@@ -1,0 +1,1291 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - button "Collapse sidebar" [ref=e4] [cursor=pointer]:
+        - img [ref=e5]
+      - generic [ref=e7]:
+        - link "LeadScout" [ref=e9] [cursor=pointer]:
+          - /url: /
+          - img [ref=e11]
+          - strong [ref=e13]: LeadScout
+        - navigation [ref=e14]:
+          - link "Dashboard" [ref=e15] [cursor=pointer]:
+            - /url: /
+            - img [ref=e16]
+            - generic [ref=e18]: Dashboard
+          - link "Insights" [ref=e19] [cursor=pointer]:
+            - /url: /insights
+            - img [ref=e20]
+            - generic [ref=e23]: Insights
+          - button "Deep Discovery" [ref=e24] [cursor=pointer]:
+            - img [ref=e25]
+            - generic [ref=e28]: Deep Discovery
+          - button "Audited" [ref=e29] [cursor=pointer]:
+            - img [ref=e30]
+            - generic [ref=e33]: Audited
+          - button "High Risk" [ref=e34] [cursor=pointer]:
+            - img [ref=e35]
+            - generic [ref=e37]: High Risk
+          - button "Settings" [ref=e38] [cursor=pointer]:
+            - img [ref=e39]
+            - generic [ref=e42]: Settings
+        - generic [ref=e43]:
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - img [ref=e47]
+              - generic [ref=e49]: TOP PROSPECTS
+            - paragraph [ref=e51]: Enrich leads to see rankings.
+          - generic [ref=e52]:
+            - generic [ref=e53]:
+              - heading "AI Insights" [level=4] [ref=e54]
+              - button [ref=e55] [cursor=pointer]:
+                - img [ref=e56]
+            - generic [ref=e61]:
+              - paragraph [ref=e229]: System analysis completed.
+              - list [ref=e230]:
+                - listitem [ref=e231]:
+                  - generic [ref=e232]: •
+                  - text: "```json { \"summary\": \"The pipeline reveals a significant 'digital decay' trend among high-intent F"
+          - generic [ref=e65]:
+            - heading "Quick Guide" [level=4] [ref=e66]
+            - list [ref=e67]:
+              - listitem [ref=e68]:
+                - strong [ref=e69]: "1. Import:"
+                - text: Load a CSV of raw leads.
+              - listitem [ref=e70]:
+                - strong [ref=e71]: "2. Discovery:"
+                - text: Use "Deep Discovery" to find more.
+              - listitem [ref=e72]:
+                - strong [ref=e73]: "3. Orchestrate:"
+                - text: Hit "AI Orchestrate" for full audit.
+              - listitem [ref=e74]:
+                - strong [ref=e75]: "4. Outreach:"
+                - text: AI generates personalized hooks.
+    - main [ref=e76]:
+      - generic [ref=e77]:
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - generic [ref=e80]: Operational Overview
+            - heading "Pipeline Intelligence" [level=1] [ref=e81]
+            - paragraph [ref=e82]: Orchestrating AI-driven auditing for high-conversion prospecting.
+          - generic [ref=e83]:
+            - button "Audit All" [ref=e84] [cursor=pointer]:
+              - img [ref=e85]
+              - text: Audit All
+            - button "AI Orchestrate" [ref=e87] [cursor=pointer]:
+              - img [ref=e88]
+              - text: AI Orchestrate
+            - button "Hunt All" [ref=e90] [cursor=pointer]:
+              - img [ref=e91]
+              - text: Hunt All
+            - button "Export Full" [ref=e93] [cursor=pointer]:
+              - img [ref=e94]
+              - text: Export Full
+            - button "CRM Export" [ref=e97] [cursor=pointer]:
+              - img [ref=e98]
+              - text: CRM Export
+            - button "Import CSV" [ref=e102] [cursor=pointer]:
+              - img [ref=e103]
+              - text: Import CSV
+        - generic [ref=e107]:
+          - generic [ref=e109]:
+            - heading "Lead Health Analysis" [level=3] [ref=e110]
+            - paragraph [ref=e111]: Visual breakdown of your lead database status.
+          - generic [ref=e112]:
+            - application [ref=e116]
+            - generic [ref=e117]:
+              - generic [ref=e118]:
+                - generic [ref=e119]:
+                  - generic [ref=e122]: Healthy
+                  - generic [ref=e123]: "10"
+                - generic [ref=e124]:
+                  - generic [ref=e127]: High Risk
+                  - generic [ref=e128]: "7"
+                - generic [ref=e129]:
+                  - generic [ref=e132]: Pending
+                  - generic [ref=e133]: "7"
+              - paragraph [ref=e135]:
+                - img [ref=e136]
+                - strong [ref=e138]: "Analytics Insight:"
+                - text: 67% of your leads have verified emails.
+        - generic [ref=e139]:
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - generic [ref=e142]: TOTAL LEADS
+              - img [ref=e143]
+            - generic [ref=e145]: "27"
+          - generic [ref=e146]:
+            - generic [ref=e147]:
+              - generic [ref=e148]: PENDING
+              - img [ref=e149]
+            - generic [ref=e151]: "7"
+          - generic [ref=e152]:
+            - generic [ref=e153]:
+              - generic [ref=e154]: HIGH RISK
+              - img [ref=e155]
+            - generic [ref=e157]: "7"
+          - generic [ref=e158]:
+            - generic [ref=e159]:
+              - generic [ref=e160]: HEALTHY
+              - img [ref=e161]
+            - generic [ref=e164]: "17"
+        - generic [ref=e166]:
+          - generic [ref=e167]:
+            - heading "Prospect Inventory" [level=3] [ref=e168]
+            - generic [ref=e169]:
+              - generic [ref=e170]:
+                - img [ref=e171]
+                - textbox "Search leads..." [ref=e174]
+              - combobox [ref=e175]:
+                - option "All Segments" [selected]
+              - combobox [ref=e176]:
+                - option "All Statuses" [selected]
+                - option "Completed"
+                - option "Pending"
+                - option "Failed"
+              - generic [ref=e177]:
+                - generic [ref=e178]: "Score: 0+"
+                - slider [ref=e179]: "0"
+          - table [ref=e181]:
+            - rowgroup [ref=e188]:
+              - row "PROSPECT AUDIT STATUS INTELLIGENCE SOCIAL ACTIONS" [ref=e189]:
+                - columnheader "PROSPECT" [ref=e190]
+                - columnheader "AUDIT STATUS" [ref=e191]
+                - columnheader "INTELLIGENCE" [ref=e192]
+                - columnheader "SOCIAL" [ref=e193]
+                - columnheader "ACTIONS" [ref=e194]
+            - rowgroup [ref=e195]:
+              - row "Community Smiles Dental Clinic www.csmiles.org/ Pending N/A Draft Audit" [ref=e245]:
+                - cell "Community Smiles Dental Clinic www.csmiles.org/" [ref=e246]:
+                  - generic [ref=e247]:
+                    - generic [ref=e249]: Community Smiles Dental Clinic
+                    - link "www.csmiles.org/" [ref=e251] [cursor=pointer]:
+                      - /url: http://www.csmiles.org/
+                      - img [ref=e252]
+                      - generic [ref=e255]: www.csmiles.org/
+                - cell "Pending" [ref=e256]:
+                  - generic [ref=e258]: Pending
+                - cell [ref=e259]
+                - cell "N/A" [ref=e260]:
+                  - generic [ref=e262]: N/A
+                - cell "Draft Audit" [ref=e263]:
+                  - generic [ref=e264]:
+                    - button "Harvest Contact Details" [ref=e265] [cursor=pointer]:
+                      - img [ref=e266]
+                    - button "Deep Digital Hunt" [ref=e271] [cursor=pointer]:
+                      - img [ref=e272]
+                    - button "Draft" [disabled] [ref=e274] [cursor=pointer]
+                    - button "Audit" [ref=e275] [cursor=pointer]
+              - row "Sky Dental skydentalmiami.com/ Pending N/A Draft Audit" [ref=e276]:
+                - cell "Sky Dental skydentalmiami.com/" [ref=e277]:
+                  - generic [ref=e278]:
+                    - generic [ref=e280]: Sky Dental
+                    - link "skydentalmiami.com/" [ref=e282] [cursor=pointer]:
+                      - /url: https://skydentalmiami.com/
+                      - img [ref=e283]
+                      - generic [ref=e286]: skydentalmiami.com/
+                - cell "Pending" [ref=e287]:
+                  - generic [ref=e289]: Pending
+                - cell [ref=e290]
+                - cell "N/A" [ref=e291]:
+                  - generic [ref=e293]: N/A
+                - cell "Draft Audit" [ref=e294]:
+                  - generic [ref=e295]:
+                    - button "Harvest Contact Details" [ref=e296] [cursor=pointer]:
+                      - img [ref=e297]
+                    - button "Deep Digital Hunt" [ref=e302] [cursor=pointer]:
+                      - img [ref=e303]
+                    - button "Draft" [disabled] [ref=e305] [cursor=pointer]
+                    - button "Audit" [ref=e306] [cursor=pointer]
+              - row "Test Upload Restaurant test-upload.example.com Pending N/A Draft Audit" [ref=e307]:
+                - cell "Test Upload Restaurant test-upload.example.com" [ref=e308]:
+                  - generic [ref=e309]:
+                    - generic [ref=e311]: Test Upload Restaurant
+                    - link "test-upload.example.com" [ref=e313] [cursor=pointer]:
+                      - /url: https://test-upload.example.com
+                      - img [ref=e314]
+                      - generic [ref=e317]: test-upload.example.com
+                - cell "Pending" [ref=e318]:
+                  - generic [ref=e320]: Pending
+                - cell [ref=e321]
+                - cell "N/A" [ref=e322]:
+                  - generic [ref=e324]: N/A
+                - cell "Draft Audit" [ref=e325]:
+                  - generic [ref=e326]:
+                    - button "Harvest Contact Details" [ref=e327] [cursor=pointer]:
+                      - img [ref=e328]
+                    - button "Deep Digital Hunt" [ref=e333] [cursor=pointer]:
+                      - img [ref=e334]
+                    - button "Draft" [disabled] [ref=e336] [cursor=pointer]
+                    - button "Audit" [ref=e337] [cursor=pointer]
+              - 'row "Dentists in Brickell - HQ Dontics Dental Centre www.hqdontics.com/ Pending SEO: 50/100 LinkedIn Hook Ready Email Hook Ready Draft Audit" [ref=e338]':
+                - cell "Dentists in Brickell - HQ Dontics Dental Centre www.hqdontics.com/" [ref=e339]:
+                  - generic [ref=e340]:
+                    - generic [ref=e342]: Dentists in Brickell - HQ Dontics Dental Centre
+                    - link "www.hqdontics.com/" [ref=e344] [cursor=pointer]:
+                      - /url: https://www.hqdontics.com/
+                      - img [ref=e345]
+                      - generic [ref=e348]: www.hqdontics.com/
+                - 'cell "Pending SEO: 50/100" [ref=e349]':
+                  - generic [ref=e350]:
+                    - generic [ref=e351]: Pending
+                    - generic [ref=e352]: "SEO: 50/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e353]:
+                  - generic [ref=e354]:
+                    - generic "LinkedIn Hook Ready" [ref=e355]:
+                      - img [ref=e356]
+                    - generic "Email Hook Ready" [ref=e360]:
+                      - img [ref=e361]
+                - cell [ref=e364]:
+                  - generic [ref=e365]:
+                    - link [ref=e366] [cursor=pointer]:
+                      - /url: https://www.facebook.com/pages/HQ-dontics-dental-centre/139078799486463/
+                      - img [ref=e367]
+                    - link [ref=e369] [cursor=pointer]:
+                      - /url: https://www.instagram.com/reel/DJEh7HEO_Hr/
+                      - img [ref=e370]
+                    - link [ref=e373] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/in/hernan-quintero-6635a523
+                      - img [ref=e374]
+                - cell "Draft Audit" [ref=e378]:
+                  - generic [ref=e379]:
+                    - button "Harvest Contact Details" [ref=e380] [cursor=pointer]:
+                      - img [ref=e381]
+                    - button "Deep Digital Hunt" [ref=e386] [cursor=pointer]:
+                      - img [ref=e387]
+                    - button "Draft" [disabled] [ref=e389] [cursor=pointer]
+                    - button "Audit" [ref=e390] [cursor=pointer]
+              - 'row "PAIN POINTS Analysis of Pain Points: • Severe SEO & Visibility Issues: The website text snippet (\"Just a moment... Enable JavaScript...\") indicates the site is stuck behind a security or loading screen that prevents search engines from crawling the actual conten... Show more" [ref=e391]':
+                - 'cell "PAIN POINTS Analysis of Pain Points: • Severe SEO & Visibility Issues: The website text snippet (\"Just a moment... Enable JavaScript...\") indicates the site is stuck behind a security or loading screen that prevents search engines from crawling the actual conten... Show more" [ref=e392]':
+                  - generic [ref=e394]:
+                    - generic [ref=e395]: PAIN POINTS
+                    - generic [ref=e396]:
+                      - paragraph [ref=e397]: "Analysis of Pain Points: • Severe SEO & Visibility Issues: The website text snippet (\"Just a moment... Enable JavaScript...\") indicates the site is stuck behind a security or loading screen that prevents search engines from crawling the actual conten..."
+                      - button "Show more" [ref=e398] [cursor=pointer]
+              - 'row "Super Dentist Miami superdentistmiami.com/ Completed SEO: 50/100 LinkedIn Hook Ready Email Hook Ready Draft Re-Audit" [ref=e399]':
+                - cell "Super Dentist Miami superdentistmiami.com/" [ref=e400]:
+                  - generic [ref=e401]:
+                    - generic [ref=e403]: Super Dentist Miami
+                    - link "superdentistmiami.com/" [ref=e405] [cursor=pointer]:
+                      - /url: https://superdentistmiami.com/
+                      - img [ref=e406]
+                      - generic [ref=e409]: superdentistmiami.com/
+                - 'cell "Completed SEO: 50/100" [ref=e410]':
+                  - generic [ref=e411]:
+                    - generic [ref=e412]: Completed
+                    - generic [ref=e413]: "SEO: 50/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e414]:
+                  - generic [ref=e415]:
+                    - generic "LinkedIn Hook Ready" [ref=e416]:
+                      - img [ref=e417]
+                    - generic "Email Hook Ready" [ref=e421]:
+                      - img [ref=e422]
+                - cell [ref=e425]:
+                  - generic [ref=e426]:
+                    - link [ref=e427] [cursor=pointer]:
+                      - /url: https://www.facebook.com/61580067585915/
+                      - img [ref=e428]
+                    - link [ref=e430] [cursor=pointer]:
+                      - /url: https://www.instagram.com/superdentistmiami/
+                      - img [ref=e431]
+                    - link [ref=e434] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/in/angelika-batres-navarro-3a328011a
+                      - img [ref=e435]
+                    - link [ref=e439] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@therealmiamidentists
+                      - img [ref=e440]
+                    - link [ref=e444] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/superdentists/the-super-dentists/
+                      - img [ref=e445]
+                - cell "Draft Re-Audit" [ref=e447]:
+                  - generic [ref=e448]:
+                    - button "Harvest Contact Details" [ref=e449] [cursor=pointer]:
+                      - img [ref=e450]
+                    - button "Deep Digital Hunt" [ref=e455] [cursor=pointer]:
+                      - img [ref=e456]
+                    - button "Draft" [ref=e458] [cursor=pointer]
+                    - button "Re-Audit" [ref=e459] [cursor=pointer]
+              - 'row "PAIN POINTS Identified Business & Marketing Pain Points: • Critical Marketing Gaps (Flying Blind): There is absolutely no tracking installed (No Google Analytics, GTM, or Facebook Pixel). They cannot measure where their traffic is coming from, track form conver... Show more" [ref=e460]':
+                - 'cell "PAIN POINTS Identified Business & Marketing Pain Points: • Critical Marketing Gaps (Flying Blind): There is absolutely no tracking installed (No Google Analytics, GTM, or Facebook Pixel). They cannot measure where their traffic is coming from, track form conver... Show more" [ref=e461]':
+                  - generic [ref=e463]:
+                    - generic [ref=e464]: PAIN POINTS
+                    - generic [ref=e465]:
+                      - paragraph [ref=e466]: "Identified Business & Marketing Pain Points: • Critical Marketing Gaps (Flying Blind): There is absolutely no tracking installed (No Google Analytics, GTM, or Facebook Pixel). They cannot measure where their traffic is coming from, track form conver..."
+                      - button "Show more" [ref=e467] [cursor=pointer]
+              - 'row "Biscayne Dental & Facial Aesthetics dentistry.bwcmiami.com/ Completed SEO: 50/100 LinkedIn Hook Ready Email Hook Ready Draft Re-Audit" [ref=e468]':
+                - cell "Biscayne Dental & Facial Aesthetics dentistry.bwcmiami.com/" [ref=e469]:
+                  - generic [ref=e470]:
+                    - generic [ref=e472]: Biscayne Dental & Facial Aesthetics
+                    - link "dentistry.bwcmiami.com/" [ref=e474] [cursor=pointer]:
+                      - /url: https://dentistry.bwcmiami.com/
+                      - img [ref=e475]
+                      - generic [ref=e478]: dentistry.bwcmiami.com/
+                - 'cell "Completed SEO: 50/100" [ref=e479]':
+                  - generic [ref=e480]:
+                    - generic [ref=e481]: Completed
+                    - generic [ref=e482]: "SEO: 50/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e483]:
+                  - generic [ref=e484]:
+                    - generic "LinkedIn Hook Ready" [ref=e485]:
+                      - img [ref=e486]
+                    - generic "Email Hook Ready" [ref=e490]:
+                      - img [ref=e491]
+                - cell [ref=e494]:
+                  - generic [ref=e495]:
+                    - link [ref=e496] [cursor=pointer]:
+                      - /url: https://www.facebook.com/bwcmiami/
+                      - img [ref=e497]
+                    - link [ref=e499] [cursor=pointer]:
+                      - /url: https://www.instagram.com/bdfamiami/
+                      - img [ref=e500]
+                    - link [ref=e503] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/biscayne-dental-facial-aesthetics
+                      - img [ref=e504]
+                - cell "Draft Re-Audit" [ref=e508]:
+                  - generic [ref=e509]:
+                    - button "Harvest Contact Details" [ref=e510] [cursor=pointer]:
+                      - img [ref=e511]
+                    - button "Deep Digital Hunt" [ref=e516] [cursor=pointer]:
+                      - img [ref=e517]
+                    - button "Draft" [ref=e519] [cursor=pointer]
+                    - button "Re-Audit" [ref=e520] [cursor=pointer]
+              - 'row "PAIN POINTS Here is an analysis of the business and marketing pain points for Biscayne Dental & Facial Aesthetics based on the provided data: Key Business & Marketing Pain Points 1. Severe Marketing & Retargeting Gaps • Flying Blind: The complete lack of Googl... Show more" [ref=e521]':
+                - 'cell "PAIN POINTS Here is an analysis of the business and marketing pain points for Biscayne Dental & Facial Aesthetics based on the provided data: Key Business & Marketing Pain Points 1. Severe Marketing & Retargeting Gaps • Flying Blind: The complete lack of Googl... Show more" [ref=e522]':
+                  - generic [ref=e524]:
+                    - generic [ref=e525]: PAIN POINTS
+                    - generic [ref=e526]:
+                      - paragraph [ref=e527]: "Here is an analysis of the business and marketing pain points for Biscayne Dental & Facial Aesthetics based on the provided data: Key Business & Marketing Pain Points 1. Severe Marketing & Retargeting Gaps • Flying Blind: The complete lack of Googl..."
+                      - button "Show more" [ref=e528] [cursor=pointer]
+              - 'row "Dentists at Midtown RISK www.dentistsatmidtown.com/ Completed SEO: 20/100 LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities Draft Re-Audit" [ref=e529]':
+                - cell "Dentists at Midtown RISK www.dentistsatmidtown.com/" [ref=e530]:
+                  - generic [ref=e531]:
+                    - generic [ref=e532]:
+                      - generic [ref=e533]: Dentists at Midtown
+                      - generic [ref=e534]:
+                        - img [ref=e535]
+                        - text: RISK
+                    - link "www.dentistsatmidtown.com/" [ref=e538] [cursor=pointer]:
+                      - /url: https://www.dentistsatmidtown.com/?sc_cid=GBP%3AO%3AGP%3A979%3AOrganic_Search%3AGeneral%3Ana&_vsrefdom=organic_gbp&y_source=1_MTIwMzA0NDgtNzE1LWxvY2F0aW9uLndlYnNpdGU%3D
+                      - img [ref=e539]
+                      - generic [ref=e542]: www.dentistsatmidtown.com/
+                - 'cell "Completed SEO: 20/100" [ref=e543]':
+                  - generic [ref=e544]:
+                    - generic [ref=e545]: Completed
+                    - generic [ref=e546]: "SEO: 20/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities" [ref=e547]:
+                  - generic [ref=e548]:
+                    - generic "LinkedIn Hook Ready" [ref=e549]:
+                      - img [ref=e550]
+                    - generic "Email Hook Ready" [ref=e554]:
+                      - img [ref=e555]
+                    - generic "Security Vulnerabilities" [ref=e558]:
+                      - img [ref=e559]
+                - cell [ref=e561]:
+                  - generic [ref=e562]:
+                    - link [ref=e563] [cursor=pointer]:
+                      - /url: https://www.facebook.com/654648594984462/
+                      - img [ref=e564]
+                    - link [ref=e566] [cursor=pointer]:
+                      - /url: https://www.instagram.com/
+                      - img [ref=e567]
+                    - link [ref=e570] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/midtowndentistry
+                      - img [ref=e571]
+                    - link [ref=e575] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@midtowndentalstudiofl
+                      - img [ref=e576]
+                    - link [ref=e580] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/midtowndentistrystaff/
+                      - img [ref=e581]
+                - cell "Draft Re-Audit" [ref=e583]:
+                  - generic [ref=e584]:
+                    - button "Harvest Contact Details" [ref=e585] [cursor=pointer]:
+                      - img [ref=e586]
+                    - button "Deep Digital Hunt" [ref=e591] [cursor=pointer]:
+                      - img [ref=e592]
+                    - button "Draft" [ref=e594] [cursor=pointer]
+                    - button "Re-Audit" [ref=e595] [cursor=pointer]
+              - 'row "PAIN POINTS Based on the technical data and site snippet, here is the analysis of the business pain points: Key Business & Marketing Pain Points • The \"Invisible\" Practice: With no Title Tags, H1 headers, sitemap, or robots.txt, the site is virtually non-exist... Show more" [ref=e596]':
+                - 'cell "PAIN POINTS Based on the technical data and site snippet, here is the analysis of the business pain points: Key Business & Marketing Pain Points • The \"Invisible\" Practice: With no Title Tags, H1 headers, sitemap, or robots.txt, the site is virtually non-exist... Show more" [ref=e597]':
+                  - generic [ref=e599]:
+                    - generic [ref=e600]: PAIN POINTS
+                    - generic [ref=e601]:
+                      - paragraph [ref=e602]: "Based on the technical data and site snippet, here is the analysis of the business pain points: Key Business & Marketing Pain Points • The \"Invisible\" Practice: With no Title Tags, H1 headers, sitemap, or robots.txt, the site is virtually non-exist..."
+                      - button "Show more" [ref=e603] [cursor=pointer]
+              - 'row "Amaya Dental www.amayadental.com/ Pending SEO: 90/100 LinkedIn Hook Ready Email Hook Ready Draft Audit" [ref=e604]':
+                - cell "Amaya Dental www.amayadental.com/" [ref=e605]:
+                  - generic [ref=e606]:
+                    - generic [ref=e608]: Amaya Dental
+                    - link "www.amayadental.com/" [ref=e610] [cursor=pointer]:
+                      - /url: https://www.amayadental.com/?utm_source=google&utm_medium=organic&utm_campaign=gbp-listing
+                      - img [ref=e611]
+                      - generic [ref=e614]: www.amayadental.com/
+                - 'cell "Pending SEO: 90/100" [ref=e615]':
+                  - generic [ref=e616]:
+                    - generic [ref=e617]: Pending
+                    - generic [ref=e618]: "SEO: 90/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e619]:
+                  - generic [ref=e620]:
+                    - generic "LinkedIn Hook Ready" [ref=e621]:
+                      - img [ref=e622]
+                    - generic "Email Hook Ready" [ref=e626]:
+                      - img [ref=e627]
+                - cell [ref=e630]:
+                  - generic [ref=e631]:
+                    - link [ref=e632] [cursor=pointer]:
+                      - /url: https://www.facebook.com/amayadental/
+                      - img [ref=e633]
+                    - link [ref=e635] [cursor=pointer]:
+                      - /url: https://www.instagram.com/amaya.dental/
+                      - img [ref=e636]
+                    - link [ref=e639] [cursor=pointer]:
+                      - /url: https://in.linkedin.com/company/amaya-dental-clinic
+                      - img [ref=e640]
+                    - link [ref=e644] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@amayadentalclinic
+                      - img [ref=e645]
+                    - link [ref=e649] [cursor=pointer]:
+                      - /url: https://in.pinterest.com/amayadentalc/
+                      - img [ref=e650]
+                - cell "Draft Audit" [ref=e652]:
+                  - generic [ref=e653]:
+                    - button "Harvest Contact Details" [ref=e654] [cursor=pointer]:
+                      - img [ref=e655]
+                    - button "Deep Digital Hunt" [ref=e660] [cursor=pointer]:
+                      - img [ref=e661]
+                    - button "Draft" [disabled] [ref=e663] [cursor=pointer]
+                    - button "Audit" [ref=e664] [cursor=pointer]
+              - row "PAIN POINTS I noticed your Webflow site is missing critical SEO files (robots.txt and sitemap.xml), effectively hiding your $99 new patient special and high-ticket services from local Google searchers. Fixing this foundational technical blindspot will immediatel... Show more" [ref=e665]:
+                - cell "PAIN POINTS I noticed your Webflow site is missing critical SEO files (robots.txt and sitemap.xml), effectively hiding your $99 new patient special and high-ticket services from local Google searchers. Fixing this foundational technical blindspot will immediatel... Show more" [ref=e666]:
+                  - generic [ref=e668]:
+                    - generic [ref=e669]: PAIN POINTS
+                    - generic [ref=e670]:
+                      - paragraph [ref=e671]: I noticed your Webflow site is missing critical SEO files (robots.txt and sitemap.xml), effectively hiding your $99 new patient special and high-ticket services from local Google searchers. Fixing this foundational technical blindspot will immediatel...
+                      - button "Show more" [ref=e672] [cursor=pointer]
+              - 'row "Ultra Smile Miami RISK ultrasmilemiami.com/ Completed SEO: 40/100 LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities Draft Re-Audit" [ref=e673]':
+                - cell "Ultra Smile Miami RISK ultrasmilemiami.com/" [ref=e674]:
+                  - generic [ref=e675]:
+                    - generic [ref=e676]:
+                      - generic [ref=e677]: Ultra Smile Miami
+                      - generic [ref=e678]:
+                        - img [ref=e679]
+                        - text: RISK
+                    - link "ultrasmilemiami.com/" [ref=e682] [cursor=pointer]:
+                      - /url: http://ultrasmilemiami.com/
+                      - img [ref=e683]
+                      - generic [ref=e686]: ultrasmilemiami.com/
+                - 'cell "Completed SEO: 40/100" [ref=e687]':
+                  - generic [ref=e688]:
+                    - generic [ref=e689]: Completed
+                    - generic [ref=e690]: "SEO: 40/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities" [ref=e691]:
+                  - generic [ref=e692]:
+                    - generic "LinkedIn Hook Ready" [ref=e693]:
+                      - img [ref=e694]
+                    - generic "Email Hook Ready" [ref=e698]:
+                      - img [ref=e699]
+                    - generic "Security Vulnerabilities" [ref=e702]:
+                      - img [ref=e703]
+                - cell [ref=e705]:
+                  - generic [ref=e706]:
+                    - link [ref=e707] [cursor=pointer]:
+                      - /url: https://www.facebook.com/UltraSmileMiami/photos/
+                      - img [ref=e708]
+                    - link [ref=e710] [cursor=pointer]:
+                      - /url: https://www.instagram.com/ultrasmiledentistry/
+                      - img [ref=e711]
+                    - link [ref=e714] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/in/neda-bahmadi-05042462
+                      - img [ref=e715]
+                    - link [ref=e719] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@ultra_miami
+                      - img [ref=e720]
+                    - link [ref=e724] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/ideas/ultra-miami/938959241967/
+                      - img [ref=e725]
+                - cell "Draft Re-Audit" [ref=e727]:
+                  - generic [ref=e728]:
+                    - button "Harvest Contact Details" [ref=e729] [cursor=pointer]:
+                      - img [ref=e730]
+                    - button "Deep Digital Hunt" [ref=e735] [cursor=pointer]:
+                      - img [ref=e736]
+                    - button "Draft" [ref=e738] [cursor=pointer]
+                    - button "Re-Audit" [ref=e739] [cursor=pointer]
+              - 'row "PAIN POINTS Cold Outreach Hook: \"Ultra Smile Miami is losing high-ticket cosmetic patients to competitors because a sluggish 4-second load time and critical SEO errors—like missing sitemaps and H1 tags—are actively burying your website in Google searches. Furth... Show more" [ref=e740]':
+                - 'cell "PAIN POINTS Cold Outreach Hook: \"Ultra Smile Miami is losing high-ticket cosmetic patients to competitors because a sluggish 4-second load time and critical SEO errors—like missing sitemaps and H1 tags—are actively burying your website in Google searches. Furth... Show more" [ref=e741]':
+                  - generic [ref=e743]:
+                    - generic [ref=e744]: PAIN POINTS
+                    - generic [ref=e745]:
+                      - paragraph [ref=e746]: "Cold Outreach Hook: \"Ultra Smile Miami is losing high-ticket cosmetic patients to competitors because a sluggish 4-second load time and critical SEO errors—like missing sitemaps and H1 tags—are actively burying your website in Google searches. Furth..."
+                      - button "Show more" [ref=e747] [cursor=pointer]
+              - 'row "Relax and Smile Dental Care www.relaxandsmile.com/ Pending SEO: 70/100 LinkedIn Hook Ready Email Hook Ready Draft Audit" [ref=e748]':
+                - cell "Relax and Smile Dental Care www.relaxandsmile.com/" [ref=e749]:
+                  - generic [ref=e750]:
+                    - generic [ref=e752]: Relax and Smile Dental Care
+                    - link "www.relaxandsmile.com/" [ref=e754] [cursor=pointer]:
+                      - /url: https://www.relaxandsmile.com/?utm_source=GMB&utm_medium=organic&utm_campaign=DevOptimization&utm_content=Website
+                      - img [ref=e755]
+                      - generic [ref=e758]: www.relaxandsmile.com/
+                - 'cell "Pending SEO: 70/100" [ref=e759]':
+                  - generic [ref=e760]:
+                    - generic [ref=e761]: Pending
+                    - generic [ref=e762]: "SEO: 70/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e763]:
+                  - generic [ref=e764]:
+                    - generic "LinkedIn Hook Ready" [ref=e765]:
+                      - img [ref=e766]
+                    - generic "Email Hook Ready" [ref=e770]:
+                      - img [ref=e771]
+                - cell [ref=e774]:
+                  - generic [ref=e775]:
+                    - link [ref=e776] [cursor=pointer]:
+                      - /url: https://www.facebook.com/relaxandsmiledentalcare/about/
+                      - img [ref=e777]
+                    - link [ref=e779] [cursor=pointer]:
+                      - /url: https://www.instagram.com/relaxandsmiledental/
+                      - img [ref=e780]
+                    - link [ref=e783] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/relaxandsmiledentalcare
+                      - img [ref=e784]
+                - cell "Draft Audit" [ref=e788]:
+                  - generic [ref=e789]:
+                    - button "Harvest Contact Details" [ref=e790] [cursor=pointer]:
+                      - img [ref=e791]
+                    - button "Deep Digital Hunt" [ref=e796] [cursor=pointer]:
+                      - img [ref=e797]
+                    - button "Draft" [disabled] [ref=e799] [cursor=pointer]
+                    - button "Audit" [ref=e800] [cursor=pointer]
+              - 'row "PAIN POINTS Business & Marketing Pain Points Identified: • Critical Local SEO Gaps: The site is missing vital SEO infrastructure—specifically a `sitemap.xml` and `robots.txt` file. For a local business highly dependent on Google searches (\"Miami dentist near me... Show more" [ref=e801]':
+                - 'cell "PAIN POINTS Business & Marketing Pain Points Identified: • Critical Local SEO Gaps: The site is missing vital SEO infrastructure—specifically a `sitemap.xml` and `robots.txt` file. For a local business highly dependent on Google searches (\"Miami dentist near me... Show more" [ref=e802]':
+                  - generic [ref=e804]:
+                    - generic [ref=e805]: PAIN POINTS
+                    - generic [ref=e806]:
+                      - paragraph [ref=e807]: "Business & Marketing Pain Points Identified: • Critical Local SEO Gaps: The site is missing vital SEO infrastructure—specifically a `sitemap.xml` and `robots.txt` file. For a local business highly dependent on Google searches (\"Miami dentist near me..."
+                      - button "Show more" [ref=e808] [cursor=pointer]
+              - 'row "ONE Dental Miami www.onedentalmiami.com/ Pending SEO: 70/100 LinkedIn Hook Ready Email Hook Ready Draft Audit" [ref=e809]':
+                - cell "ONE Dental Miami www.onedentalmiami.com/" [ref=e810]:
+                  - generic [ref=e811]:
+                    - generic [ref=e813]: ONE Dental Miami
+                    - link "www.onedentalmiami.com/" [ref=e815] [cursor=pointer]:
+                      - /url: http://www.onedentalmiami.com/
+                      - img [ref=e816]
+                      - generic [ref=e819]: www.onedentalmiami.com/
+                - 'cell "Pending SEO: 70/100" [ref=e820]':
+                  - generic [ref=e821]:
+                    - generic [ref=e822]: Pending
+                    - generic [ref=e823]: "SEO: 70/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e824]:
+                  - generic [ref=e825]:
+                    - generic "LinkedIn Hook Ready" [ref=e826]:
+                      - img [ref=e827]
+                    - generic "Email Hook Ready" [ref=e831]:
+                      - img [ref=e832]
+                - cell [ref=e835]:
+                  - generic [ref=e836]:
+                    - link [ref=e837] [cursor=pointer]:
+                      - /url: https://www.facebook.com/One.d.miami/
+                      - img [ref=e838]
+                    - link [ref=e840] [cursor=pointer]:
+                      - /url: https://www.instagram.com/one.dental.miami/
+                      - img [ref=e841]
+                    - link [ref=e844] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/in/katherine-rodriguez-dmd-40889367
+                      - img [ref=e845]
+                    - link [ref=e849] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@onenadeladental
+                      - img [ref=e850]
+                    - link [ref=e854] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/labsonedentalmiami/
+                      - img [ref=e855]
+                - cell "Draft Audit" [ref=e857]:
+                  - generic [ref=e858]:
+                    - button "Harvest Contact Details" [ref=e859] [cursor=pointer]:
+                      - img [ref=e860]
+                    - button "Deep Digital Hunt" [ref=e865] [cursor=pointer]:
+                      - img [ref=e866]
+                    - button "Draft" [disabled] [ref=e868] [cursor=pointer]
+                    - button "Audit" [ref=e869] [cursor=pointer]
+              - 'row "PAIN POINTS Business & Marketing Pain Points Identified: • Critical SEO & Indexing Issues: The site is missing foundational SEO files (`robots.txt` and `sitemap.xml`), meaning search engines are likely struggling to crawl and index their massive catalog of high... Show more" [ref=e870]':
+                - 'cell "PAIN POINTS Business & Marketing Pain Points Identified: • Critical SEO & Indexing Issues: The site is missing foundational SEO files (`robots.txt` and `sitemap.xml`), meaning search engines are likely struggling to crawl and index their massive catalog of high... Show more" [ref=e871]':
+                  - generic [ref=e873]:
+                    - generic [ref=e874]: PAIN POINTS
+                    - generic [ref=e875]:
+                      - paragraph [ref=e876]: "Business & Marketing Pain Points Identified: • Critical SEO & Indexing Issues: The site is missing foundational SEO files (`robots.txt` and `sitemap.xml`), meaning search engines are likely struggling to crawl and index their massive catalog of high..."
+                      - button "Show more" [ref=e877] [cursor=pointer]
+              - 'row "Napoli Italian Pizzeria RISK www.semoranpizza.com/ Completed SEO: 30/100 LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities Draft Re-Audit" [ref=e878]':
+                - cell "Napoli Italian Pizzeria RISK www.semoranpizza.com/" [ref=e879]:
+                  - generic [ref=e880]:
+                    - generic [ref=e881]:
+                      - generic [ref=e882]: Napoli Italian Pizzeria
+                      - generic [ref=e883]:
+                        - img [ref=e884]
+                        - text: RISK
+                    - link "www.semoranpizza.com/" [ref=e887] [cursor=pointer]:
+                      - /url: https://www.semoranpizza.com/
+                      - img [ref=e888]
+                      - generic [ref=e891]: www.semoranpizza.com/
+                - 'cell "Completed SEO: 30/100" [ref=e892]':
+                  - generic [ref=e893]:
+                    - generic [ref=e894]: Completed
+                    - generic [ref=e895]: "SEO: 30/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities" [ref=e896]:
+                  - generic [ref=e897]:
+                    - generic "LinkedIn Hook Ready" [ref=e898]:
+                      - img [ref=e899]
+                    - generic "Email Hook Ready" [ref=e903]:
+                      - img [ref=e904]
+                    - generic "Security Vulnerabilities" [ref=e907]:
+                      - img [ref=e908]
+                - cell [ref=e910]:
+                  - generic [ref=e911]:
+                    - link [ref=e912] [cursor=pointer]:
+                      - /url: https://www.facebook.com/napoliorlandopizza/
+                      - img [ref=e913]
+                    - link [ref=e915] [cursor=pointer]:
+                      - /url: https://www.instagram.com/napolipizzaplace/
+                      - img [ref=e916]
+                    - link [ref=e919] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/vianapolipizzeria/
+                      - img [ref=e920]
+                    - link [ref=e924] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@napolispizzeria
+                      - img [ref=e925]
+                    - link [ref=e929] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/turkey10927/napoli-pizzaria/
+                      - img [ref=e930]
+                - cell "Draft Re-Audit" [ref=e932]:
+                  - generic [ref=e933]:
+                    - button "Harvest Contact Details" [ref=e934] [cursor=pointer]:
+                      - img [ref=e935]
+                    - button "Deep Digital Hunt" [ref=e940] [cursor=pointer]:
+                      - img [ref=e941]
+                    - button "Draft" [ref=e943] [cursor=pointer]
+                    - button "Re-Audit" [ref=e944] [cursor=pointer]
+              - 'row "PAIN POINTS Based on the technical audit and the critical site error, here is the analysis of the pain points for Napoli Italian Pizzeria: Business & Marketing Pain Points • Critical Accessibility Failure (The \"403 Forbidden\" Error): The most immediate issue i... Show more" [ref=e945]':
+                - 'cell "PAIN POINTS Based on the technical audit and the critical site error, here is the analysis of the pain points for Napoli Italian Pizzeria: Business & Marketing Pain Points • Critical Accessibility Failure (The \"403 Forbidden\" Error): The most immediate issue i... Show more" [ref=e946]':
+                  - generic [ref=e948]:
+                    - generic [ref=e949]: PAIN POINTS
+                    - generic [ref=e950]:
+                      - paragraph [ref=e951]: "Based on the technical audit and the critical site error, here is the analysis of the pain points for Napoli Italian Pizzeria: Business & Marketing Pain Points • Critical Accessibility Failure (The \"403 Forbidden\" Error): The most immediate issue i..."
+                      - button "Show more" [ref=e952] [cursor=pointer]
+              - 'row "Pizza Xtreme www.pizzaxtreme.com/ Completed SEO: 60/100 LinkedIn Hook Ready Email Hook Ready Draft Re-Audit" [ref=e953]':
+                - cell "Pizza Xtreme www.pizzaxtreme.com/" [ref=e954]:
+                  - generic [ref=e955]:
+                    - generic [ref=e957]: Pizza Xtreme
+                    - link "www.pizzaxtreme.com/" [ref=e959] [cursor=pointer]:
+                      - /url: http://www.pizzaxtreme.com/
+                      - img [ref=e960]
+                      - generic [ref=e963]: www.pizzaxtreme.com/
+                - 'cell "Completed SEO: 60/100" [ref=e964]':
+                  - generic [ref=e965]:
+                    - generic [ref=e966]: Completed
+                    - generic [ref=e967]: "SEO: 60/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e968]:
+                  - generic [ref=e969]:
+                    - generic "LinkedIn Hook Ready" [ref=e970]:
+                      - img [ref=e971]
+                    - generic "Email Hook Ready" [ref=e975]:
+                      - img [ref=e976]
+                - cell [ref=e979]:
+                  - generic [ref=e980]:
+                    - link [ref=e981] [cursor=pointer]:
+                      - /url: https://www.facebook.com/PizzaXtreme/about/
+                      - img [ref=e982]
+                    - link [ref=e984] [cursor=pointer]:
+                      - /url: https://www.instagram.com/pizzaxtreme0/
+                      - img [ref=e985]
+                    - link [ref=e988] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/extreme-pizza
+                      - img [ref=e989]
+                    - link [ref=e993] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@extremepizzaofficial
+                      - img [ref=e994]
+                    - link [ref=e998] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/pizzaxtremeteam/
+                      - img [ref=e999]
+                - cell "Draft Re-Audit" [ref=e1001]:
+                  - generic [ref=e1002]:
+                    - button "Harvest Contact Details" [ref=e1003] [cursor=pointer]:
+                      - img [ref=e1004]
+                    - button "Deep Digital Hunt" [ref=e1009] [cursor=pointer]:
+                      - img [ref=e1010]
+                    - button "Draft" [ref=e1012] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1013] [cursor=pointer]
+              - 'row "PAIN POINTS Pain Points Identified: • Outdated Branding: The business contact email is an AOL address (`pizzaxtreme@AOL.com`), which immediately damages credibility and makes the brand look stuck in the past. • Marketing Gaps: No Facebook Pixel means they are c... Show more" [ref=e1014]':
+                - 'cell "PAIN POINTS Pain Points Identified: • Outdated Branding: The business contact email is an AOL address (`pizzaxtreme@AOL.com`), which immediately damages credibility and makes the brand look stuck in the past. • Marketing Gaps: No Facebook Pixel means they are c... Show more" [ref=e1015]':
+                  - generic [ref=e1017]:
+                    - generic [ref=e1018]: PAIN POINTS
+                    - generic [ref=e1019]:
+                      - paragraph [ref=e1020]: "Pain Points Identified: • Outdated Branding: The business contact email is an AOL address (`pizzaxtreme@AOL.com`), which immediately damages credibility and makes the brand look stuck in the past. • Marketing Gaps: No Facebook Pixel means they are c..."
+                      - button "Show more" [ref=e1021] [cursor=pointer]
+              - 'row "Black Magic Pizza blackmagicpizza.com/ Completed SEO: 50/100 Draft Re-Audit" [ref=e1022]':
+                - cell "Black Magic Pizza blackmagicpizza.com/" [ref=e1023]:
+                  - generic [ref=e1024]:
+                    - generic [ref=e1026]: Black Magic Pizza
+                    - link "blackmagicpizza.com/" [ref=e1028] [cursor=pointer]:
+                      - /url: http://blackmagicpizza.com/
+                      - img [ref=e1029]
+                      - generic [ref=e1032]: blackmagicpizza.com/
+                - 'cell "Completed SEO: 50/100" [ref=e1033]':
+                  - generic [ref=e1034]:
+                    - generic [ref=e1035]: Completed
+                    - generic [ref=e1036]: "SEO: 50/100"
+                - cell [ref=e1037]
+                - cell [ref=e1038]:
+                  - generic [ref=e1039]:
+                    - link [ref=e1040] [cursor=pointer]:
+                      - /url: https://www.facebook.com/BlackMagicPizza/photos/
+                      - img [ref=e1041]
+                    - link [ref=e1043] [cursor=pointer]:
+                      - /url: https://www.instagram.com/blackmagicpizza/reels/
+                      - img [ref=e1044]
+                    - link [ref=e1047] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/magicpizza/people/
+                      - img [ref=e1048]
+                    - link [ref=e1052] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/magickalspot/black-magic/
+                      - img [ref=e1053]
+                - cell "Draft Re-Audit" [ref=e1055]:
+                  - generic [ref=e1056]:
+                    - button "Harvest Contact Details" [ref=e1057] [cursor=pointer]:
+                      - img [ref=e1058]
+                    - button "Deep Digital Hunt" [ref=e1063] [cursor=pointer]:
+                      - img [ref=e1064]
+                    - button "Draft" [ref=e1066] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1067] [cursor=pointer]
+              - 'row "PAIN POINTS Here is an analysis of the pain points for Black Magic Pizza based on the provided data, followed by a cold outreach hook. Business & Marketing Pain Points Identified: 1. Technical & Local SEO Failures • Missing sitemap.xml & robots.txt: Search eng... Show more" [ref=e1068]':
+                - 'cell "PAIN POINTS Here is an analysis of the pain points for Black Magic Pizza based on the provided data, followed by a cold outreach hook. Business & Marketing Pain Points Identified: 1. Technical & Local SEO Failures • Missing sitemap.xml & robots.txt: Search eng... Show more" [ref=e1069]':
+                  - generic [ref=e1071]:
+                    - generic [ref=e1072]: PAIN POINTS
+                    - generic [ref=e1073]:
+                      - paragraph [ref=e1074]: "Here is an analysis of the pain points for Black Magic Pizza based on the provided data, followed by a cold outreach hook. Business & Marketing Pain Points Identified: 1. Technical & Local SEO Failures • Missing sitemap.xml & robots.txt: Search eng..."
+                      - button "Show more" [ref=e1075] [cursor=pointer]
+              - 'row "Pizzeria Del-Dio Italian Restaurant RISK www.pizzeriadel-dio.com/ Completed SEO: 40/100 LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities Draft Re-Audit" [ref=e1076]':
+                - cell "Pizzeria Del-Dio Italian Restaurant RISK www.pizzeriadel-dio.com/" [ref=e1077]:
+                  - generic [ref=e1078]:
+                    - generic [ref=e1079]:
+                      - generic [ref=e1080]: Pizzeria Del-Dio Italian Restaurant
+                      - generic [ref=e1081]:
+                        - img [ref=e1082]
+                        - text: RISK
+                    - link "www.pizzeriadel-dio.com/" [ref=e1085] [cursor=pointer]:
+                      - /url: http://www.pizzeriadel-dio.com/
+                      - img [ref=e1086]
+                      - generic [ref=e1089]: www.pizzeriadel-dio.com/
+                - 'cell "Completed SEO: 40/100" [ref=e1090]':
+                  - generic [ref=e1091]:
+                    - generic [ref=e1092]: Completed
+                    - generic [ref=e1093]: "SEO: 40/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities" [ref=e1094]:
+                  - generic [ref=e1095]:
+                    - generic "LinkedIn Hook Ready" [ref=e1096]:
+                      - img [ref=e1097]
+                    - generic "Email Hook Ready" [ref=e1101]:
+                      - img [ref=e1102]
+                    - generic "Security Vulnerabilities" [ref=e1105]:
+                      - img [ref=e1106]
+                - cell [ref=e1108]:
+                  - generic [ref=e1109]:
+                    - link [ref=e1110] [cursor=pointer]:
+                      - /url: https://www.facebook.com/SMYRNASBESTPIZZA/
+                      - img [ref=e1111]
+                    - link [ref=e1113] [cursor=pointer]:
+                      - /url: https://www.instagram.com/deldiopizza/
+                      - img [ref=e1114]
+                    - link [ref=e1117] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/desiderio/italian-restaurant/
+                      - img [ref=e1118]
+                - cell "Draft Re-Audit" [ref=e1120]:
+                  - generic [ref=e1121]:
+                    - button "Harvest Contact Details" [ref=e1122] [cursor=pointer]:
+                      - img [ref=e1123]
+                    - button "Deep Digital Hunt" [ref=e1128] [cursor=pointer]:
+                      - img [ref=e1129]
+                    - button "Draft" [ref=e1131] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1132] [cursor=pointer]
+              - 'row "PAIN POINTS Business & Marketing Pain Points Identified: • Fatal Mobile Experience: The website is not mobile-friendly (missing viewport). For a local restaurant, this is disastrous, as the vast majority of hungry customers are searching for food on their smart... Show more" [ref=e1133]':
+                - 'cell "PAIN POINTS Business & Marketing Pain Points Identified: • Fatal Mobile Experience: The website is not mobile-friendly (missing viewport). For a local restaurant, this is disastrous, as the vast majority of hungry customers are searching for food on their smart... Show more" [ref=e1134]':
+                  - generic [ref=e1136]:
+                    - generic [ref=e1137]: PAIN POINTS
+                    - generic [ref=e1138]:
+                      - paragraph [ref=e1139]: "Business & Marketing Pain Points Identified: • Fatal Mobile Experience: The website is not mobile-friendly (missing viewport). For a local restaurant, this is disastrous, as the vast majority of hungry customers are searching for food on their smart..."
+                      - button "Show more" [ref=e1140] [cursor=pointer]
+              - 'row "Solorzano''s Pizzeria & Poolside Bistro RISK www.nobodymakespizzalikewedo.com/ Completed SEO: 40/100 LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities Draft Re-Audit" [ref=e1141]':
+                - cell "Solorzano's Pizzeria & Poolside Bistro RISK www.nobodymakespizzalikewedo.com/" [ref=e1142]:
+                  - generic [ref=e1143]:
+                    - generic [ref=e1144]:
+                      - generic [ref=e1145]: Solorzano's Pizzeria & Poolside Bistro
+                      - generic [ref=e1146]:
+                        - img [ref=e1147]
+                        - text: RISK
+                    - link "www.nobodymakespizzalikewedo.com/" [ref=e1150] [cursor=pointer]:
+                      - /url: https://www.nobodymakespizzalikewedo.com/
+                      - img [ref=e1151]
+                      - generic [ref=e1154]: www.nobodymakespizzalikewedo.com/
+                - 'cell "Completed SEO: 40/100" [ref=e1155]':
+                  - generic [ref=e1156]:
+                    - generic [ref=e1157]: Completed
+                    - generic [ref=e1158]: "SEO: 40/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities" [ref=e1159]:
+                  - generic [ref=e1160]:
+                    - generic "LinkedIn Hook Ready" [ref=e1161]:
+                      - img [ref=e1162]
+                    - generic "Email Hook Ready" [ref=e1166]:
+                      - img [ref=e1167]
+                    - generic "Security Vulnerabilities" [ref=e1170]:
+                      - img [ref=e1171]
+                - cell [ref=e1173]:
+                  - generic [ref=e1174]:
+                    - link [ref=e1175] [cursor=pointer]:
+                      - /url: https://www.facebook.com/profile.php/?id=100092159737700
+                      - img [ref=e1176]
+                    - link [ref=e1178] [cursor=pointer]:
+                      - /url: https://www.instagram.com/solorzanos_pizzerias/
+                      - img [ref=e1179]
+                    - link [ref=e1182] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@solorzanos_pizzerias
+                      - img [ref=e1183]
+                - cell "Draft Re-Audit" [ref=e1187]:
+                  - generic [ref=e1188]:
+                    - button "Harvest Contact Details" [ref=e1189] [cursor=pointer]:
+                      - img [ref=e1190]
+                    - button "Deep Digital Hunt" [ref=e1195] [cursor=pointer]:
+                      - img [ref=e1196]
+                    - button "Draft" [ref=e1198] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1199] [cursor=pointer]
+              - 'row "PAIN POINTS Cold Outreach Hook: \"While Solorzano''s is expanding rapidly across Florida, your website is flying completely blind without Google Analytics or a Facebook Pixel, making it impossible to track or retarget hungry locals. Furthermore, critical SEO road... Show more" [ref=e1200]':
+                - 'cell "PAIN POINTS Cold Outreach Hook: \"While Solorzano''s is expanding rapidly across Florida, your website is flying completely blind without Google Analytics or a Facebook Pixel, making it impossible to track or retarget hungry locals. Furthermore, critical SEO road... Show more" [ref=e1201]':
+                  - generic [ref=e1203]:
+                    - generic [ref=e1204]: PAIN POINTS
+                    - generic [ref=e1205]:
+                      - paragraph [ref=e1206]: "Cold Outreach Hook: \"While Solorzano's is expanding rapidly across Florida, your website is flying completely blind without Google Analytics or a Facebook Pixel, making it impossible to track or retarget hungry locals. Furthermore, critical SEO road..."
+                      - button "Show more" [ref=e1207] [cursor=pointer]
+              - 'row "Mister O1 Extraordinary Pizza Dr Phillips www.mistero1.com/ Completed SEO: 80/100 N/A Draft Re-Audit" [ref=e1208]':
+                - cell "Mister O1 Extraordinary Pizza Dr Phillips www.mistero1.com/" [ref=e1209]:
+                  - generic [ref=e1210]:
+                    - generic [ref=e1212]: Mister O1 Extraordinary Pizza Dr Phillips
+                    - link "www.mistero1.com/" [ref=e1214] [cursor=pointer]:
+                      - /url: https://www.mistero1.com/
+                      - img [ref=e1215]
+                      - generic [ref=e1218]: www.mistero1.com/
+                - 'cell "Completed SEO: 80/100" [ref=e1219]':
+                  - generic [ref=e1220]:
+                    - generic [ref=e1221]: Completed
+                    - generic [ref=e1222]: "SEO: 80/100"
+                - cell [ref=e1223]
+                - cell "N/A" [ref=e1224]:
+                  - generic [ref=e1226]: N/A
+                - cell "Draft Re-Audit" [ref=e1227]:
+                  - generic [ref=e1228]:
+                    - button "Harvest Contact Details" [ref=e1229] [cursor=pointer]:
+                      - img [ref=e1230]
+                    - button "Deep Digital Hunt" [ref=e1235] [cursor=pointer]:
+                      - img [ref=e1236]
+                    - button "Draft" [ref=e1238] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1239] [cursor=pointer]
+              - row "PAIN POINTS Could not analyze pain points." [ref=e1240]:
+                - cell "PAIN POINTS Could not analyze pain points." [ref=e1241]:
+                  - generic [ref=e1243]:
+                    - generic [ref=e1244]: PAIN POINTS
+                    - paragraph [ref=e1246]: Could not analyze pain points.
+              - 'row "DI MAURO´S ITALIAN RESTAURANT & PIZZERIA dimauromiami.com/ Completed SEO: 50/100 LinkedIn Hook Ready Email Hook Ready Draft Re-Audit" [ref=e1247]':
+                - cell "DI MAURO´S ITALIAN RESTAURANT & PIZZERIA dimauromiami.com/" [ref=e1248]:
+                  - generic [ref=e1249]:
+                    - generic [ref=e1251]: DI MAURO´S ITALIAN RESTAURANT & PIZZERIA
+                    - link "dimauromiami.com/" [ref=e1253] [cursor=pointer]:
+                      - /url: https://dimauromiami.com/
+                      - img [ref=e1254]
+                      - generic [ref=e1257]: dimauromiami.com/
+                - 'cell "Completed SEO: 50/100" [ref=e1258]':
+                  - generic [ref=e1259]:
+                    - generic [ref=e1260]: Completed
+                    - generic [ref=e1261]: "SEO: 50/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e1262]:
+                  - generic [ref=e1263]:
+                    - generic "LinkedIn Hook Ready" [ref=e1264]:
+                      - img [ref=e1265]
+                    - generic "Email Hook Ready" [ref=e1269]:
+                      - img [ref=e1270]
+                - cell [ref=e1273]:
+                  - generic [ref=e1274]:
+                    - link [ref=e1275] [cursor=pointer]:
+                      - /url: https://www.facebook.com/76720834394/
+                      - img [ref=e1276]
+                    - link [ref=e1278] [cursor=pointer]:
+                      - /url: https://www.instagram.com/dimaurosmiami/
+                      - img [ref=e1279]
+                    - link [ref=e1282] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/in/mauro-luise-397b9953
+                      - img [ref=e1283]
+                    - link [ref=e1287] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/
+                      - img [ref=e1288]
+                - cell "Draft Re-Audit" [ref=e1290]:
+                  - generic [ref=e1291]:
+                    - button "Harvest Contact Details" [ref=e1292] [cursor=pointer]:
+                      - img [ref=e1293]
+                    - button "Deep Digital Hunt" [ref=e1298] [cursor=pointer]:
+                      - img [ref=e1299]
+                    - button "Draft" [ref=e1301] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1302] [cursor=pointer]
+              - 'row "PAIN POINTS Pain Points Identified: • Marketing Gaps: No Facebook Pixel installed, meaning the restaurant is completely missing out on highly profitable retargeting campaigns for website visitors who didn''t book a table or order online. • Critical SEO/Technical ... Show more" [ref=e1303]':
+                - 'cell "PAIN POINTS Pain Points Identified: • Marketing Gaps: No Facebook Pixel installed, meaning the restaurant is completely missing out on highly profitable retargeting campaigns for website visitors who didn''t book a table or order online. • Critical SEO/Technical ... Show more" [ref=e1304]':
+                  - generic [ref=e1306]:
+                    - generic [ref=e1307]: PAIN POINTS
+                    - generic [ref=e1308]:
+                      - paragraph [ref=e1309]: "Pain Points Identified: • Marketing Gaps: No Facebook Pixel installed, meaning the restaurant is completely missing out on highly profitable retargeting campaigns for website visitors who didn't book a table or order online. • Critical SEO/Technical ..."
+                      - button "Show more" [ref=e1310] [cursor=pointer]
+              - 'row "Timpano Las Olas RISK www.timpanolasolas.com/ Completed SEO: 30/100 LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities Draft Re-Audit" [ref=e1311]':
+                - cell "Timpano Las Olas RISK www.timpanolasolas.com/" [ref=e1312]:
+                  - generic [ref=e1313]:
+                    - generic [ref=e1314]:
+                      - generic [ref=e1315]: Timpano Las Olas
+                      - generic [ref=e1316]:
+                        - img [ref=e1317]
+                        - text: RISK
+                    - link "www.timpanolasolas.com/" [ref=e1320] [cursor=pointer]:
+                      - /url: https://www.timpanolasolas.com/
+                      - img [ref=e1321]
+                      - generic [ref=e1324]: www.timpanolasolas.com/
+                - 'cell "Completed SEO: 30/100" [ref=e1325]':
+                  - generic [ref=e1326]:
+                    - generic [ref=e1327]: Completed
+                    - generic [ref=e1328]: "SEO: 30/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready Security Vulnerabilities" [ref=e1329]:
+                  - generic [ref=e1330]:
+                    - generic "LinkedIn Hook Ready" [ref=e1331]:
+                      - img [ref=e1332]
+                    - generic "Email Hook Ready" [ref=e1336]:
+                      - img [ref=e1337]
+                    - generic "Security Vulnerabilities" [ref=e1340]:
+                      - img [ref=e1341]
+                - cell [ref=e1343]:
+                  - generic [ref=e1344]:
+                    - link [ref=e1345] [cursor=pointer]:
+                      - /url: https://www.facebook.com/TimpanoLasOlas/about/
+                      - img [ref=e1346]
+                    - link [ref=e1348] [cursor=pointer]:
+                      - /url: https://www.instagram.com/timpanolasolas/
+                      - img [ref=e1349]
+                    - link [ref=e1352] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/timpano-restaurant
+                      - img [ref=e1353]
+                - cell "Draft Re-Audit" [ref=e1357]:
+                  - generic [ref=e1358]:
+                    - button "Harvest Contact Details" [ref=e1359] [cursor=pointer]:
+                      - img [ref=e1360]
+                    - button "Deep Digital Hunt" [ref=e1365] [cursor=pointer]:
+                      - img [ref=e1366]
+                    - button "Draft" [ref=e1368] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1369] [cursor=pointer]
+              - 'row "PAIN POINTS Based on the technical audit and the \"403 Forbidden\" error, here is the analysis of Timpano Las Olas’s digital presence: Key Business & Marketing Pain Points • Critical Accessibility Failure (The \"403\" Wall): The most glaring issue is the \"403 Forb... Show more" [ref=e1370]':
+                - 'cell "PAIN POINTS Based on the technical audit and the \"403 Forbidden\" error, here is the analysis of Timpano Las Olas’s digital presence: Key Business & Marketing Pain Points • Critical Accessibility Failure (The \"403\" Wall): The most glaring issue is the \"403 Forb... Show more" [ref=e1371]':
+                  - generic [ref=e1373]:
+                    - generic [ref=e1374]: PAIN POINTS
+                    - generic [ref=e1375]:
+                      - paragraph [ref=e1376]: "Based on the technical audit and the \"403 Forbidden\" error, here is the analysis of Timpano Las Olas’s digital presence: Key Business & Marketing Pain Points • Critical Accessibility Failure (The \"403\" Wall): The most glaring issue is the \"403 Forb..."
+                      - button "Show more" [ref=e1377] [cursor=pointer]
+              - row "'O Munaciello Neapolitan Pizza Failed N/A Draft Audit" [ref=e1378]:
+                - cell "'O Munaciello Neapolitan Pizza" [ref=e1379]:
+                  - generic [ref=e1382]: "'O Munaciello Neapolitan Pizza"
+                - cell "Failed" [ref=e1383]:
+                  - generic [ref=e1385]: Failed
+                - cell [ref=e1386]
+                - cell "N/A" [ref=e1387]:
+                  - generic [ref=e1389]: N/A
+                - cell "Draft Audit" [ref=e1390]:
+                  - generic [ref=e1391]:
+                    - button "Harvest Contact Details" [ref=e1392] [cursor=pointer]:
+                      - img [ref=e1393]
+                    - button "Deep Digital Hunt" [ref=e1398] [cursor=pointer]:
+                      - img [ref=e1399]
+                    - button "Draft" [disabled] [ref=e1401] [cursor=pointer]
+                    - button "Audit" [ref=e1402] [cursor=pointer]
+              - 'row "PROCESSING ERROR Audit failed: No website" [ref=e1403]':
+                - 'cell "PROCESSING ERROR Audit failed: No website" [ref=e1404]':
+                  - generic [ref=e1406]:
+                    - generic [ref=e1407]:
+                      - img [ref=e1408]
+                      - text: PROCESSING ERROR
+                    - paragraph [ref=e1410]: "Audit failed: No website"
+              - 'row "BELLILLO - A Taste of Napoli www.bellillo.com/ Completed SEO: 60/100 LinkedIn Hook Ready Email Hook Ready Draft Re-Audit" [ref=e1411]':
+                - cell "BELLILLO - A Taste of Napoli www.bellillo.com/" [ref=e1412]:
+                  - generic [ref=e1413]:
+                    - generic [ref=e1415]: BELLILLO - A Taste of Napoli
+                    - link "www.bellillo.com/" [ref=e1417] [cursor=pointer]:
+                      - /url: https://www.bellillo.com/
+                      - img [ref=e1418]
+                      - generic [ref=e1421]: www.bellillo.com/
+                - 'cell "Completed SEO: 60/100" [ref=e1422]':
+                  - generic [ref=e1423]:
+                    - generic [ref=e1424]: Completed
+                    - generic [ref=e1425]: "SEO: 60/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e1426]:
+                  - generic [ref=e1427]:
+                    - generic "LinkedIn Hook Ready" [ref=e1428]:
+                      - img [ref=e1429]
+                    - generic "Email Hook Ready" [ref=e1433]:
+                      - img [ref=e1434]
+                - cell [ref=e1437]:
+                  - generic [ref=e1438]:
+                    - link [ref=e1439] [cursor=pointer]:
+                      - /url: https://www.facebook.com/bellillous/
+                      - img [ref=e1440]
+                    - link [ref=e1442] [cursor=pointer]:
+                      - /url: https://www.instagram.com/bellillo_us/
+                      - img [ref=e1443]
+                    - link [ref=e1446] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/bellillo
+                      - img [ref=e1447]
+                - cell "Draft Re-Audit" [ref=e1451]:
+                  - generic [ref=e1452]:
+                    - button "Harvest Contact Details" [ref=e1453] [cursor=pointer]:
+                      - img [ref=e1454]
+                    - button "Deep Digital Hunt" [ref=e1459] [cursor=pointer]:
+                      - img [ref=e1460]
+                    - button "Draft" [ref=e1462] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1463] [cursor=pointer]
+              - 'row "PAIN POINTS Business & Marketing Pain Point Analysis 1. SEO Invisibility & Indexing Failures Despite being on Squarespace (which is generally SEO-friendly), the site is missing the \"Big Three\" of search foundation: robots.txt, sitemap.xml, and H1 headers. Witho... Show more" [ref=e1464]':
+                - 'cell "PAIN POINTS Business & Marketing Pain Point Analysis 1. SEO Invisibility & Indexing Failures Despite being on Squarespace (which is generally SEO-friendly), the site is missing the \"Big Three\" of search foundation: robots.txt, sitemap.xml, and H1 headers. Witho... Show more" [ref=e1465]':
+                  - generic [ref=e1467]:
+                    - generic [ref=e1468]: PAIN POINTS
+                    - generic [ref=e1469]:
+                      - paragraph [ref=e1470]: "Business & Marketing Pain Point Analysis 1. SEO Invisibility & Indexing Failures Despite being on Squarespace (which is generally SEO-friendly), the site is missing the \"Big Three\" of search foundation: robots.txt, sitemap.xml, and H1 headers. Witho..."
+                      - button "Show more" [ref=e1471] [cursor=pointer]
+              - row "Il Pizzaiolo Failed N/A Draft Audit" [ref=e1472]:
+                - cell "Il Pizzaiolo" [ref=e1473]:
+                  - generic [ref=e1476]: Il Pizzaiolo
+                - cell "Failed" [ref=e1477]:
+                  - generic [ref=e1479]: Failed
+                - cell [ref=e1480]
+                - cell "N/A" [ref=e1481]:
+                  - generic [ref=e1483]: N/A
+                - cell "Draft Audit" [ref=e1484]:
+                  - generic [ref=e1485]:
+                    - button "Harvest Contact Details" [ref=e1486] [cursor=pointer]:
+                      - img [ref=e1487]
+                    - button "Deep Digital Hunt" [ref=e1492] [cursor=pointer]:
+                      - img [ref=e1493]
+                    - button "Draft" [disabled] [ref=e1495] [cursor=pointer]
+                    - button "Audit" [ref=e1496] [cursor=pointer]
+              - 'row "PROCESSING ERROR Audit failed: No website" [ref=e1497]':
+                - 'cell "PROCESSING ERROR Audit failed: No website" [ref=e1498]':
+                  - generic [ref=e1500]:
+                    - generic [ref=e1501]:
+                      - img [ref=e1502]
+                      - text: PROCESSING ERROR
+                    - paragraph [ref=e1504]: "Audit failed: No website"
+              - 'row "Mister O1 Extraordinary Pizza - Brickell www.mistero1.com/ Completed SEO: 80/100 Draft Re-Audit" [ref=e1505]':
+                - cell "Mister O1 Extraordinary Pizza - Brickell www.mistero1.com/" [ref=e1506]:
+                  - generic [ref=e1507]:
+                    - generic [ref=e1509]: Mister O1 Extraordinary Pizza - Brickell
+                    - link "www.mistero1.com/" [ref=e1511] [cursor=pointer]:
+                      - /url: https://www.mistero1.com/
+                      - img [ref=e1512]
+                      - generic [ref=e1515]: www.mistero1.com/
+                - 'cell "Completed SEO: 80/100" [ref=e1516]':
+                  - generic [ref=e1517]:
+                    - generic [ref=e1518]: Completed
+                    - generic [ref=e1519]: "SEO: 80/100"
+                - cell [ref=e1520]
+                - cell [ref=e1521]:
+                  - generic [ref=e1522]:
+                    - link [ref=e1523] [cursor=pointer]:
+                      - /url: https://www.facebook.com/MisterO1Brickell/about/
+                      - img [ref=e1524]
+                    - link [ref=e1526] [cursor=pointer]:
+                      - /url: https://www.instagram.com/mistero1pizza/
+                      - img [ref=e1527]
+                    - link [ref=e1530] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/mister-o1
+                      - img [ref=e1531]
+                - cell "Draft Re-Audit" [ref=e1535]:
+                  - generic [ref=e1536]:
+                    - button "Harvest Contact Details" [ref=e1537] [cursor=pointer]:
+                      - img [ref=e1538]
+                    - button "Deep Digital Hunt" [ref=e1543] [cursor=pointer]:
+                      - img [ref=e1544]
+                    - button "Draft" [ref=e1546] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1547] [cursor=pointer]
+              - 'row "PAIN POINTS Business & Marketing Pain Points Identified: • Critical Marketing & Retargeting Gaps: The absence of a Facebook Pixel means Mister O1 is unable to retarget local Brickell website visitors with ads. If a hungry customer views the menu but doesn''t imm... Show more" [ref=e1548]':
+                - 'cell "PAIN POINTS Business & Marketing Pain Points Identified: • Critical Marketing & Retargeting Gaps: The absence of a Facebook Pixel means Mister O1 is unable to retarget local Brickell website visitors with ads. If a hungry customer views the menu but doesn''t imm... Show more" [ref=e1549]':
+                  - generic [ref=e1551]:
+                    - generic [ref=e1552]: PAIN POINTS
+                    - generic [ref=e1553]:
+                      - paragraph [ref=e1554]: "Business & Marketing Pain Points Identified: • Critical Marketing & Retargeting Gaps: The absence of a Facebook Pixel means Mister O1 is unable to retarget local Brickell website visitors with ads. If a hungry customer views the menu but doesn't imm..."
+                      - button "Show more" [ref=e1555] [cursor=pointer]
+              - 'row "DC PIE CO. dcpieco.com/ Completed SEO: 60/100 LinkedIn Hook Ready Email Hook Ready Draft Re-Audit" [ref=e1556]':
+                - cell "DC PIE CO. dcpieco.com/" [ref=e1557]:
+                  - generic [ref=e1558]:
+                    - generic [ref=e1560]: DC PIE CO.
+                    - link "dcpieco.com/" [ref=e1562] [cursor=pointer]:
+                      - /url: https://dcpieco.com/
+                      - img [ref=e1563]
+                      - generic [ref=e1566]: dcpieco.com/
+                - 'cell "Completed SEO: 60/100" [ref=e1567]':
+                  - generic [ref=e1568]:
+                    - generic [ref=e1569]: Completed
+                    - generic [ref=e1570]: "SEO: 60/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e1571]:
+                  - generic [ref=e1572]:
+                    - generic "LinkedIn Hook Ready" [ref=e1573]:
+                      - img [ref=e1574]
+                    - generic "Email Hook Ready" [ref=e1578]:
+                      - img [ref=e1579]
+                - cell [ref=e1582]:
+                  - generic [ref=e1583]:
+                    - link [ref=e1584] [cursor=pointer]:
+                      - /url: https://www.facebook.com/dcpieco/events/
+                      - img [ref=e1585]
+                    - link [ref=e1587] [cursor=pointer]:
+                      - /url: https://www.instagram.com/dcpieco/
+                      - img [ref=e1588]
+                    - link [ref=e1591] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/dcpieco
+                      - img [ref=e1592]
+                    - link [ref=e1596] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/
+                      - img [ref=e1597]
+                - cell "Draft Re-Audit" [ref=e1599]:
+                  - generic [ref=e1600]:
+                    - button "Harvest Contact Details" [ref=e1601] [cursor=pointer]:
+                      - img [ref=e1602]
+                    - button "Deep Digital Hunt" [ref=e1607] [cursor=pointer]:
+                      - img [ref=e1608]
+                    - button "Draft" [ref=e1610] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1611] [cursor=pointer]
+              - 'row "PAIN POINTS Identified Business & Marketing Pain Points • Critical Marketing & Retargeting Gaps: Despite heavily promoting limited-edition collaborations (like the Patria Pie) and pushing social media engagement, the site lacks a Facebook Pixel. This means they... Show more" [ref=e1612]':
+                - 'cell "PAIN POINTS Identified Business & Marketing Pain Points • Critical Marketing & Retargeting Gaps: Despite heavily promoting limited-edition collaborations (like the Patria Pie) and pushing social media engagement, the site lacks a Facebook Pixel. This means they... Show more" [ref=e1613]':
+                  - generic [ref=e1615]:
+                    - generic [ref=e1616]: PAIN POINTS
+                    - generic [ref=e1617]:
+                      - paragraph [ref=e1618]: "Identified Business & Marketing Pain Points • Critical Marketing & Retargeting Gaps: Despite heavily promoting limited-edition collaborations (like the Patria Pie) and pushing social media engagement, the site lacks a Facebook Pixel. This means they..."
+                      - button "Show more" [ref=e1619] [cursor=pointer]
+              - 'row "Pummarola Pizzeria Napoletana pummarola.us/ Completed SEO: 50/100 LinkedIn Hook Ready Email Hook Ready Draft Re-Audit" [ref=e1620]':
+                - cell "Pummarola Pizzeria Napoletana pummarola.us/" [ref=e1621]:
+                  - generic [ref=e1622]:
+                    - generic [ref=e1624]: Pummarola Pizzeria Napoletana
+                    - link "pummarola.us/" [ref=e1626] [cursor=pointer]:
+                      - /url: http://pummarola.us/
+                      - img [ref=e1627]
+                      - generic [ref=e1630]: pummarola.us/
+                - 'cell "Completed SEO: 50/100" [ref=e1631]':
+                  - generic [ref=e1632]:
+                    - generic [ref=e1633]: Completed
+                    - generic [ref=e1634]: "SEO: 50/100"
+                - cell "LinkedIn Hook Ready Email Hook Ready" [ref=e1635]:
+                  - generic [ref=e1636]:
+                    - generic "LinkedIn Hook Ready" [ref=e1637]:
+                      - img [ref=e1638]
+                    - generic "Email Hook Ready" [ref=e1642]:
+                      - img [ref=e1643]
+                - cell [ref=e1646]:
+                  - generic [ref=e1647]:
+                    - link [ref=e1648] [cursor=pointer]:
+                      - /url: https://www.facebook.com/pummarolapizzeria/photos/
+                      - img [ref=e1649]
+                    - link [ref=e1651] [cursor=pointer]:
+                      - /url: https://www.instagram.com/pummarolapizzeria/
+                      - img [ref=e1652]
+                    - link [ref=e1655] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/pummarola-pizzeria
+                      - img [ref=e1656]
+                    - link [ref=e1660] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@pummarola.bcn
+                      - img [ref=e1661]
+                - cell "Draft Re-Audit" [ref=e1665]:
+                  - generic [ref=e1666]:
+                    - button "Harvest Contact Details" [ref=e1667] [cursor=pointer]:
+                      - img [ref=e1668]
+                    - button "Deep Digital Hunt" [ref=e1673] [cursor=pointer]:
+                      - img [ref=e1674]
+                    - button "Draft" [ref=e1676] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1677] [cursor=pointer]
+              - 'row "PAIN POINTS Pain Points Identified: • Marketing Gap: Missing a Facebook Pixel, meaning they cannot retarget website visitors for their high-margin offerings like pizza-making classes and mobile catering. • Technical/SEO Issues: Missing an H1 header, a too-short ... Show more" [ref=e1678]':
+                - 'cell "PAIN POINTS Pain Points Identified: • Marketing Gap: Missing a Facebook Pixel, meaning they cannot retarget website visitors for their high-margin offerings like pizza-making classes and mobile catering. • Technical/SEO Issues: Missing an H1 header, a too-short ... Show more" [ref=e1679]':
+                  - generic [ref=e1681]:
+                    - generic [ref=e1682]: PAIN POINTS
+                    - generic [ref=e1683]:
+                      - paragraph [ref=e1684]: "Pain Points Identified: • Marketing Gap: Missing a Facebook Pixel, meaning they cannot retarget website visitors for their high-margin offerings like pizza-making classes and mobile catering. • Technical/SEO Issues: Missing an H1 header, a too-short ..."
+                      - button "Show more" [ref=e1685] [cursor=pointer]
+              - row "New York Pizza & Restaurant Failed N/A Draft Audit" [ref=e1686]:
+                - cell "New York Pizza & Restaurant" [ref=e1687]:
+                  - generic [ref=e1690]: New York Pizza & Restaurant
+                - cell "Failed" [ref=e1691]:
+                  - generic [ref=e1693]: Failed
+                - cell [ref=e1694]
+                - cell "N/A" [ref=e1695]:
+                  - generic [ref=e1697]: N/A
+                - cell "Draft Audit" [ref=e1698]:
+                  - generic [ref=e1699]:
+                    - button "Harvest Contact Details" [ref=e1700] [cursor=pointer]:
+                      - img [ref=e1701]
+                    - button "Deep Digital Hunt" [ref=e1706] [cursor=pointer]:
+                      - img [ref=e1707]
+                    - button "Draft" [disabled] [ref=e1709] [cursor=pointer]
+                    - button "Audit" [ref=e1710] [cursor=pointer]
+              - 'row "PROCESSING ERROR Audit failed: No website" [ref=e1711]':
+                - 'cell "PROCESSING ERROR Audit failed: No website" [ref=e1712]':
+                  - generic [ref=e1714]:
+                    - generic [ref=e1715]:
+                      - img [ref=e1716]
+                      - text: PROCESSING ERROR
+                    - paragraph [ref=e1718]: "Audit failed: No website"
+              - 'row "Test Agent RISK example-agent.com Completed SEO: 0/100 Security Vulnerabilities Draft Re-Audit" [ref=e1719]':
+                - cell "Test Agent RISK example-agent.com" [ref=e1720]:
+                  - generic [ref=e1721]:
+                    - generic [ref=e1722]:
+                      - generic [ref=e1723]: Test Agent
+                      - generic [ref=e1724]:
+                        - img [ref=e1725]
+                        - text: RISK
+                    - link "example-agent.com" [ref=e1728] [cursor=pointer]:
+                      - /url: https://example-agent.com
+                      - img [ref=e1729]
+                      - generic [ref=e1732]: example-agent.com
+                - 'cell "Completed SEO: 0/100" [ref=e1733]':
+                  - generic [ref=e1734]:
+                    - generic [ref=e1735]: Completed
+                    - generic [ref=e1736]: "SEO: 0/100"
+                - cell "Security Vulnerabilities" [ref=e1737]:
+                  - generic "Security Vulnerabilities" [ref=e1739]:
+                    - img [ref=e1740]
+                - cell [ref=e1742]:
+                  - generic [ref=e1743]:
+                    - link [ref=e1744] [cursor=pointer]:
+                      - /url: https://developers.facebook.com/docs/development/build-and-test/test-users/
+                      - img [ref=e1745]
+                    - link [ref=e1747] [cursor=pointer]:
+                      - /url: https://www.instagram.com/
+                      - img [ref=e1748]
+                    - link [ref=e1751] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/testagent-ai
+                      - img [ref=e1752]
+                    - link [ref=e1756] [cursor=pointer]:
+                      - /url: https://www.tiktok.com/@official.agent
+                      - img [ref=e1757]
+                    - link [ref=e1761] [cursor=pointer]:
+                      - /url: https://www.pinterest.com/
+                      - img [ref=e1762]
+                - cell "Draft Re-Audit" [ref=e1764]:
+                  - generic [ref=e1765]:
+                    - button "Harvest Contact Details" [ref=e1766] [cursor=pointer]:
+                      - img [ref=e1767]
+                    - button "Deep Digital Hunt" [ref=e1772] [cursor=pointer]:
+                      - img [ref=e1773]
+                    - button "Draft" [ref=e1775] [cursor=pointer]
+                    - button "Re-Audit" [ref=e1776] [cursor=pointer]
+    - generic [ref=e202]:
+      - generic [ref=e204]:
+        - img [ref=e206] [cursor=pointer]
+        - textbox "Ask AI to audit, find emails, or filter leads..." [ref=e208]
+        - generic [ref=e209]:
+          - generic [ref=e210]: ENTER
+          - button [disabled] [ref=e211] [cursor=pointer]:
+            - img [ref=e212]
+      - generic [ref=e215]:
+        - button "Clear Chat" [ref=e216] [cursor=pointer]
+        - button "Minimize" [ref=e217] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e223] [cursor=pointer]:
+    - img [ref=e224]
+  - alert [ref=e227]

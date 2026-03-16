@@ -1,0 +1,35 @@
+services:
+  # Backend Service (Using Docker for reliable Playwright execution)
+  - type: web
+    name: lead-scraper-backend
+    env: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile
+    plan: starter # Recommendation: starter or higher for browser automation stability
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PYTHON_ENV
+        value: production
+
+  # Frontend Service (Next.js)
+  - type: web
+    name: lead-scraper-frontend
+    env: node
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm run start
+    plan: starter
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: lead-scraper-backend
+          property: host
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
