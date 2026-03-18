@@ -276,7 +276,7 @@ class AgenticRouter:
             return {"error": "AI model not initialized. Set GEMINI_API_KEY."}
 
         # Fetch limited data for context (to avoid token limits)
-        response = self.db.client.table("leads").select("*").limit(50).execute()
+        response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(50).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         query_prompt = f"""
@@ -423,7 +423,7 @@ class AgenticRouter:
             return {"error": "AI model not initialized. Set GEMINI_API_KEY."}
 
         # Fetch recent leads with audit results
-        response = self.db.client.table("leads").select("*").limit(200).execute()
+        response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(200).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:
