@@ -110,6 +110,7 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
     return (
       <button 
         onClick={() => setIsMinimized(false)}
+        aria-label="Open AI chat"
         style={{ 
           position: 'fixed', 
           bottom: isMobile ? '1rem' : '2rem', 
@@ -198,6 +199,7 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
                         setCopiedIdx(idx);
                         setTimeout(() => setCopiedIdx(null), 2000);
                       }}
+                      aria-label="Copy message"
                       style={{
                         position: 'absolute',
                         top: '0.5rem',
@@ -269,15 +271,22 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
           alignItems: 'center',
           gap: '1.25rem'
         }}>
-          <div style={{ 
-            background: isLoading ? 'var(--primary)' : 'rgba(99, 102, 241, 0.2)', 
-            borderRadius: '10px', 
-            padding: '0.5rem', 
-            transition: 'background 0.3s',
-            cursor: 'pointer'
-          }} onClick={() => messages.length > 0 && setMessages([])}>
+          <button
+            type="button"
+            aria-label="Clear chat"
+            style={{
+              background: isLoading ? 'var(--primary)' : 'rgba(99, 102, 241, 0.2)',
+              borderRadius: '10px',
+              padding: '0.5rem',
+              transition: 'background 0.3s',
+              cursor: 'pointer',
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }} onClick={() => messages.length > 0 && setMessages([])}>
              {isLoading ? <Loader2 className="animate-spin" size={20} color="white" /> : <Shield size={20} color="white" />}
-          </div>
+          </button>
           <input 
             type="text" 
             value={query}
@@ -293,6 +302,7 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
             <button 
               type="submit"
               disabled={!query.trim() || isLoading}
+              aria-label="Send message"
               style={{ 
                 background: 'none', 
                 border: 'none', 
@@ -316,12 +326,14 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
       }}>
          <button 
            onClick={() => setMessages([])}
+           aria-label="Clear chat"
            style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '20px', padding: '0.25rem 0.75rem', color: '#94a3b8', fontSize: '0.7rem', cursor: 'pointer' }}
          >
            Clear Chat
          </button>
          <button 
            onClick={() => setIsMinimized(true)}
+           aria-label="Minimize AI chat"
            style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '20px', padding: '0.25rem 0.75rem', color: '#94a3b8', fontSize: '0.7rem', cursor: 'pointer' }}
          >
            Minimize
