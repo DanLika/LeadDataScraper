@@ -12,22 +12,15 @@ def load_csv_with_unique_key(filepath, df_name="CSV"):
     """
     essential_cols = ['Name', 'Website', 'email', 'unique_key']
 
-    if not os.path.exists(filepath):
+    try:
+        df = pd.read_csv(filepath, dtype=str)
+        logger.info("Successfully loaded %d leads from '%s' for %s.", len(df), filepath, df_name)
+    except FileNotFoundError:
         logger.warning("'%s' not found. Initializing empty DataFrame for %s.", filepath, df_name)
         df = pd.DataFrame(columns=essential_cols, dtype=str)
-    elif os.path.getsize(filepath) == 0:
-        logger.warning("'%s' is empty. Initializing empty DataFrame for %s.", filepath, df_name)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as e:
+        logger.error("Error parsing '%s' for %s: %s. Initializing empty DataFrame.", filepath, df_name, e)
         df = pd.DataFrame(columns=essential_cols, dtype=str)
-    else:
-        try:
-            df = pd.read_csv(filepath, dtype=str)
-            logger.info("Successfully loaded %d leads from '%s' for %s.", len(df), filepath, df_name)
-        except pd.errors.EmptyDataError:
-            logger.error("'%s' has headers but no data. Initializing empty DataFrame for %s.", filepath, df_name)
-            df = pd.DataFrame(columns=essential_cols, dtype=str)
-        except Exception as e:
-            logger.error("Error loading '%s' for %s: %s. Initializing empty DataFrame.", filepath, df_name, e)
-            df = pd.DataFrame(columns=essential_cols, dtype=str)
 
     # Case-insensitive column merging logic
     canonical_map = {
