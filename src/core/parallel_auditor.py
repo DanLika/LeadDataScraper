@@ -2,7 +2,6 @@ import asyncio
 from typing import List, Dict
 from src.scrapers.seo_audit import perform_seo_audit_async
 from src.utils.supabase_helper import SupabaseHelper
-from src.utils.csv_helper import save_csv
 from src.processors.leadhunter import LeadHunter
 from src.utils.logging_config import get_logger
 import time
