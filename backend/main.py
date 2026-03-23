@@ -190,9 +190,12 @@ async def get_audit_status():
 @app.post("/audit/stop")
 async def stop_audit():
     """Signal the orchestrator to stop all running jobs."""
-    response = db.client.table("orchestration_jobs").select("id").eq("status", "running").execute()
-    for job in response.data:
-        await orchestrator.stop_job(job["id"])
+    # Single query update all running jobs to stopped
+    db.client.table("orchestration_jobs").update({
+        "status": "stopped",
+        "current_phase": "Stopped by user"
+    }).eq("status", "running").execute()
+
     auditor.stop()
     return {"status": "stopped"}
 
