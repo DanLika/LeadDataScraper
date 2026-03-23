@@ -1,5 +1,4 @@
 import asyncio
-import os
 from src.core.agentic_router import AgenticRouter
 from dotenv import load_dotenv
 
