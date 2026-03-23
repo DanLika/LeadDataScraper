@@ -1,4 +1,5 @@
 import sys
+import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 import unittest
@@ -352,6 +353,25 @@ class TestAgenticRouterExecuteTask(unittest.IsolatedAsyncioTestCase):
             "task": "UNKNOWN_TASK"
         })
         self.assertEqual(result, {"error": "Unknown task: UNKNOWN_TASK"})
+
+class TestAgenticRouter(unittest.IsolatedAsyncioTestCase):
+    async def test_route_instruction_error_path(self):
+        """Verify that route_instruction correctly handles and formats exceptions during AI calling."""
+        # Instantiate router
+        router = AgenticRouter()
+
+        # Override client with a mock
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = Exception("Simulated AI Failure")
+        router.client = mock_client
+
+        # Act
+        result = await router.route_instruction("do something")
+
+        # Assert
+        self.assertEqual(result.get("task"), "ERROR")
+        self.assertEqual(result.get("params"), {})
+        self.assertEqual(result.get("reasoning"), "Tool calling failed: Simulated AI Failure")
 
 if __name__ == "__main__":
     unittest.main()
