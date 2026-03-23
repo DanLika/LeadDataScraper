@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from postgrest.exceptions import APIError
 
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.agentic_router import AgenticRouter
@@ -73,9 +74,12 @@ async def list_leads():
             return error_response("Database not connected", status_code=503)
         response = db.client.table("leads").select("*").order("created_at", desc=True).limit(200).execute()
         return {"leads": response.data}
+    except APIError as e:
+        logger.error("Database API Error fetching leads: %s", e, exc_info=True)
+        return error_response("Failed to fetch leads from database", status_code=502, details=str(e))
     except Exception as e:
-        logger.error("Error fetching leads: %s", e, exc_info=True)
-        return error_response("Failed to fetch leads", details=str(e))
+        logger.error("Unexpected error fetching leads: %s", e, exc_info=True)
+        return error_response("An unexpected error occurred while fetching leads", details=str(e))
 
 def validate_csv_upload(file: UploadFile, contents: bytes) -> Optional[JSONResponse]:
     """Validate uploaded file is a CSV and within size limits."""
