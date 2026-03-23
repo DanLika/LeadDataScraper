@@ -1,7 +1,6 @@
 import asyncio
 import os
 import json
-import re
 from typing import List, Dict, Any
 from playwright.async_api import async_playwright
 from google import genai
