@@ -5,6 +5,7 @@ import uvicorn
 import os
 import asyncio
 import pandas as pd
+import aiofiles
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
@@ -97,8 +98,8 @@ async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
     # Save uploaded file temporarily
     temp_path = f"tmp_{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        buffer.write(contents)
+    async with aiofiles.open(temp_path, "wb") as buffer:
+        await buffer.write(contents)
 
     # Process in background
     def process_csv():
