@@ -30,11 +30,12 @@ def extract_json_from_response(text: str) -> Optional[dict]:
                 start = i
             depth += 1
         elif ch == '}':
-            depth -= 1
-            if depth == 0 and start is not None:
-                try:
-                    return json.loads(cleaned[start:i + 1])
-                except (json.JSONDecodeError, ValueError):
-                    start = None
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    try:
+                        return json.loads(cleaned[start:i + 1])
+                    except (json.JSONDecodeError, ValueError):
+                        start = None
 
     return None
