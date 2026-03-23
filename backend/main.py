@@ -71,79 +71,97 @@ async def list_leads():
         logger.error("Error fetching leads: %s", e, exc_info=True)
         return error_response("Failed to fetch leads", details=str(e))
 
-@app.post("/upload")
-async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    """
-    Handle CSV file upload, map columns using AI, and upsert leads to the database.
-    Processing happens in the background.
-    """
-    # Validate file type
+def validate_csv_upload(file: UploadFile, contents: bytes) -> Optional[JSONResponse]:
+    """Validate uploaded file is a CSV and within size limits."""
     if not file.filename or not file.filename.lower().endswith('.csv'):
         return error_response("Only CSV files are allowed.", status_code=400)
 
     if file.content_type and file.content_type not in ["text/csv", "application/vnd.ms-excel", "application/octet-stream"]:
         return error_response(f"Invalid content type: {file.content_type}. Expected text/csv.", status_code=400)
 
-    # Read and validate file size (max 50MB)
-    contents = await file.read()
     max_size = 50 * 1024 * 1024  # 50MB
     if len(contents) > max_size:
         return error_response(f"File too large. Maximum size is 50MB, got {len(contents) / (1024*1024):.1f}MB.", status_code=400)
+
+    return None
+
+@app.post("/upload")
+async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """
+    Handle CSV file upload, map columns using AI, and upsert leads to the database.
+    Processing happens in the background.
+    """
+    contents = await file.read()
+    validation_error = validate_csv_upload(file, contents)
+    if validation_error:
+        return validation_error
 
     # Save uploaded file temporarily
     temp_path = f"tmp_{file.filename}"
     with open(temp_path, "wb") as buffer:
         buffer.write(contents)
 
-    # Process in background
-    def process_csv():
-        try:
-            from src.utils.csv_helper import load_csv_with_unique_key
-            from src.processors.ai_mapper import GeminiMapper
-
-            # 1. Load data
-            df = load_csv_with_unique_key(temp_path)
-
-            # 2. Basic Standardization: Lowercase all columns to avoid case-sensitivity issues
-            df.columns = [col.lower().replace(" ", "_") for col in df.columns]
-
-            # 3. AI Mapping (optional, for semantic matching)
-            mapper = GeminiMapper()
-            mapping = mapper.get_column_mapping(df.columns.tolist())
-            if mapping:
-                logger.info("AI suggested mapping: %s", mapping)
-                df = df.rename(columns=mapping)
-
-            # 4. Final Filter: Only keep columns that exist in our schema
-            valid_cols = [
-                "unique_key", "name", "company_name", "website", "email", "phone", "address",
-                "rating", "reviews", "lead_source", "audit_status", "audit_results",
-                "enrichment_status", "high_risk_flag", "seo_score", "outreach_score",
-                "company_size", "leadership_team", "key_offerings", "contact_details",
-                "business_details", "target_clients", "pain_points", "segment",
-                "email_hook", "linkedin_hook",
-                "facebook", "instagram", "linkedin", "tiktok", "pinterest"
-            ]
-            final_df = df[[col for col in df.columns if col in valid_cols]]
-
-            # 5. Upsert to Supabase
-            leads_dict = final_df.to_dict('records')
-            # Clean up NaN for JSON serialization
-            leads_dict = [{k: (None if pd.isna(v) else v) for k, v in lead.items()} for lead in leads_dict]
-
-            logger.info("Upserting %d leads with columns: %s", len(leads_dict), final_df.columns.tolist())
-            db.upsert_leads(leads_dict)
-
-            # Cleanup
-            os.remove(temp_path)
-            logger.info("Successfully processed and upserted %d leads.", len(leads_dict))
-        except Exception as e:
-            logger.error("Error processing upload: %s", e, exc_info=True)
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-    background_tasks.add_task(process_csv)
+    background_tasks.add_task(process_csv_background, temp_path)
     return {"filename": file.filename, "status": "processing", "message": "Leads are being imported in the background."}
+
+
+def _load_and_standardize_csv(temp_path: str) -> pd.DataFrame:
+    from src.utils.csv_helper import load_csv_with_unique_key
+    df = load_csv_with_unique_key(temp_path)
+    df.columns = [col.lower().replace(" ", "_") for col in df.columns]
+    return df
+
+def _apply_ai_mapping(df: pd.DataFrame) -> pd.DataFrame:
+    from src.processors.ai_mapper import GeminiMapper
+    mapper = GeminiMapper()
+    mapping = mapper.get_column_mapping(df.columns.tolist())
+    if mapping:
+        logger.info("AI suggested mapping: %s", mapping)
+        df = df.rename(columns=mapping)
+    return df
+
+def _filter_valid_columns(df: pd.DataFrame) -> pd.DataFrame:
+    valid_cols = [
+        "unique_key", "name", "company_name", "website", "email", "phone", "address",
+        "rating", "reviews", "lead_source", "audit_status", "audit_results",
+        "enrichment_status", "high_risk_flag", "seo_score", "outreach_score",
+        "company_size", "leadership_team", "key_offerings", "contact_details",
+        "business_details", "target_clients", "pain_points", "segment",
+        "email_hook", "linkedin_hook",
+        "facebook", "instagram", "linkedin", "tiktok", "pinterest"
+    ]
+    return df[[col for col in df.columns if col in valid_cols]]
+
+def _upsert_leads_to_db(df: pd.DataFrame):
+    leads_dict = df.to_dict('records')
+    # Clean up NaN for JSON serialization
+    leads_dict = [{k: (None if pd.isna(v) else v) for k, v in lead.items()} for lead in leads_dict]
+    logger.info("Upserting %d leads with columns: %s", len(leads_dict), df.columns.tolist())
+    db.upsert_leads(leads_dict)
+    return len(leads_dict)
+
+def process_csv_background(temp_path: str):
+    """Background task to process the uploaded CSV."""
+    try:
+        # 1 & 2. Load and standardize data
+        df = _load_and_standardize_csv(temp_path)
+
+        # 3. AI Mapping
+        df = _apply_ai_mapping(df)
+
+        # 4. Filter columns
+        final_df = _filter_valid_columns(df)
+
+        # 5. Upsert to database
+        upserted_count = _upsert_leads_to_db(final_df)
+
+        # Cleanup
+        os.remove(temp_path)
+        logger.info("Successfully processed and upserted %d leads.", upserted_count)
+    except Exception as e:
+        logger.error("Error processing upload: %s", e, exc_info=True)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 @app.post("/process-lead")
 async def process_single_lead(payload: dict):
