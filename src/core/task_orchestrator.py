@@ -102,7 +102,7 @@ class TaskOrchestrator:
                 if existing_job.data:
                     job_id = existing_job.data[0]["id"]
                     logger.info("Resuming existing job: %s", job_id)
-                    asyncio.create_task(self._process_in_chunks(job_id, filters, tasks=tasks))
+                    asyncio.create_task(self._process_in_chunks(job_id, filters=filters, tasks=tasks))
                     return job_id
 
             # 2. Create new job record
@@ -118,7 +118,7 @@ class TaskOrchestrator:
             self.db.client.table("orchestration_jobs").insert(job_data).execute()
 
         # 3. Start background task (outside lock)
-        asyncio.create_task(self._process_in_chunks(job_id, filters, lead_ids, tasks))
+        asyncio.create_task(self._process_in_chunks(job_id, filters=filters, lead_ids=lead_ids, tasks=tasks))
 
         return job_id
 
@@ -128,10 +128,15 @@ class TaskOrchestrator:
         """
         self.db.client.table("orchestration_jobs").update(updates).eq("id", job_id).execute()
 
-    async def _process_in_chunks(self, job_id: str, filters: Dict[str, Any] = None, lead_ids: List[str] = None, tasks: List[str] = None, chunk_size: int = 50):
+    async def _process_in_chunks(self, job_id: str, **kwargs):
         """
         Processes leads in chunks with batch updates and centralized concurrency.
         """
+        filters = kwargs.get("filters")
+        lead_ids = kwargs.get("lead_ids")
+        tasks = kwargs.get("tasks")
+        chunk_size = kwargs.get("chunk_size", 50)
+
         auditor = ParallelAuditor()
         enricher = EnrichmentEngine()
 
