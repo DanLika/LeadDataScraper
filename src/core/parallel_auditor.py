@@ -1,5 +1,4 @@
 import asyncio
-import aiohttp
 from typing import List, Dict
 from src.scrapers.seo_audit import perform_seo_audit_async
 from src.utils.supabase_helper import SupabaseHelper
