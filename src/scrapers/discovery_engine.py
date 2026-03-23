@@ -60,90 +60,9 @@ class DiscoveryEngine:
 
                 for container in containers[:max_results]:
                     try:
-                        # a. Extract Name
-                        name_elem = await container.query_selector(".fontHeadlineSmall, .qBF1Pd, h3, .fontBodyMedium > span:first-child, [data-jspb]")
-                        name = await name_elem.inner_text() if name_elem else await container.get_attribute("aria-label")
-
-                        if not name:
-                            continue
-
-                        # b. Extract Maps URL & unique_key
-                        maps_url = ""
-                        link_elem = await container.query_selector("a[href*='/maps/place/']")
-                        if link_elem:
-                            maps_url = await link_elem.get_attribute("href") or ""
-
-                        tag_name = await container.evaluate("node => node.tagName.toLowerCase()")
-                        if not maps_url and tag_name == "a":
-                            maps_url = await container.get_attribute("href") or ""
-
-                        # Generate stable unique_key
-                        if maps_url and "!1s" in maps_url:
-                            unique_key = maps_url.split("!1s")[1].split("!")[0]
-                        elif maps_url:
-                            unique_key = maps_url.split("/place/")[1].split("/")[0]
-                        else:
-                            unique_key = hashlib.md5(name.encode()).hexdigest()[:16]
-
-                        # c. Extract Rating
-                        rating_elem = await container.query_selector("span[aria-label*='stars'], .MW4T7d")
-                        rating = await rating_elem.get_attribute("aria-label") if rating_elem else None
-
-                        # d. Extract Website
-                        website = None
-                        website_selectors = [
-                            "a[data-value='Website']",
-                            "a[aria-label*='Website']",
-                            "a[href*='http']:not([href*='google.com'])",
-                            "a.l761vp", # Common class for website links in Maps
-                            "a.cs939e"
-                        ]
-                        for selector in website_selectors:
-                            website_elem = await container.query_selector(selector)
-                            if website_elem:
-                                website_href = await website_elem.get_attribute("href")
-                                if website_href and "google.com" not in website_href:
-                                    website = website_href
-                                    break
-
-                        # Fallback: Click container to see more details in sidebar
-                        if not website:
-                            try:
-                                await container.click()
-                                await asyncio.sleep(2) # Wait for panel
-                                # Look in the whole page for the website link now that the panel is open
-                                panel_website_elem = await page.query_selector("a[data-item-id='authority'], a[aria-label*='Website']")
-                                if panel_website_elem:
-                                    website_href = await panel_website_elem.get_attribute("href")
-                                    if website_href and "google.com" not in website_href:
-                                        website = website_href
-                            except Exception:
-                                pass
-
-                        # e. Extract Phone
-                        phone = None
-                        all_text = await container.inner_text()
-                        phone_match = re.search(r'(\+?\d{1,4}[\s.-]?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}', all_text)
-                        if phone_match:
-                            phone = phone_match.group()
-
-                        # Fallback phone from panel
-                        if not phone:
-                            try:
-                                panel_phone_elem = await page.query_selector("button[data-tooltip*='phone'], button[aria-label*='Phone']")
-                                if panel_phone_elem:
-                                    phone = await panel_phone_elem.inner_text()
-                            except Exception:
-                                pass
-
-                        leads.append({
-                            "name": name.strip(),
-                            "unique_key": unique_key,
-                            "website": website,
-                            "phone": phone,
-                            "rating": self._parse_rating(rating),
-                            "audit_status": "Pending"
-                        })
+                        lead_data = await self._extract_lead_data(page, container)
+                        if lead_data:
+                            leads.append(lead_data)
                     except Exception as inner_e:
                         logger.warning("Error parsing single discovery result: %s", inner_e)
                         continue
@@ -161,6 +80,93 @@ class DiscoveryEngine:
 
         logger.info("Discovery complete. Found %d unique leads.", len(leads))
         return leads
+
+    async def _extract_lead_data(self, page, container) -> Optional[dict]:
+        """Extracts lead data from a single result container."""
+        # a. Extract Name
+        name_elem = await container.query_selector(".fontHeadlineSmall, .qBF1Pd, h3, .fontBodyMedium > span:first-child, [data-jspb]")
+        name = await name_elem.inner_text() if name_elem else await container.get_attribute("aria-label")
+
+        if not name:
+            return None
+
+        # b. Extract Maps URL & unique_key
+        maps_url = ""
+        link_elem = await container.query_selector("a[href*='/maps/place/']")
+        if link_elem:
+            maps_url = await link_elem.get_attribute("href") or ""
+
+        tag_name = await container.evaluate("node => node.tagName.toLowerCase()")
+        if not maps_url and tag_name == "a":
+            maps_url = await container.get_attribute("href") or ""
+
+        # Generate stable unique_key
+        if maps_url and "!1s" in maps_url:
+            unique_key = maps_url.split("!1s")[1].split("!")[0]
+        elif maps_url:
+            unique_key = maps_url.split("/place/")[1].split("/")[0]
+        else:
+            unique_key = hashlib.md5(name.encode()).hexdigest()[:16]
+
+        # c. Extract Rating
+        rating_elem = await container.query_selector("span[aria-label*='stars'], .MW4T7d")
+        rating = await rating_elem.get_attribute("aria-label") if rating_elem else None
+
+        # d. Extract Website
+        website = None
+        website_selectors = [
+            "a[data-value='Website']",
+            "a[aria-label*='Website']",
+            "a[href*='http']:not([href*='google.com'])",
+            "a.l761vp", # Common class for website links in Maps
+            "a.cs939e"
+        ]
+        for selector in website_selectors:
+            website_elem = await container.query_selector(selector)
+            if website_elem:
+                website_href = await website_elem.get_attribute("href")
+                if website_href and "google.com" not in website_href:
+                    website = website_href
+                    break
+
+        # Fallback: Click container to see more details in sidebar
+        if not website:
+            try:
+                await container.click()
+                await asyncio.sleep(2) # Wait for panel
+                # Look in the whole page for the website link now that the panel is open
+                panel_website_elem = await page.query_selector("a[data-item-id='authority'], a[aria-label*='Website']")
+                if panel_website_elem:
+                    website_href = await panel_website_elem.get_attribute("href")
+                    if website_href and "google.com" not in website_href:
+                        website = website_href
+            except Exception:
+                pass
+
+        # e. Extract Phone
+        phone = None
+        all_text = await container.inner_text()
+        phone_match = re.search(r'(\+?\d{1,4}[\s.-]?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}', all_text)
+        if phone_match:
+            phone = phone_match.group()
+
+        # Fallback phone from panel
+        if not phone:
+            try:
+                panel_phone_elem = await page.query_selector("button[data-tooltip*='phone'], button[aria-label*='Phone']")
+                if panel_phone_elem:
+                    phone = await panel_phone_elem.inner_text()
+            except Exception:
+                pass
+
+        return {
+            "name": name.strip(),
+            "unique_key": unique_key,
+            "website": website,
+            "phone": phone,
+            "rating": self._parse_rating(rating),
+            "audit_status": "Pending"
+        }
 
     @staticmethod
     def _parse_rating(rating_text: Optional[str]) -> Optional[float]:
