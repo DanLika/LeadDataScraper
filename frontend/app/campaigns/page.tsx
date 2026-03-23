@@ -34,6 +34,7 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [messages, setMessages] = useState<CampaignMessage[]>([]);
+  const [totalMessages, setTotalMessages] = useState<number>(0);
   const [messageStats, setMessageStats] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -65,6 +66,7 @@ export default function CampaignsPage() {
       if (data.campaign) {
         setSelectedCampaign(data.campaign);
         setMessages(data.messages || []);
+        setTotalMessages(data.total_messages || (data.messages || []).length);
         setMessageStats(data.stats || {});
       }
     } catch (err) {
@@ -270,7 +272,7 @@ export default function CampaignsPage() {
             {/* Messages List */}
             {messages.length > 0 && (
               <div>
-                <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Messages ({messages.length})</h3>
+                <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Messages ({totalMessages})</h3>
                 <div style={{ maxHeight: 'min(400px, 50vh)', overflowY: 'auto' }}>
                   {messages.slice(0, 50).map((msg, idx) => (
                     <div key={idx} style={{
