@@ -1,4 +1,5 @@
 import os
+import re
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from src.utils.logging_config import get_logger
@@ -174,13 +175,25 @@ class SupabaseHelper:
         if not self.client or not missing_columns:
             return False
 
+        # Validate column names to prevent SQL injection
+        valid_columns = []
+        for col in missing_columns:
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(col)):
+                valid_columns.append(col)
+            else:
+                logger.warning("Auto-migration: Skipping invalid column name '%s' to prevent SQL injection", col)
+
+        if not valid_columns:
+            logger.warning("Auto-migration: No valid columns to migrate.")
+            return False
+
         try:
             # Try using rpc to run ALTER TABLE (requires a Supabase SQL function)
             sql = "ALTER TABLE leads " + ", ".join(
-                [f"ADD COLUMN IF NOT EXISTS {col} TEXT" for col in missing_columns]
+                [f"ADD COLUMN IF NOT EXISTS {col} TEXT" for col in valid_columns]
             ) + ";"
             self.client.rpc("exec_sql", {"query": sql}).execute()
-            logger.info("Auto-migration: Added columns %s", missing_columns)
+            logger.info("Auto-migration: Added columns %s", valid_columns)
             return True
         except Exception as e:
             logger.warning("RPC migration failed (exec_sql function may not exist): %s", e)
