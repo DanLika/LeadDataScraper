@@ -29,17 +29,9 @@ class AgenticRouter:
         else:
             self.client = genai.Client(api_key=self.api_key)
 
-    async def route_instruction(self, instruction: str):
-        """
-        Parses a natural language instruction from the user using Gemini's Tool Calling.
-        """
-        if not self.client:
-            return {"error": "AI model not initialized"}
-
+    def _get_tools(self):
         from google.genai import types
-
-        # Define functions for tool calling
-        tools = [
+        return [
             types.Tool(
                 function_declarations=[
                     types.FunctionDeclaration(
@@ -140,6 +132,17 @@ class AgenticRouter:
             )
         ]
 
+    async def route_instruction(self, instruction: str):
+        """
+        Parses a natural language instruction from the user using Gemini's Tool Calling.
+        """
+        if not self.client:
+            return {"error": "AI model not initialized"}
+
+        from google.genai import types
+
+        tools = self._get_tools()
+
         try:
             response = self.client.models.generate_content(
                 model='gemini-flash-latest',
@@ -183,51 +186,42 @@ class AgenticRouter:
         task = orchestration_plan.get("task", "").upper()
         params = orchestration_plan.get("params", {})
 
-        if task == "DATABASE_QUERY":
-            query_text = params.get("query_text", "")
-            return await self._execute_database_query(query_text, params)
+        handlers = {
+            "DATABASE_QUERY": lambda p: self._execute_database_query(p.get("query_text", ""), p),
+            "STATUS_CHECK": lambda p: self._get_status_summary(),
+            "SEO_AUDIT": self._execute_seo_audit,
+            "OUTREACH_DRAFT": self._generate_outreach_draft,
+            "GET_INSIGHTS": lambda p: self._get_strategic_insights(),
+            "DATA_MERGE": lambda p: self._execute_data_merge(),
+            "DEEP_HUNT": self._execute_deep_hunt,
+            "RUN_MASSIVE_PIPELINE": self._execute_massive_pipeline,
+            "LINKEDIN_DRAFT": self._generate_linkedin_draft,
+            "DISCOVERY_SEARCH": self._execute_discovery_search,
+            "DEEP_ENRICHMENT": self._execute_deep_enrichment,
+            "CAMPAIGN_STRATEGY": self._generate_campaign_strategy,
+        }
 
-        elif task == "STATUS_CHECK":
-            return await self._get_status_summary()
-
-        elif task == "SEO_AUDIT":
-            unique_key = params.get("unique_key")
-            if unique_key:
-                from src.core.parallel_auditor import ParallelAuditor
-                auditor = ParallelAuditor()
-                lead_data = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
-                if lead_data.data:
-                    result = await auditor.audit_single_lead(lead_data.data[0])
-                    return {"message": "SEO Audit completed for single lead.", "result": result}
-                return {"error": f"Lead {unique_key} not found for SEO Audit"}
-            else:
-                from src.core.task_orchestrator import TaskOrchestrator
-                orchestrator = TaskOrchestrator()
-                job_id = await orchestrator.run_massive_pipeline(tasks=["audit"])
-                return {"message": "Massive SEO Audit pipeline started.", "job_id": job_id}
-
-        elif task == "OUTREACH_DRAFT":
-            return await self._generate_outreach_draft(params)
-
-        elif task == "GET_INSIGHTS":
-            return await self._get_strategic_insights()
-
-        elif task == "DATA_MERGE":
-            return await self._execute_data_merge()
-        elif task == "DEEP_HUNT":
-            return await self._execute_deep_hunt(params)
-        elif task == "RUN_MASSIVE_PIPELINE":
-            return await self._execute_massive_pipeline(params)
-        elif task == 'LINKEDIN_DRAFT':
-            return await self._generate_linkedin_draft(params)
-        elif task == 'DISCOVERY_SEARCH':
-            return await self._execute_discovery_search(params)
-        elif task == 'DEEP_ENRICHMENT':
-            return await self._execute_deep_enrichment(params)
-        elif task == 'CAMPAIGN_STRATEGY':
-            return await self._generate_campaign_strategy(params)
+        handler = handlers.get(task)
+        if handler:
+            return await handler(params)
         else:
             return {"error": f"Unknown task: {task}"}
+
+    async def _execute_seo_audit(self, params: dict):
+        unique_key = params.get("unique_key")
+        if unique_key:
+            from src.core.parallel_auditor import ParallelAuditor
+            auditor = ParallelAuditor()
+            lead_data = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+            if lead_data.data:
+                result = await auditor.audit_single_lead(lead_data.data[0])
+                return {"message": "SEO Audit completed for single lead.", "result": result}
+            return {"error": f"Lead {unique_key} not found for SEO Audit"}
+        else:
+            from src.core.task_orchestrator import TaskOrchestrator
+            orchestrator = TaskOrchestrator()
+            job_id = await orchestrator.run_massive_pipeline(tasks=["audit"])
+            return {"message": "Massive SEO Audit pipeline started.", "job_id": job_id}
 
     async def _execute_deep_hunt(self, params: dict):
         unique_key = params.get("unique_key")
