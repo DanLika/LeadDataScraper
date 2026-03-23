@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import os
-import asyncio
 import pandas as pd
 from datetime import datetime
 from typing import Optional
