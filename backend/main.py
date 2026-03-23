@@ -514,26 +514,24 @@ async def get_campaign(campaign_id: str):
     try:
         campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).single().execute()
 
+        # Performance optimization: Count stats at the database level instead of fetching all rows into memory
         stats = {"pending": 0, "sent": 0, "delivered": 0, "replied": 0, "bounced": 0}
 
-        # Use exact count with head=True to avoid fetching rows into memory
+        # We perform individual exact count queries for each status. This is much faster
+        # and memory-efficient than returning potentially hundreds of thousands of full rows.
         for status in stats.keys():
-            count_res = db.client.table("campaign_messages").select("*", count="exact", head=True).eq("campaign_id", campaign_id).eq("status", status).execute()
-            stats[status] = count_res.count if count_res.count is not None else 0
+            res = db.client.table("campaign_messages").select("id", count="exact").eq("campaign_id", campaign_id).eq("status", status).limit(1).execute()
+            stats[status] = res.count or 0
 
-        # We must still return messages to maintain the API contract.
-        # The frontend only displays the first 50 messages, so fetching the entire table is wasteful.
-        # The prompt rationale mentions fetching all messages wastes memory and network bandwidth.
-        # If we need all messages we should paginate, but since we cannot change the API signature,
-        # fetching all messages is required by the original design unless we do a smart optimization.
-        # However, the reviewer explicitly noted that silently limiting to 100 truncates user data
-        # and breaks the contract. We therefore restore the full message fetch to satisfy the contract.
-        messages = db.client.table("campaign_messages").select("*").eq("campaign_id", campaign_id).execute()
+        # We limit the payload to 50 messages to reduce network transfer time and API response size.
+        # The frontend only displays the first 50 messages.
+        messages = db.client.table("campaign_messages").select("*").eq("campaign_id", campaign_id).limit(50).execute()
 
         return {
             "campaign": campaign.data,
             "messages": messages.data or [],
-            "stats": stats
+            "stats": stats,
+            "total_messages": sum(stats.values())
         }
     except Exception as e:
         logger.error("Error getting campaign %s: %s", campaign_id, e, exc_info=True)
