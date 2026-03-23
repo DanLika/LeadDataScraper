@@ -4,7 +4,7 @@ import ssl
 import re
 import time
 from bs4 import BeautifulSoup
-from typing import Optional, List, Dict, Tuple
+from typing import Optional
 
 def calculate_seo_score(results: dict) -> int:
     """Calculates a numerical SEO Health Score from 0-100."""
