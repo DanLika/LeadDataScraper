@@ -32,12 +32,10 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
 
         result = await self.orchestrator._process_single_lead(lead, auditor, enricher)
         
-        self.assertFalse(result)
-        # Check if update was called with retry_count=1
-        calls = self.orchestrator.db.client.table.return_value.update.call_args_list
-        retry_update = [c for c in calls if 'retry_count' in c[0][0]]
-        self.assertTrue(len(retry_update) > 0)
-        self.assertEqual(retry_update[0][0][0]['retry_count'], 1)
+        # Check if the returned dictionary has retry_count=1, as the actual DB update
+        # happens in batch later, not inside _process_single_lead
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("retry_count"), 1)
 
     async def test_fail_fast(self):
         """Verify that orchestrator fails fast after consecutive batch failures."""
@@ -56,6 +54,11 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
         # Mock single lead process to always fail
         self.orchestrator._process_single_lead = AsyncMock(return_value=False)
 
+        # Mock job status to return a valid dict so processed_count integer comparison works
+        self.orchestrator.db.client.table.return_value.select.return_value.eq.return_value.execute = MagicMock(
+            return_value=MagicMock(data=[{"processed_count": 0}])
+        )
+
         # We need to stop the infinite while True loop in _process_in_chunks or it will run forever
         # For testing, we'll patch the while loop or the chunk fetcher to return empty after some calls
         side_effect_data = [
@@ -71,7 +74,7 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception) as cm:
             await self.orchestrator._process_in_chunks(job_id, chunk_size=1)
         
-        self.assertIn("Fail-fast triggered", str(cm.exception))
+        self.assertIn("consecutive batches failed", str(cm.exception))
 
 if __name__ == "__main__":
     unittest.main()
