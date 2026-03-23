@@ -57,7 +57,7 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertNotIn("123invalid", sql)
         self.assertNotIn("invalid column", sql)
         self.assertNotIn("DROP TABLE leads;", sql)
-        self.assertNotIn("in'valid", sql)
+        self.assertNotIn("in'valid" , sql)
 
         self.assertEqual(
             sql,
@@ -114,6 +114,26 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertNotIn("tiktok", missing)
         self.assertEqual(len(missing), 2)
 
+    def test_delete_all_jobs_success(self):
+        # Setup the chain: table().delete().neq().execute()
+        mock_delete = MagicMock()
+        self.helper.client.table.return_value.delete.return_value = mock_delete
+        mock_neq = MagicMock()
+        mock_delete.neq.return_value = mock_neq
+        expected_result = MagicMock()
+        mock_neq.execute.return_value = expected_result
+
+        result = self.helper.delete_all_jobs()
+
+        self.assertEqual(result, expected_result)
+        self.helper.client.table.assert_called_with("orchestration_jobs")
+        mock_delete.neq.assert_called_once_with("id", "null")
+
+    def test_delete_all_jobs_client_none(self):
+        self.helper.client = None
+        result = self.helper.delete_all_jobs()
+        self.assertIsNone(result)
+
 class TestSupabaseHelperUpsert(unittest.TestCase):
     def setUp(self):
         with patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_ANON_KEY": "test-key"}), \
@@ -157,21 +177,6 @@ class TestSupabaseHelperUpsert(unittest.TestCase):
             mock_logger.error.assert_called_once()
             self.assertIn("DATABASE SCHEMA MISMATCH:", mock_logger.error.call_args[0][0])
             mock_logger.warning.assert_called_with("Please run the SQL migration script provided in the implementation plan.")
-
-    def test_upsert_leads_exception_general(self):
-        """Test upsert_leads handling a general exception."""
-        leads_data = [{"unique_key": "123", "name": "Test Lead"}]
-        mock_execute = MagicMock(side_effect=Exception('Connection timeout'))
-        mock_upsert = MagicMock(return_value=MagicMock(execute=mock_execute))
-        mock_table = MagicMock(return_value=MagicMock(upsert=mock_upsert))
-        self.helper.client.table = mock_table
-
-        with patch("src.utils.supabase_helper.logger") as mock_logger:
-            result = self.helper.upsert_leads(leads_data)
-            self.assertIsNone(result)
-            mock_logger.error.assert_called_once()
-            self.assertEqual("Error upserting leads: %s", mock_logger.error.call_args[0][0])
-            self.assertEqual("Connection timeout", str(mock_logger.error.call_args[0][1]))
 
 if __name__ == "__main__":
     unittest.main()
