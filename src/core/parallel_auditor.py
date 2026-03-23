@@ -280,12 +280,38 @@ class ParallelAuditor:
             results = await self.run_batch(current_batch, task_type=task_type)
 
             # Update stats
+            leads_to_upsert = []
             for r in results:
                 self.status["processed"] += 1
                 if r.get("status") == "Completed":
                     self.status["completed"] += 1
+
+                    # Prepare bulk update payload
+                    lead_data = {k: v for k, v in r.items() if k not in ["status", "error", "result"]}
+
+                    if task_type == "audit" and "result" in r:
+                        audit_res = r["result"]
+                        lead_data["audit_status"] = "Completed"
+                        lead_data["audit_results"] = audit_res
+
+                        if "emails" in audit_res and audit_res["emails"]:
+                            lead_data["email"] = audit_res["emails"][0]
+
+                        if "score" in audit_res:
+                            try:
+                                lead_data["seo_score"] = float(audit_res["score"])
+                            except (ValueError, TypeError):
+                                lead_data["seo_score"] = 0
+
+                        if "high_risk_flag" in audit_res:
+                            lead_data["high_risk_flag"] = bool(audit_res["high_risk_flag"])
+
+                    leads_to_upsert.append(lead_data)
                 else:
                     self.status["failed"] += 1
+
+            if leads_to_upsert:
+                self.db.upsert_leads(leads_to_upsert)
 
             logger.info("Finished chunk. Resuming in 2 seconds...")
             await asyncio.sleep(2)
