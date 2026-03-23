@@ -46,10 +46,15 @@ auditor = ParallelAuditor()
 orchestrator = TaskOrchestrator()
 
 # Configure CORS
+# SECURITY WARNING: Using ["*"] for allow_origins is overly permissive and allows any site
+# to make cross-origin requests to this API. Specific domains should be listed in ALLOWED_ORIGINS.
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False, # Wildcard origins cannot use credentials=True
+    allow_origins=allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
