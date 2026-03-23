@@ -1,3 +1,3 @@
-## 2025-03-18 - Optimized merge_and_deduplicate with native pd.concat
-**Learning:** Manual DataFrame column union and reindexing before concatenation in Pandas is significantly slower and more memory-intensive than just calling `pd.concat(dataframes, ignore_index=True)` natively.
-**Action:** Always prefer native Pandas `concat` functions when dealing with multiple dataframes with varying columns; the internal C code handles column alignment perfectly and efficiently.
+## 2025-05-15 - [Optimization of Supabase Schema Checks]
+**Learning:** Checking column existence individually in a database table creates an N+1 query problem, which is especially costly in cloud databases like Supabase/PostgREST.
+**Action:** Use bulk selection of all required columns as a fast-path, and query `information_schema.columns` via RPC as a robust fallback to identify missing columns in a single round-trip.

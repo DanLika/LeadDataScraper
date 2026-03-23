@@ -125,11 +125,35 @@ class SupabaseHelper:
         ]
 
         try:
-            # Fetch one lead (or empty result) to get columns
-            response = self.client.table("leads").select("*").limit(1).execute()
-            if not response.data:
-                pass
+            # Optimization 1: Attempt to select all columns in a single row query
+            # This handles the common case where all columns exist with only 1 query.
+            try:
+                self.client.table("leads").select(",".join(required_cols)).limit(1).execute()
+                return []
+            except Exception as e:
+                # If selection fails, it's likely because one or more columns are missing
+                if "column" not in str(e) or "does not exist" not in str(e):
+                    # For other types of errors, log and return empty
+                    logger.error("Error during bulk schema check: %s", e)
+                    return []
 
+            # Optimization 2: Use information_schema if RPC is available (efficient fallback)
+            try:
+                # Using the existing exec_sql RPC from auto_migrate
+                sql = """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'leads'
+                """
+                response = self.client.rpc("exec_sql", {"query": sql}).execute()
+                if response.data:
+                    existing_cols = {row['column_name'] for row in response.data}
+                    return [col for col in required_cols if col not in existing_cols]
+            except Exception as rpc_e:
+                logger.debug("RPC schema check failed: %s", rpc_e)
+
+            # Optimization 3: Individual checks (ultimate fallback for restricted environments)
+            # This only runs if bulk select fails AND RPC is unavailable or fails.
             missing = []
             for col in required_cols:
                 try:
