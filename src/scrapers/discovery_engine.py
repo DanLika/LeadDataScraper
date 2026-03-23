@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import re
 from typing import List, Optional
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.agentic_router import AgenticRouter
 from src.utils.logging_config import get_logger
@@ -61,11 +61,12 @@ class DiscoveryEngine:
                         lead_data = await self._extract_lead_data(page, container)
                         if lead_data:
                             leads.append(lead_data)
-                    except Exception as inner_e:
+                    except (PlaywrightError, PlaywrightTimeoutError) as inner_e:
+
                         logger.warning("Error parsing single discovery result: %s", inner_e)
                         continue
 
-            except Exception as e:
+            except (PlaywrightError, PlaywrightTimeoutError) as e:
                 logger.error("Error during lead discovery process: %s", e, exc_info=True)
             finally:
                 await browser.close()
@@ -138,7 +139,7 @@ class DiscoveryEngine:
                     website_href = await panel_website_elem.get_attribute("href")
                     if website_href and "google.com" not in website_href:
                         website = website_href
-            except Exception:
+            except (PlaywrightError, PlaywrightTimeoutError):
                 pass
 
         # e. Extract Phone
@@ -154,7 +155,7 @@ class DiscoveryEngine:
                 panel_phone_elem = await page.query_selector("button[data-tooltip*='phone'], button[aria-label*='Phone']")
                 if panel_phone_elem:
                     phone = await panel_phone_elem.inner_text()
-            except Exception:
+            except (PlaywrightError, PlaywrightTimeoutError):
                 pass
 
         return {
