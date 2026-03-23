@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import sys
+import os
 
 # Mock external dependencies
 sys.modules['playwright'] = MagicMock()
@@ -14,6 +15,8 @@ sys.modules['numpy'] = MagicMock()
 sys.modules['aiohttp'] = MagicMock()
 sys.modules['bs4'] = MagicMock()
 sys.modules['fake_useragent'] = MagicMock()
+
+sys.path.append(os.path.abspath(os.curdir))
 
 from src.utils.supabase_helper import SupabaseHelper
 
@@ -36,7 +39,6 @@ class TestSupabaseHelper(unittest.TestCase):
             "in'valid"
         ]
 
-        # Setup mock for rpc
         mock_rpc = MagicMock()
         mock_rpc.execute.return_value = None
         self.helper.client.rpc.return_value = mock_rpc
@@ -44,8 +46,6 @@ class TestSupabaseHelper(unittest.TestCase):
         result = self.helper.auto_migrate(missing_columns)
 
         self.assertTrue(result)
-
-        # Verify the generated SQL contains only valid columns
         self.helper.client.rpc.assert_called_once()
         args, kwargs = self.helper.client.rpc.call_args
         self.assertEqual(args[0], "exec_sql")
@@ -53,7 +53,6 @@ class TestSupabaseHelper(unittest.TestCase):
         sql = args[1]["query"]
         self.assertIn("valid_column", sql)
         self.assertIn("invalid_column_123", sql)
-
         self.assertNotIn("123invalid", sql)
         self.assertNotIn("invalid column", sql)
         self.assertNotIn("DROP TABLE leads;", sql)
@@ -65,7 +64,6 @@ class TestSupabaseHelper(unittest.TestCase):
         )
 
     def test_auto_migrate_no_valid_columns(self):
-        # Test when all columns are invalid
         missing_columns = ["123invalid", "invalid column", "invalid;DROP TABLE leads;"]
 
         mock_rpc = MagicMock()
@@ -73,10 +71,68 @@ class TestSupabaseHelper(unittest.TestCase):
 
         result = self.helper.auto_migrate(missing_columns)
 
-        # Method should return False because no valid columns exist
         self.assertFalse(result)
-        # rpc should not be called
         self.helper.client.rpc.assert_not_called()
+
+
+class TestSupabaseHelperUpsert(unittest.TestCase):
+    def setUp(self):
+        with patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_ANON_KEY": "test-key"}), \
+             patch("src.utils.supabase_helper.create_client") as mock_create:
+            mock_create.return_value = MagicMock()
+            self.helper = SupabaseHelper()
+
+    def test_upsert_leads_no_client(self):
+        """Test upsert_leads when self.client is None."""
+        self.helper.client = None
+        result = self.helper.upsert_leads([{"unique_key": "123"}])
+        self.assertIsNone(result)
+
+    def test_upsert_leads_success(self):
+        """Test successful upsert of leads."""
+        leads_data = [{"unique_key": "123", "name": "Test Lead"}]
+        mock_execute = MagicMock(return_value="success_result")
+        mock_upsert = MagicMock(return_value=MagicMock(execute=mock_execute))
+        mock_table = MagicMock(return_value=MagicMock(upsert=mock_upsert))
+        self.helper.client.table = mock_table
+
+        with patch("src.utils.supabase_helper.logger") as mock_logger:
+            result = self.helper.upsert_leads(leads_data)
+            self.assertEqual(result, "success_result")
+            mock_table.assert_called_once_with("leads")
+            mock_upsert.assert_called_once_with(leads_data)
+            mock_execute.assert_called_once()
+            mock_logger.info.assert_called_with("Successfully upserted %d leads to Supabase.", 1)
+
+    def test_upsert_leads_exception_schema_mismatch(self):
+        """Test upsert_leads handling schema mismatch (column does not exist)."""
+        leads_data = [{"unique_key": "123", "name": "Test Lead"}]
+        mock_execute = MagicMock(side_effect=Exception('column "missing_col" does not exist'))
+        mock_upsert = MagicMock(return_value=MagicMock(execute=mock_execute))
+        mock_table = MagicMock(return_value=MagicMock(upsert=mock_upsert))
+        self.helper.client.table = mock_table
+
+        with patch("src.utils.supabase_helper.logger") as mock_logger:
+            result = self.helper.upsert_leads(leads_data)
+            self.assertIsNone(result)
+            mock_logger.error.assert_called_once()
+            self.assertIn("DATABASE SCHEMA MISMATCH:", mock_logger.error.call_args[0][0])
+            mock_logger.warning.assert_called_with("Please run the SQL migration script provided in the implementation plan.")
+
+    def test_upsert_leads_exception_general(self):
+        """Test upsert_leads handling a general exception."""
+        leads_data = [{"unique_key": "123", "name": "Test Lead"}]
+        mock_execute = MagicMock(side_effect=Exception('Connection timeout'))
+        mock_upsert = MagicMock(return_value=MagicMock(execute=mock_execute))
+        mock_table = MagicMock(return_value=MagicMock(upsert=mock_upsert))
+        self.helper.client.table = mock_table
+
+        with patch("src.utils.supabase_helper.logger") as mock_logger:
+            result = self.helper.upsert_leads(leads_data)
+            self.assertIsNone(result)
+            mock_logger.error.assert_called_once()
+            self.assertEqual("Error upserting leads: %s", mock_logger.error.call_args[0][0])
+            self.assertEqual("Connection timeout", str(mock_logger.error.call_args[0][1]))
 
 if __name__ == '__main__':
     unittest.main()
