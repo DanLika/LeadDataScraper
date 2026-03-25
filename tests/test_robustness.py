@@ -37,10 +37,14 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(result.get("retry_count"), 1)
 
+
     async def test_fail_fast(self):
         """Verify that orchestrator fails fast after consecutive batch failures."""
         job_id = "test_job"
         
+        # Mock get_job_status to return a valid dict
+        self.orchestrator.get_job_status = AsyncMock(return_value={"processed_count": 0, "status": "running"})
+
         # Mock chunk fetch to return 1 lead
         self.orchestrator.db.client.table.return_value.select.return_value.or_.return_value.lt.return_value.order.return_value.limit.return_value.execute = MagicMock(
             return_value=MagicMock(data=[{"unique_key": "fail_lead", "retry_count": 0}])
@@ -73,8 +77,8 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(Exception) as cm:
             await self.orchestrator._process_in_chunks(job_id, chunk_size=1)
-
         self.assertIn("consecutive batches failed", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
