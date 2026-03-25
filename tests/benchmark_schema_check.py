@@ -118,5 +118,62 @@ class TestCheckSchemaBenchmark(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertEqual(missing[0], "enrichment_status")
 
+    @patch('src.utils.supabase_helper.logger')
+    def test_check_schema_outer_exception(self, mock_logger):
+        # We want to test the outer except Exception as e block at the end of check_schema.
+        # It's reachable if an unhandled exception bubbles up from within the outer try block.
+        # We can achieve this by making Optimization 1 raise a normal "does not exist" error,
+        # then in Optimization 2, we make the rpc call raise an error, which triggers
+        # logger.debug("RPC schema check failed..."). If we make logger.debug raise an exception,
+        # it will escape Optimization 2's inner try-except block and get caught by the outer one.
+
+        self.execute_mock.execute.reset_mock()
+
+        # Opt 1: raise standard "column does not exist" error to move to Opt 2
+        def execute_side_effect():
+            # First call is the select bulk
+            if self.execute_mock.execute.call_count == 1:
+                raise Exception("column \"some_col\" does not exist")
+            return MockResponse()
+        self.execute_mock.execute.side_effect = execute_side_effect
+
+        # Opt 2: RPC raises an error
+        # Since self.helper.client.rpc("exec_sql", ...).execute() is what runs,
+        # and self.helper.client.rpc is mocked to return self.execute_mock in setUp(),
+        # we need to make sure the SECOND call to execute_mock.execute raises an error
+        # Actually in setUp:
+        # self.rpc_mock.rpc.return_value = self.execute_mock
+        # self.helper.client.rpc = self.rpc_mock.rpc
+        # So the RPC call uses self.execute_mock.execute !
+
+        def execute_side_effect():
+            if self.execute_mock.execute.call_count == 1:
+                raise Exception("column \"some_col\" does not exist")
+            if self.execute_mock.execute.call_count == 2:
+                raise Exception("RPC failed")
+            return MockResponse()
+        self.execute_mock.execute.side_effect = execute_side_effect
+
+        # Opt 2 catch block: logger.debug raises an exception to bubble up to outer block
+        mock_logger.debug.side_effect = Exception("Debug logging failed")
+
+        print("\nRunning optimized check_schema (Outer exception case)...")
+        missing = self.helper.check_schema()
+
+        # It should return an empty list when the outer exception catches it
+        self.assertEqual(missing, [])
+
+        # Verify the outer exception handler logged the correct error
+        # NOTE: mock_logger.error might be called by other things if we aren't careful,
+        # but in this path it shouldn't be. However, wait! Opt 1 catch block logs
+        # an error IF the exception does NOT contain "column does not exist".
+        # We ensured Opt 1 raises an exception WITH "column does not exist", so it shouldn't log there.
+        # But wait, self.rpc_mock is mocked in setUp().
+        # Let's verify the exact call to error.
+        mock_logger.error.assert_called_once()
+        called_args = mock_logger.error.call_args[0]
+        self.assertEqual(called_args[0], "Error checking schema: %s")
+        self.assertEqual(str(called_args[1]), "Debug logging failed")
+
 if __name__ == "__main__":
     unittest.main()
