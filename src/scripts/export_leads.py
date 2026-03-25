@@ -3,6 +3,42 @@ import pandas as pd
 from datetime import datetime
 from src.utils.supabase_helper import SupabaseHelper
 
+def check_vulnerability(row):
+    audit = row.get('audit_results') or {}
+    # missing_title, missing_description, no_h1, ssl_valid
+    no_ssl = audit.get('ssl_valid') is False
+    no_h1 = audit.get('no_h1') is True
+    return no_ssl or no_h1
+
+def is_high_priority(row):
+    audit = row.get('audit_results') or {}
+    score = audit.get('score', 100)
+    try:
+        score_val = float(score)
+    except Exception:
+        score_val = 100
+    return score_val < 50
+
+def is_outreach_ready(row):
+    has_contact = bool(row.get('email')) or bool(row.get('phone'))
+    score = row.get('outreach_score') or 0
+    try:
+        score = float(score)
+    except (TypeError, ValueError):
+        score = 0
+    return has_contact and score > 30
+
+def extract_names(row):
+    leader = row.get('leadership_team', 'Unknown')
+    if leader and leader != 'Unknown':
+        # Take the first name in the string
+        parts = leader.replace(',', ' ').split()
+        if len(parts) >= 2:
+            return parts[0], " ".join(parts[1:])
+        elif len(parts) == 1:
+            return parts[0], ""
+    return "Business", "Owner"
+
 def export_leads():
     """
     Fetches all leads from Supabase and exports them into three specific CSV files.
@@ -37,57 +73,21 @@ def export_leads():
 
     # 2. Leads Vulnerable (No SSL or No H1)
     # Note: audit_results is a JSON column in Supabase
-    def check_vulnerability(row):
-        audit = row.get('audit_results') or {}
-        # missing_title, missing_description, no_h1, ssl_valid
-        no_ssl = audit.get('ssl_valid') is False
-        no_h1 = audit.get('no_h1') is True
-        return no_ssl or no_h1
-
     vulnerable_df = df[df.apply(check_vulnerability, axis=1)]
     vulnerable_path = f"{export_dir}/leads_vulnerable_no_ssl_no_h1_{timestamp}.csv"
     vulnerable_df.to_csv(vulnerable_path, index=False)
     print(f"✅ Exported vulnerable leads ({len(vulnerable_df)}): {vulnerable_path}")
 
     # 3. High Priority Outreach List (SEO score < 50)
-    def is_high_priority(row):
-        audit = row.get('audit_results') or {}
-        score = audit.get('score', 100)
-        try:
-            score_val = float(score)
-        except Exception:
-            score_val = 100
-        return score_val < 50
-
     high_priority_df = df[df.apply(is_high_priority, axis=1)]
     hp_path = f"{export_dir}/high_priority_outreach_{timestamp}.csv"
     high_priority_df.to_csv(hp_path, index=False)
     print(f"✅ Exported high priority leads ({len(high_priority_df)}): {hp_path}")
 
     # 4. Outreach Ready List (Has Email OR Phone AND Score > 30)
-    def is_outreach_ready(row):
-        has_contact = bool(row.get('email')) or bool(row.get('phone'))
-        score = row.get('outreach_score') or 0
-        try:
-            score = float(score)
-        except (TypeError, ValueError):
-            score = 0
-        return has_contact and score > 30
-
     outreach_df = df[df.apply(is_outreach_ready, axis=1)].copy()
     
     # Simple First/Last Name extraction from leadership_team for outreach tools
-    def extract_names(row):
-        leader = row.get('leadership_team', 'Unknown')
-        if leader and leader != 'Unknown':
-            # Take the first name in the string
-            parts = leader.replace(',', ' ').split()
-            if len(parts) >= 2:
-                return parts[0], " ".join(parts[1:])
-            elif len(parts) == 1:
-                return parts[0], ""
-        return "Business", "Owner"
-
     if not outreach_df.empty:
         outreach_df[['_first_name', '_last_name']] = outreach_df.apply(
             lambda x: pd.Series(extract_names(x)), axis=1
