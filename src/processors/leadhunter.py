@@ -74,21 +74,39 @@ class LeadHunter:
         fb, insta, li, tt, pin = self._extract_socials(results)
 
         # Individual narrow fallbacks if needed
+        tasks = []
+        platforms_needed = []
+
         if not fb:
-            results = await self._ddg_search_async(f"{pojam} facebook official page")
-            fb, _, _, _, _ = self._extract_socials(results)
+            tasks.append(self._ddg_search_async(f"{pojam} facebook official page"))
+            platforms_needed.append('fb')
         if not insta:
-            results = await self._ddg_search_async(f"{pojam} instagram official")
-            _, insta, _, _, _ = self._extract_socials(results)
+            tasks.append(self._ddg_search_async(f"{pojam} instagram official"))
+            platforms_needed.append('insta')
         if not li:
-            results = await self._ddg_search_async(f"{pojam} linkedin company official")
-            _, _, li, _, _ = self._extract_socials(results)
+            tasks.append(self._ddg_search_async(f"{pojam} linkedin company official"))
+            platforms_needed.append('li')
         if not tt:
-            results = await self._ddg_search_async(f"{pojam} tiktok official")
-            _, _, _, tt, _ = self._extract_socials(results)
+            tasks.append(self._ddg_search_async(f"{pojam} tiktok official"))
+            platforms_needed.append('tt')
         if not pin:
-            results = await self._ddg_search_async(f"{pojam} pinterest official")
-            _, _, _, _, pin = self._extract_socials(results)
+            tasks.append(self._ddg_search_async(f"{pojam} pinterest official"))
+            platforms_needed.append('pin')
+
+        if tasks:
+            results = await asyncio.gather(*tasks)
+            for platform, html in zip(platforms_needed, results):
+                extracted = self._extract_socials(html)
+                if platform == 'fb' and extracted[0]:
+                    fb = extracted[0]
+                elif platform == 'insta' and extracted[1]:
+                    insta = extracted[1]
+                elif platform == 'li' and extracted[2]:
+                    li = extracted[2]
+                elif platform == 'tt' and extracted[3]:
+                    tt = extracted[3]
+                elif platform == 'pin' and extracted[4]:
+                    pin = extracted[4]
 
         return fb, insta, li, tt, pin
 
