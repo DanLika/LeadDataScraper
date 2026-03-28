@@ -6,6 +6,27 @@ from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
+def normalize_df_with_ai(df: pd.DataFrame, api_key: str = None) -> pd.DataFrame:
+    """
+    Convenience wrapper: use GeminiMapper to map messy CSV columns to standard names.
+    If api_key is provided, it is set in the environment for GeminiMapper to pick up.
+    """
+    if api_key:
+        os.environ["GEMINI_API_KEY"] = api_key
+
+    mapper = GeminiMapper()
+    mapping = mapper.get_column_mapping(df.columns.tolist())
+
+    if mapping:
+        logger.info("AI column mapping applied: %s", mapping)
+        df = df.rename(columns=mapping)
+    else:
+        logger.warning("No AI column mapping returned; columns unchanged.")
+
+    return df
+
+
 class GeminiMapper:
     def __init__(self):
         self.api_key = os.environ.get("GEMINI_API_KEY")

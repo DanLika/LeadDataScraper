@@ -4,7 +4,7 @@ from src.utils.csv_helper import save_csv
 from src.processors.google_maps import process_gmaps_df
 from src.processors.ai_mapper import normalize_df_with_ai
 from src.core.data_manager import merge_and_deduplicate
-from src.scrapers.seo_audit import audit_website
+from src.scrapers.seo_audit import perform_seo_audit_async as audit_website
 
 def run_pipeline(messy_file=None, gmaps_file=None, api_key=None):
     """
