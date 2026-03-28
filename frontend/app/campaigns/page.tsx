@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Mail, Linkedin, Play, Pause, Download, Plus, ArrowLeft,
-  Loader2, Send, Users, CheckCircle, Menu,
+  Loader2, Send, Users, CheckCircle,
   Eye, X, Shield
 } from 'lucide-react';
 import Link from 'next/link';
@@ -131,11 +131,11 @@ export default function CampaignsPage() {
 
   const statusColor = (status: string) => {
     switch (status) {
-      case 'active': return '#10b981';
-      case 'paused': return '#f59e0b';
-      case 'completed': return '#6366f1';
-      case 'draft': return '#94a3b8';
-      default: return '#94a3b8';
+      case 'active': return 'var(--success)';
+      case 'paused': return 'var(--warning)';
+      case 'completed': return 'var(--primary)';
+      case 'draft': return 'var(--text-muted)';
+      default: return 'var(--text-muted)';
     }
   };
 
@@ -153,13 +153,13 @@ export default function CampaignsPage() {
         <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-              <Link href="/" style={{ color: '#94a3b8', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Link href="/" style={{ color: 'var(--text-muted)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <ArrowLeft size={20} />
                 <Shield size={20} />
               </Link>
               <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800 }}>Outreach Campaigns</h1>
             </div>
-            <p style={{ color: '#94a3b8', fontSize: '1rem', margin: 0 }}>Manage email and LinkedIn outreach campaigns for your leads.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '1rem', margin: 0 }}>Manage email and LinkedIn outreach campaigns for your leads.</p>
           </div>
           <button className="btn-primary" onClick={() => setShowCreate(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Plus size={18} /> New Campaign
@@ -172,23 +172,23 @@ export default function CampaignsPage() {
             <h3 style={{ marginBottom: '1.5rem' }}>Create New Campaign</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label htmlFor="campaign-name" style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Campaign Name</label>
+                <label htmlFor="campaign-name" style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Campaign Name</label>
                 <input
                   id="campaign-name"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                   placeholder="e.g. Q1 Cold Outreach - Dental Clinics"
-                  style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', fontSize: '0.95rem' }}
+                  style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
                 />
               </div>
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '200px' }}>
-                  <label htmlFor="campaign-channel" style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Channel</label>
+                  <label htmlFor="campaign-channel" style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Channel</label>
                   <select
                     id="campaign-channel"
                     value={newChannel}
                     onChange={e => setNewChannel(e.target.value)}
-                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', fontSize: '0.95rem' }}
+                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
                   >
                     <option value="email">Email</option>
                     <option value="linkedin">LinkedIn</option>
@@ -196,13 +196,13 @@ export default function CampaignsPage() {
                   </select>
                 </div>
                 <div style={{ flex: 1, minWidth: '200px' }}>
-                  <label htmlFor="campaign-segment" style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Segment Filter (optional)</label>
+                  <label htmlFor="campaign-segment" style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Segment Filter (optional)</label>
                   <input
                     id="campaign-segment"
                     value={newSegment}
                     onChange={e => setNewSegment(e.target.value)}
                     placeholder="e.g. Performance Optimization"
-                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', fontSize: '0.95rem' }}
+                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
                   />
                 </div>
               </div>
@@ -223,7 +223,7 @@ export default function CampaignsPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <button onClick={() => { setSelectedCampaign(null); setMessages([]); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                  <button aria-label="Back to campaign list" onClick={() => { setSelectedCampaign(null); setMessages([]); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
                     <ArrowLeft size={18} />
                   </button>
                   <h2 style={{ margin: 0 }}>{selectedCampaign.name}</h2>
@@ -231,7 +231,7 @@ export default function CampaignsPage() {
                     {selectedCampaign.status}
                   </span>
                 </div>
-                <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   {channelIcon(selectedCampaign.channel)} {selectedCampaign.channel} campaign
                   {selectedCampaign.segment_filter && ` | Segment: ${selectedCampaign.segment_filter}`}
                 </p>
@@ -259,15 +259,15 @@ export default function CampaignsPage() {
             {/* Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
               {[
-                { label: 'Total Leads', value: selectedCampaign.total_leads, icon: <Users size={20} />, color: '#6366f1' },
-                { label: 'Pending', value: messageStats.pending || 0, icon: <Send size={20} />, color: '#94a3b8' },
-                { label: 'Sent', value: messageStats.sent || 0, icon: <CheckCircle size={20} />, color: '#10b981' },
-                { label: 'Replied', value: messageStats.replied || 0, icon: <Mail size={20} />, color: '#f59e0b' },
+                { label: 'Total Leads', value: selectedCampaign.total_leads, icon: <Users size={20} />, color: 'var(--primary)' },
+                { label: 'Pending', value: messageStats.pending || 0, icon: <Send size={20} />, color: 'var(--text-muted)' },
+                { label: 'Sent', value: messageStats.sent || 0, icon: <CheckCircle size={20} />, color: 'var(--success)' },
+                { label: 'Replied', value: messageStats.replied || 0, icon: <Mail size={20} />, color: 'var(--warning)' },
               ].map((stat, i) => (
                 <div key={i} className="card" style={{ textAlign: 'center', padding: '1.25rem' }}>
                   <div style={{ color: stat.color, marginBottom: '0.5rem' }}>{stat.icon}</div>
                   <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{stat.value}</div>
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{stat.label}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{stat.label}</div>
                 </div>
               ))}
             </div>
@@ -295,19 +295,20 @@ export default function CampaignsPage() {
                             borderRadius: '10px',
                             fontSize: '0.7rem',
                             background: msg.status === 'sent' ? 'rgba(16,185,129,0.1)' : 'rgba(148,163,184,0.1)',
-                            color: msg.status === 'sent' ? '#10b981' : '#94a3b8'
+                            color: msg.status === 'sent' ? 'var(--success)' : 'var(--text-muted)'
                           }}>
                             {msg.status}
                           </span>
                         </div>
-                        {msg.subject && <div style={{ fontSize: '0.8rem', color: '#e2e8f0' }}>{msg.subject}</div>}
-                        <div style={{ fontSize: '0.75rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {msg.subject && <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>{msg.subject}</div>}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {msg.body}
                         </div>
                       </div>
                       <button
+                        aria-label="Preview message"
                         onClick={() => setPreviewMessage(msg)}
-                        style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: '#94a3b8', cursor: 'pointer' }}
+                        style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <Eye size={16} />
                       </button>
@@ -325,6 +326,7 @@ export default function CampaignsPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="preview-modal-title"
+            tabIndex={-1}
             style={{
               position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500
@@ -335,29 +337,29 @@ export default function CampaignsPage() {
             <div className="card" style={{ maxWidth: '600px', width: '90%', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h3 id="preview-modal-title" style={{ margin: 0 }}>Message Preview</h3>
-                <button onClick={() => setPreviewMessage(null)} aria-label="Close preview" style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <button onClick={() => setPreviewMessage(null)} aria-label="Close preview" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <X size={20} />
                 </button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Channel</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Channel</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     {channelIcon(previewMessage.channel)} {previewMessage.channel}
                   </div>
                 </div>
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Lead</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Lead</span>
                   <div>{previewMessage.lead_unique_key}</div>
                 </div>
                 {previewMessage.subject && (
                   <div>
-                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Subject</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Subject</span>
                     <div style={{ fontWeight: 600 }}>{previewMessage.subject}</div>
                   </div>
                 )}
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Body</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Body</span>
                   <div style={{
                     background: 'rgba(255,255,255,0.03)',
                     padding: '1rem',
@@ -379,13 +381,13 @@ export default function CampaignsPage() {
             {loading ? (
               <div style={{ textAlign: 'center', padding: '4rem' }}>
                 <Loader2 size={32} className="animate-spin" style={{ color: 'var(--primary)' }} />
-                <p style={{ color: '#94a3b8', marginTop: '1rem' }}>Loading campaigns...</p>
+                <p style={{ color: 'var(--text-muted)', marginTop: '1rem' }}>Loading campaigns...</p>
               </div>
             ) : campaigns.length === 0 ? (
               <div className="card" style={{ textAlign: 'center', padding: '4rem' }}>
-                <Mail size={48} style={{ color: '#64748b', marginBottom: '1rem' }} />
-                <h3 style={{ color: '#e2e8f0', marginBottom: '0.5rem' }}>No Campaigns Yet</h3>
-                <p style={{ color: '#94a3b8', marginBottom: '1.5rem' }}>Create your first outreach campaign to start reaching leads.</p>
+                <Mail size={48} style={{ color: 'var(--text-dim)', marginBottom: '1rem' }} />
+                <h3 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Campaigns Yet</h3>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Create your first outreach campaign to start reaching leads.</p>
                 <button className="btn-primary" onClick={() => setShowCreate(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
                   <Plus size={18} /> Create Campaign
                 </button>
@@ -397,7 +399,10 @@ export default function CampaignsPage() {
                     key={camp.id}
                     className="card"
                     style={{ cursor: 'pointer' }}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => { setSelectedCampaign(camp); fetchCampaignDetails(camp.id); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedCampaign(camp); fetchCampaignDetails(camp.id); } }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
                       <div>
@@ -412,13 +417,13 @@ export default function CampaignsPage() {
                           </span>
                         </div>
                         {camp.segment_filter && (
-                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Segment: {camp.segment_filter}</span>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Segment: {camp.segment_filter}</span>
                         )}
                       </div>
-                      <div style={{ display: 'flex', gap: '2rem', fontSize: '0.85rem', color: '#94a3b8' }}>
-                        <div><strong style={{ color: '#e2e8f0' }}>{camp.total_leads}</strong> leads</div>
-                        <div><strong style={{ color: '#10b981' }}>{camp.sent_count}</strong> sent</div>
-                        <div><strong style={{ color: '#f59e0b' }}>{camp.reply_count}</strong> replies</div>
+                      <div style={{ display: 'flex', gap: '2rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        <div><strong style={{ color: 'var(--text-primary)' }}>{camp.total_leads}</strong> leads</div>
+                        <div><strong style={{ color: 'var(--success)' }}>{camp.sent_count}</strong> sent</div>
+                        <div><strong style={{ color: 'var(--warning)' }}>{camp.reply_count}</strong> replies</div>
                       </div>
                     </div>
                   </div>

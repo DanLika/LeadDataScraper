@@ -58,10 +58,10 @@ export default function ExportButtons() {
             <CheckCircle size={12} className="text-secondary" /> full_leads_all_data.csv
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <AlertTriangle size={12} style={{ color: '#fbbf24' }} /> leads_vulnerable.csv
+            <AlertTriangle size={12} style={{ color: 'var(--warning-light)' }} /> leads_vulnerable.csv
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Star size={12} style={{ color: '#f59e0b' }} /> high_priority_outreach.csv
+            <Star size={12} style={{ color: 'var(--warning)' }} /> high_priority_outreach.csv
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Users size={12} className="text-accent" /> outreach_ready_leads.csv

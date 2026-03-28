@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   BarChart3, Search, CheckCircle, AlertTriangle, Settings,
   Zap, RefreshCw, Loader2, Shield, ChevronLeft, ChevronRight,
-  TrendingUp, BarChart, X
+  TrendingUp, X
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -60,10 +60,14 @@ export default function Sidebar({
 
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth <= 1024);
+    let timeout: NodeJS.Timeout;
+    const check = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => setIsMobile(window.innerWidth <= 1024), 150);
+    };
     check();
     window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
+    return () => { window.removeEventListener('resize', check); clearTimeout(timeout); };
   }, []);
 
   const toggleSidebar = () => {
@@ -90,7 +94,7 @@ export default function Sidebar({
         />
       )}
 
-      <aside className={`sidebar ${isCollapsed && !isMobile ? 'collapsed' : 'expanded'} ${isManuallyToggled && !isCollapsed ? 'user-expanded' : ''} ${isOpenMobile ? 'mobile-open' : ''}`}>
+      <aside aria-label="Main navigation" className={`sidebar ${isCollapsed && !isMobile ? 'collapsed' : 'expanded'} ${isManuallyToggled && !isCollapsed ? 'user-expanded' : ''} ${isOpenMobile ? 'mobile-open' : ''}`}>
         {!isMobile && (
           <button
             className="sidebar-toggle"
@@ -114,14 +118,14 @@ export default function Sidebar({
                 className="mobile-close-btn"
                 onClick={() => setIsOpenMobile?.(false)}
                 aria-label="Close menu"
-                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: '#94a3b8', cursor: 'pointer', marginLeft: 'auto', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: 'var(--text-muted)', cursor: 'pointer', marginLeft: 'auto', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <X size={20} />
               </button>
             )}
           </div>
 
-          <nav className="sidebar-nav">
+          <nav className="sidebar-nav" aria-label="Primary navigation">
             <Link
               href="/"
               className={`nav-item ${!isInsightsPage && view === 'all' && !showDiscoveryModal && !showSettings ? 'active' : ''}`}
@@ -160,7 +164,7 @@ export default function Sidebar({
             </button>
             <button
               className={`nav-item ${!isInsightsPage && view === 'high-risk' && !showDiscoveryModal && !showSettings ? 'active' : ''}`}
-              style={{ color: view === 'high-risk' ? '#ef4444' : 'inherit' }}
+              style={{ color: view === 'high-risk' ? 'var(--error)' : 'inherit' }}
               onClick={() => { setView('high-risk'); setShowDiscoveryModal(false); setShowSettings(false); setIsOpenMobile?.(false); }}
               title="High Risk"
             >
@@ -191,7 +195,7 @@ export default function Sidebar({
                       .sort((a, b) => (b.outreach_score || 0) - (a.outreach_score || 0))
                       .slice(0, 3)
                       .map((lead, idx) => (
-                        <div key={idx} className="prospect-item" onClick={() => { setSearchTerm(lead.company_name || lead.name || ''); setIsOpenMobile?.(false); }}>
+                        <div key={idx} className="prospect-item" role="button" tabIndex={0} onClick={() => { setSearchTerm(lead.company_name || lead.name || ''); setIsOpenMobile?.(false); }} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSearchTerm(lead.company_name || lead.name || ''); setIsOpenMobile?.(false); } }}>
                             <span className="prospect-name truncate">{lead.company_name || lead.name}</span>
                             <span className="prospect-score">{lead.outreach_score}</span>
                         </div>

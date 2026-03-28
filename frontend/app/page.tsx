@@ -2,12 +2,13 @@
 
 import { useCallback, useState, useEffect, Fragment, useMemo } from 'react';
 import { createClient } from '@/utils/supabase/client';
-import { 
-  Search, Upload, Globe, Mail, Phone, Shield, BarChart3, 
+import {
+  Search, Upload, Globe, Mail, Phone, Shield, BarChart3,
   Settings, AlertCircle, AlertTriangle,
-  Download, FileDown, Facebook, Instagram, Linkedin, Crosshair, 
-  User, Briefcase, Users, Loader2, Play, RefreshCw, X, Zap, CheckCircle,
-  MessageSquare, Copy, Check, Music, Pin, Menu // Added Menu for mobile
+  Download, FileDown, Crosshair,
+  Users, Loader2, Play, RefreshCw, X, Zap, CheckCircle,
+  Copy, Check, Menu,
+  Facebook, Instagram, Linkedin, Music, Pin
 } from 'lucide-react';
 import AIChat from './components/AIChat';
 import Sidebar from './components/Sidebar';
@@ -83,6 +84,13 @@ interface CampaignItem {
 
 const ALLOWED_UPLOAD_TYPES = ['text/csv', 'application/vnd.ms-excel'];
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10MB
+const DISCOVERY_STEPS = [
+  "Initializing Google Maps crawler...",
+  "Navigating to search results...",
+  "Scanning business cards...",
+  "Extracting websites and phone numbers...",
+  "Syncing new leads to inventory..."
+];
 
 // Strip markdown markers for clean display
 function cleanMarkdown(text: string): string {
@@ -120,8 +128,6 @@ function CollapsibleText({ text, maxLength = 250, style }: { text: string; maxLe
 export default function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState(''); // Maybe keep for simple search? No, user wants chat.
-  const [aiResponse, setAiResponse] = useState('');
   const [outreachDraft, setOutreachDraft] = useState<{ text: string, leadName: string } | null>(null);
   const [linkedinDraft, setLinkedinDraft] = useState<string>('');
   const [isDrafting, setIsDrafting] = useState(false);
@@ -135,7 +141,6 @@ export default function Dashboard() {
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [orchestratorJob, setOrchestratorJob] = useState<OrchestratorJob | null>(null);
   const [processingAi, setProcessingAi] = useState(false);
-  const [aiPlan, setAiPlan] = useState<ExecutePlan | null>(null);
   const [processingLeads, setProcessingLeads] = useState<Record<string, boolean>>({});
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const [browserPersistence, setBrowserPersistence] = useState(true);
@@ -149,13 +154,13 @@ export default function Dashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [discoveryStep, setDiscoveryStep] = useState(0);
-  const discoverySteps = [
-    "Initializing Google Maps crawler...",
-    "Navigating to search results...",
-    "Scanning business cards...",
-    "Extracting websites and phone numbers...",
-    "Syncing new leads to inventory..."
-  ];
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'success' | 'error' | 'info' }>>([]);
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  }, []);
   const supabase = useMemo(() => createClient(), []);
 
   // ESC key handler for all modals
@@ -269,13 +274,13 @@ export default function Dashboard() {
     if (isDiscovering) {
       setDiscoveryStep(0);
       interval = setInterval(() => {
-        setDiscoveryStep(prev => (prev + 1) % discoverySteps.length);
+        setDiscoveryStep(prev => (prev + 1) % DISCOVERY_STEPS.length);
       }, 3000);
     } else {
       setDiscoveryStep(0);
     }
     return () => clearInterval(interval!);
-  }, [isDiscovering, discoverySteps.length]);
+  }, [isDiscovering, DISCOVERY_STEPS.length]);
 
   const handleExecutePlan = async (plan: ExecutePlan) => {
     if (!plan) return;
@@ -336,12 +341,12 @@ export default function Dashboard() {
     if (!file) return;
 
     if (!ALLOWED_UPLOAD_TYPES.includes(file.type) && !file.name.endsWith('.csv')) {
-      alert('Please upload a CSV file.');
+      showToast('Please upload a CSV file.', 'error');
       e.target.value = '';
       return;
     }
     if (file.size > MAX_UPLOAD_SIZE) {
-      alert('File is too large. Maximum size is 10MB.');
+      showToast('File is too large. Maximum size is 10MB.', 'error');
       e.target.value = '';
       return;
     }
@@ -524,7 +529,7 @@ export default function Dashboard() {
       await fetch(`${API_BASE_URL}/leads/clear`, { method: 'DELETE' });
       setLeads([]);
       setInsights(null);
-      alert("All leads have been cleared.");
+      showToast("All leads have been cleared.", 'success');
       setShowSettings(false);
     } catch (err) {
       console.error('Clear leads failed:', err);
@@ -585,18 +590,17 @@ export default function Dashboard() {
     }
   };
 
-  const getHealthData = () => {
+  const healthData = useMemo(() => {
     const highRisk = leads.filter((l: Lead) => (!!l.audit_results && l.audit_results.score < 50) || l.high_risk_flag || l.audit_results?.high_risk_flag).length;
     const healthy = leads.filter((l: Lead) => l.audit_status === 'Completed' && !!l.audit_results && l.audit_results.score >= 50 && !l.high_risk_flag && !l.audit_results?.high_risk_flag).length;
     const pending = leads.filter((l: Lead) => l.audit_status === 'Pending' || !l.audit_status).length;
-    
-    return [
-      { name: 'Healthy', value: healthy, color: '#4ade80' },
-      { name: 'High Risk', value: highRisk, color: '#ef4444' },
-      { name: 'Pending', value: pending, color: '#f59e0b' },
-    ];
-  };
 
+    return [
+      { name: 'Healthy', value: healthy, color: 'var(--success-light)' },
+      { name: 'High Risk', value: highRisk, color: 'var(--error)' },
+      { name: 'Pending', value: pending, color: 'var(--warning)' },
+    ];
+  }, [leads]);
 
   const ensureProtocol = (url: string) => {
     if (!url) return '';
@@ -604,11 +608,10 @@ export default function Dashboard() {
     return `https://${url}`;
   };
 
-  const filteredLeads = leads.filter((lead: Lead) => {
+  const filteredLeads = useMemo(() => leads.filter((lead: Lead) => {
     const matchesSearch = (lead.company_name || lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (lead.website || '').toLowerCase().includes(searchTerm.toLowerCase());
-    
-    // Advanced Filters
+
     const matchesSegment = filterSegment === 'all' || lead.segment === filterSegment;
     const matchesScore = (lead.outreach_score || lead.audit_results?.score || 0) >= filterMinScore;
     const matchesAuditStatus = filterAuditStatus === 'all' || lead.audit_status === filterAuditStatus;
@@ -618,10 +621,23 @@ export default function Dashboard() {
     if (view === 'audited') return matchesSearch && lead.audit_status === 'Completed' && matchesAllFilters;
     if (view === 'high-risk') return matchesSearch && ((lead.audit_results?.score ?? 100) < 50 || lead.high_risk_flag || lead.audit_results?.high_risk_flag) && matchesAllFilters;
     return matchesSearch && matchesAllFilters;
-  });
+  }), [leads, searchTerm, filterSegment, filterMinScore, filterAuditStatus, view]);
+
+  const segmentOptions = useMemo(() =>
+    Array.from(new Set(leads.map((l: Lead) => l.segment).filter(Boolean))),
+  [leads]);
 
   return (
     <div className="dashboard-container">
+      {/* Toast Notifications */}
+      {toasts.length > 0 && (
+        <div className="toast-container" role="status" aria-live="polite">
+          {toasts.map(t => (
+            <div key={t.id} className={`toast toast-${t.type}`}>{t.message}</div>
+          ))}
+        </div>
+      )}
+      <a href="#main-content" className="sr-only" style={{ position: 'absolute', left: '-9999px', top: 'auto', width: '1px', height: '1px', overflow: 'hidden' }} onFocus={(e) => { e.currentTarget.style.position = 'static'; e.currentTarget.style.width = 'auto'; e.currentTarget.style.height = 'auto'; }}>Skip to main content</a>
       {/* Sidebar - Lead Insights */}
       <Sidebar
         view={view}
@@ -640,16 +656,8 @@ export default function Dashboard() {
         onCollapsedChange={setIsSidebarCollapsed}
       />
 
-      {/* Mobile Sidebar Backdrop */}
-      {isSidebarOpen && (
-        <div 
-          className="sidebar-mobile-backdrop" 
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
       {/* Main Content */}
-      <main className="main-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+      <main id="main-content" className="main-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
         {/* Mobile Header Toggle */}
         <div className="mobile-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -660,7 +668,7 @@ export default function Dashboard() {
           </div>
           <button
             onClick={() => setIsSidebarOpen(true)}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-white)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             aria-label="Open menu"
           >
             <Menu size={22} />
@@ -682,7 +690,7 @@ export default function Dashboard() {
                     auditStatus?.hunting ? 'Hunting Digital Footprints...' : 'Auditing Fleet...'
                   )}
                 </span>
-                <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
                   {orchestratorJob ? (orchestratorJob.current_phase || 'Initializing...') : `Chunk ${auditStatus?.current_chunk || 1} in progress`}
                 </span>
               </div>
@@ -701,7 +709,7 @@ export default function Dashboard() {
                 }} 
               />
             </div>
-            <div style={{ minWidth: '150px', fontSize: '0.85rem', color: '#94a3b8', textAlign: 'right', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ minWidth: '150px', fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'right', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: '1rem' }}>
                <span>
                  {orchestratorJob ? 
                    `${orchestratorJob.processed_count} / ${orchestratorJob.total_count} Leads` :
@@ -710,7 +718,7 @@ export default function Dashboard() {
                </span>
                <button 
                  onClick={orchestratorJob ? stopOrchestratorJob : stopAuditProcess}
-                 style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '4px', padding: '2px 8px', fontSize: '0.7rem', cursor: 'pointer' }}
+                 style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--error)', color: 'var(--error)', borderRadius: '4px', padding: '0.35rem 0.75rem', minHeight: '32px', fontSize: '0.7rem', cursor: 'pointer' }}
                >
                  STOP
                </button>
@@ -723,7 +731,7 @@ export default function Dashboard() {
           <div style={{ minWidth: '300px' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>Operational Overview</span>
             <h1 style={{ marginBottom: '0.5rem' }}>Pipeline Intelligence</h1>
-            <p style={{ color: '#94a3b8', fontSize: '1rem', fontWeight: 400 }}>Orchestrating AI-driven auditing for high-conversion prospecting.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '1rem', fontWeight: 400 }}>Orchestrating AI-driven auditing for high-conversion prospecting.</p>
           </div>
           <div className="header-actions">
             <button 
@@ -737,7 +745,7 @@ export default function Dashboard() {
               className="btn-primary" 
               onClick={startMassivePipeline}
               disabled={loading || !!(orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting'))}
-              style={{ background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)', border: 'none' }}
+              style={{ background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)', border: 'none' }}
             >
               {orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting') ? (
                 <Loader2 size={18} className="animate-spin" />
@@ -791,15 +799,15 @@ export default function Dashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <div>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Lead Health Analysis</h3>
-                <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Visual breakdown of your lead database status.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Visual breakdown of your lead database status.</p>
               </div>
             </div>
             <div className="grid-responsive-health">
-              <div style={{ height: '240px', width: '100%' }}>
+              <div style={{ height: '240px', width: '100%' }} role="img" aria-label="Lead health breakdown chart">
                 <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                   <PieChart>
                     <Pie
-                      data={getHealthData()}
+                      data={healthData}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
@@ -807,31 +815,31 @@ export default function Dashboard() {
                       paddingAngle={5}
                       dataKey="value"
                     >
-                      {getHealthData().map((entry, index) => (
+                      {healthData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip 
-                      contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
-                      itemStyle={{ color: '#f8fafc' }}
+                      contentStyle={{ background: 'var(--surface-tooltip)', border: '1px solid var(--border-tooltip)', borderRadius: '8px', color: 'var(--text-heading)' }}
+                      itemStyle={{ color: 'var(--text-heading)' }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1rem' }}>
                  <div className="grid-health-stats">
-                    {getHealthData().map((item, idx) => (
+                    {healthData.map((item, idx) => (
                       <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                           <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: item.color }} />
-                          <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>{item.name}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{item.name}</span>
                         </div>
                         <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{item.value}</div>
                       </div>
                     ))}
                  </div>
                  <div style={{ padding: '1.25rem', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.1)' }}>
-                   <p style={{ margin: 0, fontSize: '0.875rem', color: '#a5b4fc', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                   <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--primary-light)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
                      <Shield size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
                      <span><strong>Analytics Insight:</strong> {
                        leads.length > 0 ? 
@@ -849,7 +857,7 @@ export default function Dashboard() {
 
         <section className="grid-responsive-stats" style={{ marginBottom: '3.5rem' }}>
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', marginBottom: '1rem' }}>
                <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>TOTAL LEADS</span>
                <BarChart3 size={18} />
             </div>
@@ -872,7 +880,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4ade80', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-light)', marginBottom: '1rem' }}>
                <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>HEALTHY</span>
                <CheckCircle size={18} />
             </div>
@@ -888,45 +896,53 @@ export default function Dashboard() {
               <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Prospect Inventory</h3>
               <div className="filters-row" style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ position: 'relative', flex: '1', minWidth: '200px' }}>
-                  <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-                  <input 
-                    type="text" 
-                    placeholder="Search leads..." 
+                  <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search leads..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem 0.6rem 2.75rem', color: 'white', width: '100%', fontSize: '0.9rem', outline: 'none' }}
+                    id="search-leads"
+                    aria-label="Search leads"
+                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem 0.6rem 2.75rem', color: 'var(--text-white)', width: '100%', fontSize: '0.9rem', outline: 'none' }}
                   />
                 </div>
-                <select 
+                <select
                   value={filterSegment}
                   onChange={(e) => setFilterSegment(e.target.value)}
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', color: 'white', fontSize: '0.9rem', outline: 'none' }}
+                  id="filter-segment"
+                  aria-label="Filter by segment"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', color: 'var(--text-white)', fontSize: '0.9rem', outline: 'none' }}
                 >
-                  <option value="all" style={{ background: '#0f172a' }}>All Segments</option>
-                  {Array.from(new Set(leads.map((l: Lead) => l.segment).filter(Boolean))).map((seg) => (
-                    <option key={seg} value={seg} style={{ background: '#0f172a' }}>{seg}</option>
+                  <option value="all" style={{ background: 'var(--surface-dark)' }}>All Segments</option>
+                  {segmentOptions.map((seg) => (
+                    <option key={seg} value={seg} style={{ background: 'var(--surface-dark)' }}>{seg}</option>
                   ))}
                 </select>
 
-                <select 
+                <select
                   value={filterAuditStatus}
                   onChange={(e) => setFilterAuditStatus(e.target.value)}
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', color: 'white', fontSize: '0.9rem', outline: 'none' }}
+                  id="filter-audit-status"
+                  aria-label="Filter by audit status"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', color: 'var(--text-white)', fontSize: '0.9rem', outline: 'none' }}
                 >
-                  <option value="all" style={{ background: '#0f172a' }}>All Statuses</option>
-                  <option value="Completed" style={{ background: '#0f172a' }}>Completed</option>
-                  <option value="Pending" style={{ background: '#0f172a' }}>Pending</option>
-                  <option value="Failed" style={{ background: '#0f172a' }}>Failed</option>
+                  <option value="all" style={{ background: 'var(--surface-dark)' }}>All Statuses</option>
+                  <option value="Completed" style={{ background: 'var(--surface-dark)' }}>Completed</option>
+                  <option value="Pending" style={{ background: 'var(--surface-dark)' }}>Pending</option>
+                  <option value="Failed" style={{ background: 'var(--surface-dark)' }}>Failed</option>
                 </select>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem' }}>
-                  <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Score: {filterMinScore}+</span>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="100" 
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Score: {filterMinScore}+</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
                     value={filterMinScore}
                     onChange={(e) => setFilterMinScore(parseInt(e.target.value))}
+                    id="filter-min-score"
+                    aria-label="Minimum score filter"
                     style={{ accentColor: 'var(--primary)', width: '100px' }}
                   />
                 </div>
@@ -944,11 +960,11 @@ export default function Dashboard() {
                 </colgroup>
                 <thead>
                   <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    <th style={{ padding: '1rem 1.5rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8' }}>PROSPECT</th>
-                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>AUDIT STATUS</th>
-                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8' }}>INTELLIGENCE</th>
-                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8' }}>SOCIAL</th>
-                    <th style={{ padding: '1rem 0.75rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8' }}>ACTIONS</th>
+                    <th style={{ padding: '1rem 1.5rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>PROSPECT</th>
+                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>AUDIT STATUS</th>
+                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>INTELLIGENCE</th>
+                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>SOCIAL</th>
+                    <th style={{ padding: '1rem 0.75rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -957,13 +973,13 @@ export default function Dashboard() {
                       <td colSpan={5} style={{ padding: '4rem', textAlign: 'center' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
                           <Loader2 className="animate-spin" size={32} color="var(--primary)" />
-                          <span style={{ color: '#64748b' }}>Syncing with Supabase...</span>
+                          <span style={{ color: 'var(--text-dim)' }}>Syncing with Supabase...</span>
                         </div>
                       </td>
                     </tr>
                   ) : filteredLeads.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: '4rem', textAlign: 'center', color: '#64748b' }}>
+                      <td colSpan={5} style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)' }}>
                         <Users size={48} style={{ marginBottom: '1rem', opacity: 0.2 }} />
                         <p>{searchTerm ? `No leads matching "${searchTerm}" found.` : "No prospects discovered yet. Start by importing a CSV."}</p>
                       </td>
@@ -975,14 +991,14 @@ export default function Dashboard() {
                           <td style={{ padding: '1rem 1.5rem', verticalAlign: 'middle' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'white' }}>{lead.company_name || lead.name || 'Unknown Entity'}</span>
+                                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-white)' }}>{lead.company_name || lead.name || 'Unknown Entity'}</span>
                                 {lead.high_risk_flag && (
-                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                                     <AlertCircle size={12} /> RISK
                                   </span>
                                 )}
                               </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#94a3b8', fontSize: '0.8rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                                 {lead.website && (
                                   <a href={ensureProtocol(lead.website)} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--primary)', textDecoration: 'none', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     <Globe size={14} style={{ flexShrink: 0 }} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.website.replace(/^https?:\/\//, '').replace(/\?.*$/, '')}</span>
@@ -998,7 +1014,7 @@ export default function Dashboard() {
                                 {lead.audit_status || 'Unprocessed'}
                               </span>
                               {lead.audit_results?.score != null && (
-                                <div style={{ fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap', color: lead.audit_results.score < 50 ? '#ef4444' : 'var(--primary)' }}>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap', color: lead.audit_results.score < 50 ? 'var(--error)' : 'var(--primary)' }}>
                                   SEO: {lead.audit_results.score}/100
                                 </div>
                               )}
@@ -1008,11 +1024,11 @@ export default function Dashboard() {
                              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
                                {lead.linkedin_hook && <div title="LinkedIn Hook Ready" style={{ color: 'var(--primary)' }}><Linkedin size={16} /></div>}
                                {lead.email_hook && <div title="Email Hook Ready" style={{ color: 'var(--secondary)' }}><Mail size={16} /></div>}
-                               {lead.audit_results?.high_risk_flag && <div title="Security Vulnerabilities" style={{ color: '#ef4444' }}><Shield size={16} /></div>}
+                               {lead.audit_results?.high_risk_flag && <div title="Security Vulnerabilities" style={{ color: 'var(--error)' }}><Shield size={16} /></div>}
                              </div>
                           </td>
                           <td style={{ padding: '1rem', textAlign: 'center', verticalAlign: 'middle' }}>
-                            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', color: '#64748b' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', color: 'var(--text-dim)' }}>
                               {lead.facebook && <a href={ensureProtocol(lead.facebook)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Facebook size={16} /></a>}
                               {lead.instagram && <a href={ensureProtocol(lead.instagram)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Instagram size={16} /></a>}
                               {lead.linkedin && <a href={ensureProtocol(lead.linkedin)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Linkedin size={16} /></a>}
@@ -1025,7 +1041,7 @@ export default function Dashboard() {
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
                               <button 
                                 className="btn-secondary" 
-                                style={{ padding: '0.4rem', borderRadius: '8px' }}
+                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '36px', minHeight: '36px' }}
                                 onClick={() => handleEnrichLead(lead.unique_key)}
                                 disabled={processingLeads[lead.unique_key]}
                                 title="Harvest Contact Details"
@@ -1034,7 +1050,7 @@ export default function Dashboard() {
                               </button>
                               <button 
                                 className="btn-secondary" 
-                                style={{ padding: '0.4rem', borderRadius: '8px', color: 'var(--accent)', borderColor: 'rgba(245, 158, 11, 0.2)' }}
+                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '36px', minHeight: '36px', color: 'var(--accent)', borderColor: 'rgba(245, 158, 11, 0.2)' }}
                                 onClick={() => handleDeepHunt(lead.unique_key)}
                                 disabled={processingLeads[lead.unique_key]}
                                 title="Deep Digital Hunt"
@@ -1066,23 +1082,23 @@ export default function Dashboard() {
                             <td colSpan={5} style={{ padding: '1rem 2rem', borderBottom: '1px solid var(--border)' }}>
                               <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
                                 {lead.last_error && (
-                                  <div style={{ flex: '1 1 300px', borderLeft: '3px solid #ef4444', paddingLeft: '1rem' }}>
-                                    <div style={{ fontSize: '0.65rem', color: '#ef4444', textTransform: 'uppercase', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                  <div style={{ flex: '1 1 300px', borderLeft: '3px solid var(--error)', paddingLeft: '1rem' }}>
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--error)', textTransform: 'uppercase', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                                       <AlertCircle size={10} /> PROCESSING ERROR
                                     </div>
-                                    <p style={{ fontSize: '0.8rem', color: '#fca5a5', margin: 0 }}>{lead.last_error}</p>
+                                    <p style={{ fontSize: '0.8rem', color: 'var(--error-light)', margin: 0 }}>{lead.last_error}</p>
                                   </div>
                                 )}
                                 {lead.key_offerings && lead.key_offerings !== 'Unknown' && (
                                   <div style={{ flex: '1 1 200px' }}>
-                                    <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>KEY OFFERINGS</div>
-                                    <CollapsibleText text={lead.key_offerings} style={{ fontSize: '0.8rem', color: '#e2e8f0' }} />
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>KEY OFFERINGS</div>
+                                    <CollapsibleText text={lead.key_offerings} style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }} />
                                   </div>
                                 )}
                                 {lead.pain_points && lead.pain_points !== 'Unknown' && (
                                   <div style={{ flex: '1 1 200px' }}>
-                                    <div style={{ fontSize: '0.65rem', color: '#f59e0b', textTransform: 'uppercase', marginBottom: '0.25rem' }}>PAIN POINTS</div>
-                                    <CollapsibleText text={lead.pain_points} style={{ fontSize: '0.8rem', color: '#e2e8f0' }} />
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--warning)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>PAIN POINTS</div>
+                                    <CollapsibleText text={lead.pain_points} style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }} />
                                   </div>
                                 )}
                               </div>
@@ -1100,82 +1116,82 @@ export default function Dashboard() {
       </div>
     </main>
 
-      <AIChat onExecute={handleExecutePlan} sidebarCollapsed={isSidebarCollapsed} />
+      <AIChat onExecute={handleExecutePlan} sidebarCollapsed={isSidebarCollapsed} hidden={showSettings || !!outreachDraft || showDiscoveryModal || !!campaign} />
 
       {/* Outreach Draft Modal */}
       {outreachDraft && (
-        <div role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '1rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '1rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(600px, 95vw)', padding: 'clamp(1rem, 5vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setOutreachDraft(null)}
               aria-label="Close outreach draft"
-              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
             </button>
             <h2 id="outreach-modal-title" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Mail color="var(--primary)" /> Outreach for {outreachDraft.leadName}
             </h2>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '12px', color: '#e2e8f0', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '2rem', border: '1px solid var(--glass-border)', fontSize: '0.95rem' }}>
+            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '12px', color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '2rem', border: '1px solid var(--glass-border)', fontSize: '0.95rem' }}>
               {outreachDraft.text}
             </div>
 
             {activeLead?.email_hook && (
               <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(165, 180, 252, 0.05)', borderRadius: '12px', border: '1px dashed rgba(165, 180, 252, 0.3)', position: 'relative' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                  <div style={{ fontSize: '0.65rem', color: '#a5b4fc', textTransform: 'uppercase', fontWeight: 600 }}>Suggested Opening Hook</div>
-                  <button 
+                  <div style={{ fontSize: '0.65rem', color: 'var(--primary-light)', textTransform: 'uppercase', fontWeight: 600 }}>Suggested Opening Hook</div>
+                  <button
                     onClick={() => {
                       navigator.clipboard.writeText(activeLead.email_hook || '');
                       setCopiedHookType('email');
                       setTimeout(() => setCopiedHookType(null), 2000);
                     }}
-                    style={{ background: 'none', border: 'none', color: '#a5b4fc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--primary-light)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem', minHeight: '32px', padding: '0.35rem 0.5rem' }}
                   >
                     {copiedHookType === 'email' ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Hook</>}
                   </button>
                 </div>
-                <p style={{ fontSize: '0.9rem', fontStyle: 'italic', margin: 0, color: '#a5b4fc' }}>&quot;{activeLead.email_hook}&quot;</p>
+                <p style={{ fontSize: '0.9rem', fontStyle: 'italic', margin: 0, color: 'var(--primary-light)' }}>&quot;{activeLead.email_hook}&quot;</p>
               </div>
             )}
 
             {linkedinDraft && (
               <div style={{ marginTop: '0', padding: '1.5rem', background: 'rgba(10, 102, 194, 0.1)', borderRadius: '12px', border: '1px solid rgba(10, 102, 194, 0.2)', marginBottom: '2rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: '#0a66c2' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--linkedin)' }}>
                   <Linkedin size={18} />
                   <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>LinkedIn Connection Request</h4>
                 </div>
-                <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#e2e8f0', whiteSpace: 'pre-wrap', margin: 0 }}>
+                <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0 }}>
                   {linkedinDraft}
                 </p>
                 {activeLead?.linkedin_hook && (
-                  <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', borderLeft: '3px solid #0a66c2' }}>
+                  <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', borderLeft: '3px solid var(--linkedin)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                      <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Personalized Connection Hook</div>
-                      <button 
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Personalized Connection Hook</div>
+                      <button
                         onClick={() => {
                           navigator.clipboard.writeText(activeLead.linkedin_hook || '');
                           setCopiedHookType('linkedin');
                           setTimeout(() => setCopiedHookType(null), 2000);
                         }}
-                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.65rem' }}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.65rem', minHeight: '32px', padding: '0.35rem 0.5rem' }}
                       >
                         {copiedHookType === 'linkedin' ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
                       </button>
                     </div>
-                    <p style={{ fontSize: '0.8rem', margin: 0, color: '#e2e8f0' }}>{activeLead.linkedin_hook}</p>
+                    <p style={{ fontSize: '0.8rem', margin: 0, color: 'var(--text-primary)' }}>{activeLead.linkedin_hook}</p>
                   </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
-                   <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: 0 }}>
+                   <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
                     {linkedinDraft.length}/300 characters
                   </p>
                   <button 
                     className="btn-secondary" 
-                    style={{ padding: '0.4rem 1rem', fontSize: '0.75rem', background: 'rgba(10, 102, 194, 0.2)', borderColor: '#0a66c2', color: '#fff' }}
+                    style={{ padding: '0.4rem 1rem', fontSize: '0.75rem', background: 'rgba(10, 102, 194, 0.2)', borderColor: 'var(--linkedin)', color: 'var(--text-white)' }}
                     onClick={() => {
                       navigator.clipboard.writeText(linkedinDraft);
-                      alert("LinkedIn draft copied!");
+                      showToast("LinkedIn draft copied!", 'success');
                     }}
                   >
                     Copy Invite
@@ -1186,7 +1202,7 @@ export default function Dashboard() {
             <div style={{ display: 'flex', gap: '1rem' }}>
               <button className="btn-primary" style={{ flex: 1 }} onClick={() => {
                 navigator.clipboard.writeText(outreachDraft.text);
-                alert('Draft copied to clipboard!');
+                showToast('Draft copied to clipboard!', 'success');
               }}>
                 Copy to Clipboard
               </button>
@@ -1200,12 +1216,12 @@ export default function Dashboard() {
 
       {/* Discovery Modal */}
       {showDiscoveryModal && (
-        <div role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '1rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '1rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(500px, 95vw)', padding: 'clamp(1.25rem, 4vw, 2rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setShowDiscoveryModal(false)}
               aria-label="Close discovery"
-              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
             </button>
@@ -1215,23 +1231,25 @@ export default function Dashboard() {
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>What are you looking for?</label>
-                <input 
-                  type="text" 
+                <label htmlFor="discovery-query" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>What are you looking for?</label>
+                <input
+                  type="text"
+                  id="discovery-query"
                   value={discoveryQuery}
                   onChange={(e) => setDiscoveryQuery(e.target.value)}
-                  placeholder="e.g. Dental Clinics" 
-                  style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'white' }}
+                  placeholder="e.g. Dental Clinics"
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'var(--text-white)' }}
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Location (Optional)</label>
-                <input 
-                  type="text" 
+                <label htmlFor="discovery-location" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Location (Optional)</label>
+                <input
+                  type="text"
+                  id="discovery-location"
                   value={discoveryLocation}
                   onChange={(e) => setDiscoveryLocation(e.target.value)}
-                  placeholder="e.g. New York, NY" 
-                  style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'white' }}
+                  placeholder="e.g. New York, NY"
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'var(--text-white)' }}
                 />
               </div>
             </div>
@@ -1266,20 +1284,20 @@ export default function Dashboard() {
             </div>
             
             {(isDiscovering || (orchestratorJob && orchestratorJob.type === 'discovery')) && (
-                <div style={{ marginTop: '1.5rem', padding: '1.5rem', background: orchestratorJob?.current_phase === 'CAPTCHA Required' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(99, 102, 241, 0.05)', borderRadius: '16px', border: orchestratorJob?.current_phase === 'CAPTCHA Required' ? '1px solid #ef4444' : '1px solid var(--primary)', animation: orchestratorJob?.status === 'running' ? 'pulse 2s infinite' : 'none' }}>
+                <div style={{ marginTop: '1.5rem', padding: '1.5rem', background: orchestratorJob?.current_phase === 'CAPTCHA Required' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(99, 102, 241, 0.05)', borderRadius: '16px', border: orchestratorJob?.current_phase === 'CAPTCHA Required' ? '1px solid var(--error)' : '1px solid var(--primary)', animation: orchestratorJob?.status === 'running' ? 'pulse 2s infinite' : 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
                     {orchestratorJob?.current_phase === 'CAPTCHA Required' ? (
-                      <AlertTriangle size={18} color="#ef4444" />
+                      <AlertTriangle size={18} color="var(--error)" />
                     ) : (
                       <Loader2 className={orchestratorJob?.status === 'running' ? "animate-spin" : ""} size={18} color="var(--primary)" />
                     )}
-                    <span style={{ fontSize: '0.9rem', fontWeight: 600, color: orchestratorJob?.current_phase === 'CAPTCHA Required' ? '#ef4444' : 'white' }}>
-                      {orchestratorJob?.current_phase || discoverySteps[discoveryStep]}
+                    <span style={{ fontSize: '0.9rem', fontWeight: 600, color: orchestratorJob?.current_phase === 'CAPTCHA Required' ? 'var(--error)' : 'var(--text-white)' }}>
+                      {orchestratorJob?.current_phase || DISCOVERY_STEPS[discoveryStep]}
                     </span>
                   </div>
                   
                   {orchestratorJob?.current_phase === 'CAPTCHA Required' ? (
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                       Google search has blocked the automated scrapers. 
                       Please perform a manual search on the server or use a proxy.
                       <button 
@@ -1295,14 +1313,14 @@ export default function Dashboard() {
                       <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
                         <div 
                           style={{ 
-                            width: orchestratorJob?.status === 'completed' ? '100%' : `${((discoveryStep + 1) / discoverySteps.length) * 100}%`, 
+                            width: orchestratorJob?.status === 'completed' ? '100%' : `${((discoveryStep + 1) / DISCOVERY_STEPS.length) * 100}%`, 
                             height: '100%', 
                             background: 'var(--primary)',
                             transition: 'width 0.5s ease-out'
                           }} 
                         />
                       </div>
-                      <p style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: '#94a3b8', textAlign: 'center', margin: 0 }}>
+                      <p style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', margin: 0 }}>
                         {orchestratorJob?.status === 'completed' ? 'Lead discovery complete!' : 'Tracking real-time discovery progress...'}
                       </p>
                     </>
@@ -1310,7 +1328,7 @@ export default function Dashboard() {
                 </div>
             )}
             
-            <p style={{ marginTop: '1.5rem', fontSize: '0.75rem', color: '#64748b', textAlign: 'center' }}>
+            <p style={{ marginTop: '1.5rem', fontSize: '0.75rem', color: 'var(--text-dim)', textAlign: 'center' }}>
               We&apos;ll browse Google Maps and other sources to find leads. New results will appear in your inventory automatically.
             </p>
           </div>
@@ -1318,12 +1336,12 @@ export default function Dashboard() {
       )}
       {/* Settings Modal */}
       {showSettings && (
-        <div role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '2rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: '500px', padding: 'clamp(1.25rem, 4vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)' }}>
             <button
               onClick={() => setShowSettings(false)}
               aria-label="Close settings"
-              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
             </button>
@@ -1334,14 +1352,14 @@ export default function Dashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
               <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>API Configuration</h4>
-                <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Backend: <code>{API_BASE_URL}</code></p>
-                <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Database: Supabase (Connected)</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Backend: <code>{API_BASE_URL}</code></p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Database: Supabase (Connected)</p>
               </div>
               
               <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Browser Persistence</h4>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.75rem', color: '#e2e8f0' }}>Keep browser alive between audits</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-primary)' }}>Keep browser alive between audits</span>
                   <button
                     role="switch"
                     aria-checked={browserPersistence}
@@ -1383,9 +1401,9 @@ export default function Dashboard() {
                       try {
                         const res = await fetch(`${API_BASE_URL}/export`);
                         const data = await res.json();
-                        alert(data.message || "Export generated!");
+                        showToast(data.message || "Export generated!", 'success');
                       } catch {
-                        alert("Export generation failed.");
+                        showToast("Export generation failed.", 'error');
                       }
                     }}
                   >
@@ -1402,8 +1420,8 @@ export default function Dashboard() {
               </div>
 
               <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
-                <h4 style={{ fontSize: '0.9rem', color: '#ef4444', marginBottom: '0.5rem' }}>Danger Zone</h4>
-                <button className="btn-secondary" style={{ width: '100%', borderColor: '#ef4444', color: '#ef4444', fontSize: '0.8rem' }} onClick={handleClearLeads}>
+                <h4 style={{ fontSize: '0.9rem', color: 'var(--error)', marginBottom: '0.5rem' }}>Danger Zone</h4>
+                <button className="btn-secondary" style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }} onClick={handleClearLeads}>
                   Clear All Leads
                 </button>
               </div>
@@ -1417,7 +1435,7 @@ export default function Dashboard() {
       )}
       {/* Campaign Strategy Modal */}
       {campaign && (
-        <div role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '2rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(900px, 95vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--primary)', borderRadius: '24px' }}>
              <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)' }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -1426,13 +1444,13 @@ export default function Dashboard() {
                  </div>
                  <div>
                     <h2 id="campaign-modal-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Campaign Outreach Strategy</h2>
-                    <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>Personalized drafts for {campaign.length} high-priority leads.</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Personalized drafts for {campaign.length} high-priority leads.</p>
                  </div>
                </div>
                <button
                  onClick={() => setCampaign(null)}
                  aria-label="Close campaign strategy"
-                 style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', cursor: 'pointer' }}
+                 style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', cursor: 'pointer' }}
                >
                  <X size={20} />
                </button>
@@ -1444,23 +1462,23 @@ export default function Dashboard() {
                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                         <div>
                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
-                              <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'white' }}>{item.company}</h4>
-                              <span style={{ fontSize: '0.7rem', background: 'rgba(99, 102, 241, 0.1)', color: '#a5b4fc', padding: '0.1rem 0.5rem', borderRadius: '4px' }}>Lead {idx + 1}</span>
+                              <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-white)' }}>{item.company}</h4>
+                              <span style={{ fontSize: '0.7rem', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary-light)', padding: '0.1rem 0.5rem', borderRadius: '4px' }}>Lead {idx + 1}</span>
                            </div>
-                           <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>Greeting: <strong style={{ color: '#e2e8f0' }}>Hi {item.first_name || 'there'}</strong></p>
+                           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Greeting: <strong style={{ color: 'var(--text-primary)' }}>Hi {item.first_name || 'there'}</strong></p>
                         </div>
                         <button 
                           className="btn-secondary"
                           style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem', gap: '0.4rem' }}
                           onClick={() => {
                             navigator.clipboard.writeText(item.draft);
-                            alert(`Draft for ${item.company} copied!`);
+                            showToast(`Draft for ${item.company} copied!`, 'success');
                           }}
                         >
                           <Copy size={14} /> Copy Draft
                         </button>
                      </div>
-                     <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '10px', fontSize: '0.9rem', color: '#cbd5e1', lineHeight: 1.6, whiteSpace: 'pre-wrap', border: '1px solid rgba(255,255,255,0.03)' }}>
+                     <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '10px', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', border: '1px solid rgba(255,255,255,0.03)' }}>
                         {item.draft}
                      </div>
                   </div>
@@ -1472,7 +1490,7 @@ export default function Dashboard() {
                 <button className="btn-primary" onClick={() => {
                    const allDrafts = campaign.map(c => `PROSPECT: ${c.company}\nDRAFT:\n${c.draft}\n\n`).join('-------------------\n');
                    navigator.clipboard.writeText(allDrafts);
-                   alert("All campaign drafts copied to clipboard!");
+                   showToast("All campaign drafts copied to clipboard!", 'success');
                 }}>
                    <Copy size={18} /> Copy All Drafts
                 </button>

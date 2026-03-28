@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Shield, Loader2, Play, X, Send, Copy, Check } from 'lucide-react';
+import { Shield, Loader2, Play, Send, Copy, Check } from 'lucide-react';
 import { API_BASE_URL } from '@/utils/apiConfig';
 
 interface AIChatPlan {
@@ -18,9 +18,10 @@ interface Message {
 interface AIChatProps {
   onExecute?: (plan: AIChatPlan) => Promise<Record<string, unknown>>;
   sidebarCollapsed?: boolean;
+  hidden?: boolean;
 }
 
-export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
+export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatProps) {
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -100,13 +101,19 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
   const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
 
   useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
+    let timeout: NodeJS.Timeout;
+    const handleResize = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => setWindowWidth(window.innerWidth), 150);
+    };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => { window.removeEventListener('resize', handleResize); clearTimeout(timeout); };
   }, []);
 
   const isMobile = windowWidth < 768;
   const isTablet = windowWidth >= 768 && windowWidth < 1024;
+
+  if (hidden) return null;
 
   if (isMinimized) {
     return (
@@ -120,15 +127,15 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
           width: '56px', 
           height: '56px', 
           borderRadius: '50%', 
-          background: 'var(--primary)', 
-          color: 'white', 
+          background: 'var(--primary)',
+          color: 'var(--text-white)',
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center', 
-          boxShadow: '0 10px 25px rgba(99, 102, 241, 0.4)',
+          boxShadow: '0 10px 25px hsla(var(--primary-hsl), 0.4)',
           border: 'none',
           cursor: 'pointer',
-          zIndex: 1000
+          zIndex: 'var(--z-chat)'
         }}
       >
         <Shield size={24} />
@@ -137,15 +144,15 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
   }
 
   return (
-    <div style={{ 
-      position: 'fixed', 
-      bottom: isMobile ? '1rem' : '2rem', 
+    <div style={{
+      position: 'fixed',
+      bottom: isMobile ? '1rem' : '2rem',
       left: isMobile ? '1rem' : (isTablet ? '100px' : (sidebarCollapsed ? '100px' : '300px')),
-      right: isMobile ? '1rem' : '2.5rem', 
-      display: 'flex', 
-      flexDirection: 'column', 
-      alignItems: 'center', 
-      zIndex: 1000,
+      right: isMobile ? '1rem' : '2.5rem',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      zIndex: 'var(--z-chat)',
       transition: 'all 0.3s ease'
     }}>
       <div style={{ 
@@ -182,14 +189,14 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
                 gap: '0.5rem'
               }}>
                 <div style={{ 
-                  background: msg.role === 'user' ? 'rgba(255,255,255,0.05)' : 'rgba(99, 102, 241, 0.1)', 
+                  background: msg.role === 'user' ? 'rgba(255,255,255,0.05)' : 'hsla(var(--primary-hsl), 0.1)',
                   padding: msg.role === 'assistant' ? '1rem 2.5rem 1rem 1.25rem' : '1rem 1.25rem',
                   borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
                   maxWidth: '80%',
                   fontSize: '0.95rem',
                   lineHeight: 1.5,
-                  color: msg.role === 'user' ? '#e2e8f0' : 'white',
-                  border: msg.role === 'user' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(99, 102, 241, 0.2)',
+                  color: msg.role === 'user' ? 'var(--text-primary)' : 'var(--text-white)',
+                  border: msg.role === 'user' ? '1px solid rgba(255,255,255,0.1)' : '1px solid hsla(var(--primary-hsl), 0.2)',
                   position: 'relative'
                 }}>
                   {msg.content}
@@ -209,8 +216,10 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
                         background: 'rgba(255,255,255,0.05)',
                         border: 'none',
                         borderRadius: '6px',
-                        padding: '4px',
-                        color: copiedIdx === idx ? '#4ade80' : '#94a3b8',
+                        minWidth: '32px',
+                        minHeight: '32px',
+                        padding: '6px',
+                        color: copiedIdx === idx ? 'var(--success-light)' : 'var(--text-muted)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
@@ -226,18 +235,18 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
                 {msg.plan && (
                   <div style={{ 
                     marginTop: '0.5rem', 
-                    background: 'rgba(99, 102, 241, 0.1)', 
-                    padding: '1rem', 
-                    borderRadius: '12px', 
-                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                    background: 'hsla(var(--primary-hsl), 0.1)',
+                    padding: '1rem',
+                    borderRadius: '12px',
+                    border: '1px solid hsla(var(--primary-hsl), 0.3)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '0.75rem',
                     width: '100%',
                     maxWidth: isMobile ? '100%' : '400px'
                   }}>
-                    <div style={{ fontSize: '0.75rem', color: '#a5b4fc', fontWeight: 600, textTransform: 'uppercase' }}>Proposed Plan</div>
-                    <div style={{ fontSize: '0.85rem', color: '#e2e8f0' }}>Task: <strong>{msg.plan.task}</strong></div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--primary-light)', fontWeight: 600, textTransform: 'uppercase' }}>Proposed Plan</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Task: <strong>{msg.plan.task}</strong></div>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <button 
                         className="btn-primary" 
@@ -277,7 +286,7 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
             type="button"
             aria-label="Clear chat"
             style={{
-              background: isLoading ? 'var(--primary)' : 'rgba(99, 102, 241, 0.2)',
+              background: isLoading ? 'var(--primary)' : 'hsla(var(--primary-hsl), 0.2)',
               borderRadius: '10px',
               padding: '0.5rem',
               transition: 'background 0.3s',
@@ -294,23 +303,28 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Ask AI to audit, find emails, or filter leads..." 
-            style={{ flex: 1, background: 'none', border: 'none', color: 'white', outline: 'none', fontSize: '1.1rem' }}
+            style={{ flex: 1, background: 'none', border: 'none', color: 'var(--text-white)', outline: 'none', fontSize: '1.1rem' }}
             disabled={isLoading}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', color: '#94a3b8' }}>
+            <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               ENTER
             </kbd>
             <button 
               type="submit"
               disabled={!query.trim() || isLoading}
               aria-label="Send message"
-              style={{ 
-                background: 'none', 
-                border: 'none', 
-                color: query.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.2)', 
+              style={{
+                background: 'none',
+                border: 'none',
+                color: query.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.2)',
                 cursor: 'pointer',
-                transition: 'color 0.2s'
+                transition: 'color 0.2s',
+                minWidth: '44px',
+                minHeight: '44px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}
             >
               <Send size={20} />
@@ -329,14 +343,14 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
          <button 
            onClick={() => setMessages([])}
            aria-label="Clear chat"
-           style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '20px', padding: '0.25rem 0.75rem', color: '#94a3b8', fontSize: '0.7rem', cursor: 'pointer' }}
+           style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '20px', padding: '0.4rem 0.75rem', minHeight: '32px', color: 'var(--text-muted)', fontSize: '0.7rem', cursor: 'pointer' }}
          >
            Clear Chat
          </button>
          <button 
            onClick={() => setIsMinimized(true)}
            aria-label="Minimize AI chat"
-           style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '20px', padding: '0.25rem 0.75rem', color: '#94a3b8', fontSize: '0.7rem', cursor: 'pointer' }}
+           style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '20px', padding: '0.4rem 0.75rem', minHeight: '32px', color: 'var(--text-muted)', fontSize: '0.7rem', cursor: 'pointer' }}
          >
            Minimize
          </button>
