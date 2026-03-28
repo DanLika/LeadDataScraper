@@ -62,6 +62,28 @@ interface Insights {
   top_priorities: Array<{ name: string; reason: string }>;
 }
 
+interface AuditStatusInfo {
+  active: boolean;
+  hunting?: boolean;
+  current_chunk?: number;
+  processed?: number;
+  total?: number;
+}
+
+interface ExecutePlan {
+  task: string;
+  params?: Record<string, string | number | boolean>;
+}
+
+interface CampaignItem {
+  company: string;
+  first_name?: string;
+  draft: string;
+}
+
+const ALLOWED_UPLOAD_TYPES = ['text/csv', 'application/vnd.ms-excel'];
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10MB
+
 // Strip markdown markers for clean display
 function cleanMarkdown(text: string): string {
   return text
@@ -75,7 +97,7 @@ function cleanMarkdown(text: string): string {
 // Collapsible text component for long content
 function CollapsibleText({ text, maxLength = 250, style }: { text: string; maxLength?: number; style?: React.CSSProperties }) {
   const [expanded, setExpanded] = useState(false);
-  const cleaned = cleanMarkdown(text);
+  const cleaned = useMemo(() => cleanMarkdown(text), [text]);
   const isLong = cleaned.length > maxLength;
   const display = isLong && !expanded ? cleaned.slice(0, maxLength) + '...' : cleaned;
 
@@ -105,7 +127,7 @@ export default function Dashboard() {
   const [isDrafting, setIsDrafting] = useState(false);
   const [insights, setInsights] = useState<Insights | null>(null);
   const [fetchingInsights, setFetchingInsights] = useState(false);
-  const [auditStatus, setAuditStatus] = useState<any>(null); // Simplified fallback
+  const [auditStatus, setAuditStatus] = useState<AuditStatusInfo | null>(null);
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [discoveryQuery, setDiscoveryQuery] = useState('');
@@ -113,13 +135,13 @@ export default function Dashboard() {
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [orchestratorJob, setOrchestratorJob] = useState<OrchestratorJob | null>(null);
   const [processingAi, setProcessingAi] = useState(false);
-  const [aiPlan, setAiPlan] = useState<any>(null);
+  const [aiPlan, setAiPlan] = useState<ExecutePlan | null>(null);
   const [processingLeads, setProcessingLeads] = useState<Record<string, boolean>>({});
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const [browserPersistence, setBrowserPersistence] = useState(true);
   const [view, setView] = useState<'all' | 'audited' | 'high-risk'>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [campaign, setCampaign] = useState<any[] | null>(null);
+  const [campaign, setCampaign] = useState<CampaignItem[] | null>(null);
   const [filterSegment, setFilterSegment] = useState<string>('all');
   const [filterMinScore, setFilterMinScore] = useState<number>(0);
   const [filterAuditStatus, setFilterAuditStatus] = useState<string>('all');
@@ -135,6 +157,20 @@ export default function Dashboard() {
     "Syncing new leads to inventory..."
   ];
   const supabase = useMemo(() => createClient(), []);
+
+  // ESC key handler for all modals
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (campaign) setCampaign(null);
+        else if (outreachDraft) setOutreachDraft(null);
+        else if (showSettings) setShowSettings(false);
+        else if (showDiscoveryModal && !isDiscovering) setShowDiscoveryModal(false);
+      }
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [campaign, outreachDraft, showSettings, showDiscoveryModal, isDiscovering]);
 
   const fetchLeads = useCallback(async () => {
     const { data, error } = await supabase
@@ -241,7 +277,7 @@ export default function Dashboard() {
     return () => clearInterval(interval!);
   }, [isDiscovering, discoverySteps.length]);
 
-  const handleExecutePlan = async (plan: any) => {
+  const handleExecutePlan = async (plan: ExecutePlan) => {
     if (!plan) return;
     setProcessingAi(true);
     try {
@@ -265,8 +301,8 @@ export default function Dashboard() {
         });
         
         if (plan.task === 'DISCOVERY_SEARCH') {
-          setDiscoveryQuery(plan.params?.query || '');
-          setDiscoveryLocation(plan.params?.location || '');
+          setDiscoveryQuery(String(plan.params?.query ?? ''));
+          setDiscoveryLocation(String(plan.params?.location ?? ''));
           setIsDiscovering(true);
           setShowDiscoveryModal(true);
         }
@@ -299,6 +335,17 @@ export default function Dashboard() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!ALLOWED_UPLOAD_TYPES.includes(file.type) && !file.name.endsWith('.csv')) {
+      alert('Please upload a CSV file.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > MAX_UPLOAD_SIZE) {
+      alert('File is too large. Maximum size is 10MB.');
+      e.target.value = '';
+      return;
+    }
+
     setLoading(true);
     const formData = new FormData();
     formData.append('file', file);
@@ -308,11 +355,15 @@ export default function Dashboard() {
         method: 'POST',
         body: formData,
       });
-      const data = await response.json();
+      if (!response.ok) {
+        console.error('Upload failed with status:', response.status);
+      }
+      await response.json();
     } catch (err) {
       console.error('Upload failed:', err);
     } finally {
       setLoading(false);
+      e.target.value = '';
     }
   };
 
@@ -644,7 +695,7 @@ export default function Dashboard() {
                    width: `${
                      orchestratorJob ? 
                      (orchestratorJob.total_count > 0 ? (orchestratorJob.processed_count / orchestratorJob.total_count) * 100 : 0) :
-                     (auditStatus?.total > 0 ? (auditStatus.processed / auditStatus.total) * 100 : 0)
+                     ((auditStatus?.total ?? 0) > 0 ? ((auditStatus?.processed ?? 0) / (auditStatus?.total ?? 1)) * 100 : 0)
                    }%`,
                    transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
                 }} 
@@ -1053,15 +1104,16 @@ export default function Dashboard() {
 
       {/* Outreach Draft Modal */}
       {outreachDraft && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '1rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(600px, 95vw)', padding: 'clamp(1rem, 5vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <button 
+            <button
               onClick={() => setOutreachDraft(null)}
-              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              aria-label="Close outreach draft"
+              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
             </button>
-            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <h2 id="outreach-modal-title" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Mail color="var(--primary)" /> Outreach for {outreachDraft.leadName}
             </h2>
             <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '12px', color: '#e2e8f0', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '2rem', border: '1px solid var(--glass-border)', fontSize: '0.95rem' }}>
@@ -1148,15 +1200,16 @@ export default function Dashboard() {
 
       {/* Discovery Modal */}
       {showDiscoveryModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '1rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(500px, 95vw)', padding: 'clamp(1.25rem, 4vw, 2rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <button 
+            <button
               onClick={() => setShowDiscoveryModal(false)}
-              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              aria-label="Close discovery"
+              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
             </button>
-            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <h2 id="discovery-modal-title" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Globe color="var(--primary)" /> Lead Discovery Engine
             </h2>
             
@@ -1265,15 +1318,16 @@ export default function Dashboard() {
       )}
       {/* Settings Modal */}
       {showSettings && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '2rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: '500px', padding: 'clamp(1.25rem, 4vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)' }}>
-            <button 
+            <button
               onClick={() => setShowSettings(false)}
-              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              aria-label="Close settings"
+              style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
             </button>
-            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <h2 id="settings-modal-title" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Settings color="var(--primary)" /> System Settings
             </h2>
             
@@ -1288,16 +1342,21 @@ export default function Dashboard() {
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Browser Persistence</h4>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.75rem', color: '#e2e8f0' }}>Keep browser alive between audits</span>
-                  <div 
-                    style={{ 
-                      width: '40px', 
-                      height: '20px', 
-                      background: browserPersistence ? 'var(--primary)' : 'rgba(255,255,255,0.1)', 
-                      borderRadius: '10px', 
-                      position: 'relative', 
+                  <button
+                    role="switch"
+                    aria-checked={browserPersistence}
+                    aria-label="Toggle browser persistence"
+                    style={{
+                      width: '40px',
+                      height: '20px',
+                      background: browserPersistence ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+                      borderRadius: '10px',
+                      position: 'relative',
                       cursor: 'pointer',
-                      transition: 'background 0.2s'
-                    }} 
+                      transition: 'background 0.2s',
+                      border: 'none',
+                      padding: 0
+                    }}
                     onClick={() => setBrowserPersistence(!browserPersistence)}
                   >
                     <div style={{ 
@@ -1310,7 +1369,7 @@ export default function Dashboard() {
                       top: '2px',
                       transition: 'left 0.2s'
                     }} />
-                  </div>
+                  </button>
                 </div>
               </div>
 
@@ -1358,7 +1417,7 @@ export default function Dashboard() {
       )}
       {/* Campaign Strategy Modal */}
       {campaign && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110, padding: '2rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(900px, 95vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--primary)', borderRadius: '24px' }}>
              <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)' }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -1366,13 +1425,14 @@ export default function Dashboard() {
                     <Zap size={20} color="white" />
                  </div>
                  <div>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Campaign Outreach Strategy</h2>
+                    <h2 id="campaign-modal-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Campaign Outreach Strategy</h2>
                     <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>Personalized drafts for {campaign.length} high-priority leads.</p>
                  </div>
                </div>
-               <button 
+               <button
                  onClick={() => setCampaign(null)}
-                 style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', cursor: 'pointer' }}
+                 aria-label="Close campaign strategy"
+                 style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', cursor: 'pointer' }}
                >
                  <X size={20} />
                </button>

@@ -9,6 +9,18 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+interface SidebarLead {
+  company_name?: string;
+  name?: string;
+  outreach_score?: number;
+}
+
+interface SidebarInsights {
+  summary: string;
+  insights: string[];
+  top_priorities: Array<{ name: string; reason: string }>;
+}
+
 interface SidebarProps {
   view: 'all' | 'audited' | 'high-risk';
   setView: (view: 'all' | 'audited' | 'high-risk') => void;
@@ -16,9 +28,9 @@ interface SidebarProps {
   setShowDiscoveryModal: (show: boolean) => void;
   showSettings: boolean;
   setShowSettings: (show: boolean) => void;
-  leads: any[];
+  leads: SidebarLead[];
   fetchingInsights: boolean;
-  insights: any;
+  insights: SidebarInsights | null;
   fetchInsights: () => void;
   setSearchTerm: (term: string) => void;
   isOpenMobile?: boolean;
@@ -101,7 +113,8 @@ export default function Sidebar({
               <button
                 className="mobile-close-btn"
                 onClick={() => setIsOpenMobile?.(false)}
-                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: '#94a3b8', cursor: 'pointer', marginLeft: 'auto' }}
+                aria-label="Close menu"
+                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: '#94a3b8', cursor: 'pointer', marginLeft: 'auto', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <X size={20} />
               </button>
@@ -114,6 +127,7 @@ export default function Sidebar({
               className={`nav-item ${!isInsightsPage && view === 'all' && !showDiscoveryModal && !showSettings ? 'active' : ''}`}
               onClick={() => { setView('all'); setShowDiscoveryModal(false); setShowSettings(false); setIsOpenMobile?.(false); }}
               title="Dashboard"
+              aria-current={!isInsightsPage && view === 'all' && !showDiscoveryModal && !showSettings ? 'page' : undefined}
             >
               <BarChart3 size={18} />
               {showLabels && <span>Dashboard</span>}
@@ -123,6 +137,7 @@ export default function Sidebar({
               className={`nav-item ${isInsightsPage ? 'active' : ''}`}
               onClick={() => { setIsOpenMobile?.(false); }}
               title="Strategic Insights"
+              aria-current={isInsightsPage ? 'page' : undefined}
             >
               <TrendingUp size={18} />
               {showLabels && <span>Insights</span>}

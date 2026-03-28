@@ -172,8 +172,9 @@ export default function CampaignsPage() {
             <h3 style={{ marginBottom: '1.5rem' }}>Create New Campaign</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Campaign Name</label>
+                <label htmlFor="campaign-name" style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Campaign Name</label>
                 <input
+                  id="campaign-name"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                   placeholder="e.g. Q1 Cold Outreach - Dental Clinics"
@@ -182,8 +183,9 @@ export default function CampaignsPage() {
               </div>
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '200px' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Channel</label>
+                  <label htmlFor="campaign-channel" style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Channel</label>
                   <select
+                    id="campaign-channel"
                     value={newChannel}
                     onChange={e => setNewChannel(e.target.value)}
                     style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', fontSize: '0.95rem' }}
@@ -194,8 +196,9 @@ export default function CampaignsPage() {
                   </select>
                 </div>
                 <div style={{ flex: 1, minWidth: '200px' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Segment Filter (optional)</label>
+                  <label htmlFor="campaign-segment" style={{ display: 'block', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Segment Filter (optional)</label>
                   <input
+                    id="campaign-segment"
                     value={newSegment}
                     onChange={e => setNewSegment(e.target.value)}
                     placeholder="e.g. Performance Optimization"
@@ -318,15 +321,21 @@ export default function CampaignsPage() {
 
         {/* Message Preview Modal */}
         {previewMessage && (
-          <div style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-            backdropFilter: 'blur(4px)'
-          }} onClick={() => setPreviewMessage(null)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="preview-modal-title"
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500
+            }}
+            onClick={() => setPreviewMessage(null)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setPreviewMessage(null); }}
+          >
             <div className="card" style={{ maxWidth: '600px', width: '90%', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 style={{ margin: 0 }}>Message Preview</h3>
-                <button onClick={() => setPreviewMessage(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                <h3 id="preview-modal-title" style={{ margin: 0 }}>Message Preview</h3>
+                <button onClick={() => setPreviewMessage(null)} aria-label="Close preview" style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <X size={20} />
                 </button>
               </div>

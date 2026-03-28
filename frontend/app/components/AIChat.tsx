@@ -4,17 +4,19 @@ import { useState, useRef, useEffect } from 'react';
 import { Shield, Loader2, Play, X, Send, Copy, Check } from 'lucide-react';
 import { API_BASE_URL } from '@/utils/apiConfig';
 
+interface AIChatPlan {
+  task: string;
+  params: Record<string, string | number | boolean>;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
-  plan?: {
-    task: string;
-    params: any;
-  };
+  plan?: AIChatPlan;
 }
 
 interface AIChatProps {
-  onExecute?: (plan: any) => void;
+  onExecute?: (plan: AIChatPlan) => Promise<Record<string, unknown>>;
   sidebarCollapsed?: boolean;
 }
 
@@ -68,11 +70,11 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
     }
   };
 
-  const handleExecute = async (plan: any, index: number) => {
+  const handleExecute = async (plan: AIChatPlan, index: number) => {
     if (onExecute) {
       setIsLoading(true);
       try {
-        const result = await (onExecute as any)(plan);
+        const result = await onExecute(plan);
         // Remove the plan from the message
         const newMessages = messages.map((msg, i) =>
           i === index ? { ...msg, plan: undefined } : msg
@@ -80,9 +82,9 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
 
         // Add a result message
         let content = "Task executed successfully.";
-        if (result?.message) content = result.message;
-        if (result?.draft) content = `Generated draft for ${result.lead_name || 'Prospect'}. I've opened the preview for you.`;
-        if (result?.answer) content = result.answer;
+        if (result?.message) content = String(result.message);
+        if (result?.draft) content = `Generated draft for ${String(result.lead_name || 'Prospect')}. I've opened the preview for you.`;
+        if (result?.answer) content = String(result.answer);
         if (result?.details) content = `Status Check: ${JSON.stringify(result.details)}`;
 
         newMessages.push({ role: 'assistant', content });
@@ -240,7 +242,7 @@ export default function AIChat({ onExecute, sidebarCollapsed }: AIChatProps) {
                       <button 
                         className="btn-primary" 
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
-                        onClick={() => handleExecute(msg.plan, idx)}
+                        onClick={() => msg.plan && handleExecute(msg.plan, idx)}
                       >
                         <Play size={12} /> Confirm & Execute
                       </button>

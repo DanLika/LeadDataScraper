@@ -30,7 +30,7 @@ interface Insights {
 export default function InsightsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [insights, setInsights] = useState<Insights | null>(null);
-  const [leads, setLeads] = useState<any[]>([]);
+  const [leads, setLeads] = useState<Array<{ outreach_score?: number; high_risk_flag?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [fetchingInsights, setFetchingInsights] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
