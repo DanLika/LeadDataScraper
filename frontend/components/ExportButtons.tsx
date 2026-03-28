@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Download, FileSpreadsheet, AlertTriangle, Star, CheckCircle, Loader2, Users } from 'lucide-react';
-import { API_BASE_URL } from '../utils/apiConfig';
+import { API_BASE_URL, apiFetch } from '../utils/apiConfig';
 
 export default function ExportButtons() {
   const [exporting, setExporting] = useState(false);
@@ -12,7 +12,7 @@ export default function ExportButtons() {
     setExporting(true);
     setStatus(null);
     try {
-      const resp = await fetch(`${API_BASE_URL}/export`);
+      const resp = await apiFetch(`${API_BASE_URL}/export`);
       const data = await resp.json();
       if (data.message) {
         setStatus('Success! Check the /exports folder.');

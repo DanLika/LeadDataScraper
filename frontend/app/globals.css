@@ -50,6 +50,21 @@
   --surface-tooltip: #1e293b;
   --border-tooltip: #334155;
 
+  /* Semantic surface tokens for repeated patterns */
+  --primary-tint-5: hsla(var(--primary-hsl), 0.05);
+  --primary-tint-10: hsla(var(--primary-hsl), 0.1);
+  --primary-tint-15: hsla(var(--primary-hsl), 0.15);
+  --primary-tint-20: hsla(var(--primary-hsl), 0.2);
+  --surface-subtle: rgba(255, 255, 255, 0.02);
+  --surface-elevated: rgba(255, 255, 255, 0.03);
+  --surface-muted: rgba(255, 255, 255, 0.05);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-muted: rgba(255, 255, 255, 0.1);
+  --success-tint: rgba(16, 185, 129, 0.1);
+  --warning-tint: rgba(245, 158, 11, 0.1);
+  --error-tint: rgba(239, 68, 68, 0.1);
+  --linkedin-tint: rgba(10, 102, 194, 0.1);
+
   /* Z-index scale */
   --z-sidebar: 100;
   --z-mobile-backdrop: 199;
@@ -91,13 +106,7 @@ body {
   overflow-x: hidden;
 }
 
-.main-content {
-  flex: 1;
-  min-width: 0; /* Allow flex child to shrink below content width */
-  background: var(--background);
-  transition: all 0.3s ease;
-  position: relative;
-}
+/* main-content base styles are defined below with the full rule */
 
 .text-wrap {
   word-break: break-word;
@@ -325,7 +334,7 @@ body {
 
 .insights-summary p {
   font-size: 0.8rem;
-  color: #e2e8f0;
+  color: var(--text-primary);
   margin: 0;
   line-height: 1.4;
 }
@@ -411,11 +420,14 @@ body {
 
 .main-content {
   flex: 1;
+  min-width: 0;
   padding: 2rem;
   max-width: 100%;
   margin: 0;
+  background: var(--background);
   animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1);
   overflow-x: hidden;
+  position: relative;
   transition: var(--transition-default);
 }
 
@@ -1167,8 +1179,8 @@ select:focus-visible {
   border: 1px solid var(--glass-border);
   border-radius: 8px;
   padding: 0.4rem;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: var(--touch-target-min);
+  min-height: var(--touch-target-min);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1253,3 +1265,7 @@ select:focus-visible {
 .text-primary { color: var(--primary); }
 .text-secondary { color: var(--secondary); }
 .text-accent { color: var(--accent); }
+
+/* Social link hover */
+.social-link { color: var(--text-dim); transition: color 0.2s ease; }
+.social-link:hover { color: var(--text-white); }

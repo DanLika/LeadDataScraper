@@ -3,17 +3,19 @@
 import { useCallback, useState, useEffect, Fragment, useMemo } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import {
-  Search, Upload, Globe, Mail, Phone, Shield, BarChart3,
+  Upload, Globe, Mail, Phone, Shield,
   Settings, AlertCircle, AlertTriangle,
   Download, FileDown, Crosshair,
-  Users, Loader2, Play, RefreshCw, X, Zap, CheckCircle,
+  Users, Loader2, Play, RefreshCw, X, Zap,
   Copy, Check, Menu,
   Facebook, Instagram, Linkedin, Music, Pin
 } from 'lucide-react';
 import AIChat from './components/AIChat';
 import Sidebar from './components/Sidebar';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { API_BASE_URL } from '@/utils/apiConfig';
+import HealthChart from './components/HealthChart';
+import StatsCards from './components/StatsCards';
+import FilterBar from './components/FilterBar';
+import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 
 interface Lead {
   id?: string;
@@ -140,7 +142,7 @@ export default function Dashboard() {
   const [discoveryLocation, setDiscoveryLocation] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [orchestratorJob, setOrchestratorJob] = useState<OrchestratorJob | null>(null);
-  const [processingAi, setProcessingAi] = useState(false);
+  const [, setProcessingAi] = useState(false);
   const [processingLeads, setProcessingLeads] = useState<Record<string, boolean>>({});
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const [browserPersistence, setBrowserPersistence] = useState(true);
@@ -194,7 +196,7 @@ export default function Dashboard() {
   const fetchInsights = useCallback(async () => {
     setFetchingInsights(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/insights`);
+      const response = await apiFetch(`${API_BASE_URL}/insights`);
       const data = await response.json();
       setInsights(data);
     } catch (err) {
@@ -229,7 +231,7 @@ export default function Dashboard() {
     if (auditStatus?.active && !orchestratorJob) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/audit-status`);
+          const res = await apiFetch(`${API_BASE_URL}/audit-status`);
           const data = await res.json();
           setAuditStatus(data);
           if (!data.active) {
@@ -249,7 +251,7 @@ export default function Dashboard() {
     if (orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting')) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/orchestrator/status/${orchestratorJob.id}`);
+          const res = await apiFetch(`${API_BASE_URL}/orchestrator/status/${orchestratorJob.id}`);
           const data = await res.json();
           setOrchestratorJob(data);
           
@@ -280,13 +282,14 @@ export default function Dashboard() {
       setDiscoveryStep(0);
     }
     return () => clearInterval(interval!);
-  }, [isDiscovering, DISCOVERY_STEPS.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDiscovering]);
 
   const handleExecutePlan = async (plan: ExecutePlan) => {
     if (!plan) return;
     setProcessingAi(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/execute`, {
+      const response = await apiFetch(`${API_BASE_URL}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(plan),
@@ -356,7 +359,7 @@ export default function Dashboard() {
     formData.append('file', file);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/upload`, {
+      const response = await apiFetch(`${API_BASE_URL}/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -375,7 +378,7 @@ export default function Dashboard() {
   const processLead = async (uniqueKey: string) => {
     setProcessingLeads(prev => ({ ...prev, [uniqueKey]: true }));
     try {
-      const resp = await fetch(`${API_BASE_URL}/process-lead`, {
+      const resp = await apiFetch(`${API_BASE_URL}/process-lead`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: uniqueKey }),
@@ -394,7 +397,7 @@ export default function Dashboard() {
   const processAll = async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/orchestrator/start`, {
+      const resp = await apiFetch(`${API_BASE_URL}/orchestrator/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters: {}, tasks: ['audit'] }),
@@ -416,7 +419,7 @@ export default function Dashboard() {
     setOutreachDraft(null);
     setLinkedinDraft('');
     try {
-      const res = await fetch(`${API_BASE_URL}/draft-outreach`, {
+      const res = await apiFetch(`${API_BASE_URL}/draft-outreach`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: lead.unique_key })
@@ -425,7 +428,7 @@ export default function Dashboard() {
       if (data.draft) setOutreachDraft({ text: data.draft, leadName: lead.company_name || lead.name || 'Prospect' });
       
       // Also generate LinkedIn draft
-      const liRes = await fetch(`${API_BASE_URL}/draft-linkedin`, {
+      const liRes = await apiFetch(`${API_BASE_URL}/draft-linkedin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: lead.unique_key })
@@ -443,7 +446,7 @@ export default function Dashboard() {
   const handleDeepHunt = async (uniqueKey: string) => {
     setProcessingLeads(prev => ({ ...prev, [uniqueKey]: true }));
     try {
-      const resp = await fetch(`${API_BASE_URL}/hunt-lead`, {
+      const resp = await apiFetch(`${API_BASE_URL}/hunt-lead`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: uniqueKey }),
@@ -462,7 +465,7 @@ export default function Dashboard() {
   const handleDeepHuntAll = async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/orchestrator/start`, {
+      const resp = await apiFetch(`${API_BASE_URL}/orchestrator/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters: {}, tasks: ['hunt'] }),
@@ -482,7 +485,7 @@ export default function Dashboard() {
     if (!discoveryQuery.trim()) return;
     setIsDiscovering(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/discovery/start`, {
+      const response = await apiFetch(`${API_BASE_URL}/discovery/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: discoveryQuery, location: discoveryLocation }),
@@ -506,7 +509,7 @@ export default function Dashboard() {
   const handleEnrichLead = async (uniqueKey: string) => {
     setProcessingLeads(prev => ({ ...prev, [uniqueKey]: true }));
     try {
-      const resp = await fetch(`${API_BASE_URL}/enrich/start`, {
+      const resp = await apiFetch(`${API_BASE_URL}/enrich/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: uniqueKey }),
@@ -526,7 +529,7 @@ export default function Dashboard() {
     if (!confirm("Are you SURE you want to clear all leads? This cannot be undone.")) return;
     setLoading(true);
     try {
-      await fetch(`${API_BASE_URL}/leads/clear`, { method: 'DELETE' });
+      await apiFetch(`${API_BASE_URL}/leads/clear`, { method: 'DELETE' });
       setLeads([]);
       setInsights(null);
       showToast("All leads have been cleared.", 'success');
@@ -541,7 +544,7 @@ export default function Dashboard() {
   const startMassivePipeline = async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/orchestrator/start`, {
+      const resp = await apiFetch(`${API_BASE_URL}/orchestrator/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters: {}, tasks: ['audit', 'enrich', 'hunt'] }),
@@ -560,7 +563,7 @@ export default function Dashboard() {
   const stopOrchestratorJob = async () => {
     if (!orchestratorJob?.id) return;
     try {
-      await fetch(`${API_BASE_URL}/orchestrator/stop/${orchestratorJob.id}`, { method: 'POST' });
+      await apiFetch(`${API_BASE_URL}/orchestrator/stop/${orchestratorJob.id}`, { method: 'POST' });
       setOrchestratorJob({ ...orchestratorJob, status: 'stopped' });
     } catch (err) {
       console.error('Stop job failed:', err);
@@ -569,7 +572,7 @@ export default function Dashboard() {
 
   const stopAuditProcess = async () => {
     try {
-      await fetch(`${API_BASE_URL}/audit/stop`, { method: 'POST' });
+      await apiFetch(`${API_BASE_URL}/audit/stop`, { method: 'POST' });
       setAuditStatus({ ...auditStatus, active: false });
     } catch (err) {
       console.error('Stop audit failed:', err);
@@ -589,18 +592,6 @@ export default function Dashboard() {
       console.error('CRM Download failed:', err);
     }
   };
-
-  const healthData = useMemo(() => {
-    const highRisk = leads.filter((l: Lead) => (!!l.audit_results && l.audit_results.score < 50) || l.high_risk_flag || l.audit_results?.high_risk_flag).length;
-    const healthy = leads.filter((l: Lead) => l.audit_status === 'Completed' && !!l.audit_results && l.audit_results.score >= 50 && !l.high_risk_flag && !l.audit_results?.high_risk_flag).length;
-    const pending = leads.filter((l: Lead) => l.audit_status === 'Pending' || !l.audit_status).length;
-
-    return [
-      { name: 'Healthy', value: healthy, color: 'var(--success-light)' },
-      { name: 'High Risk', value: highRisk, color: 'var(--error)' },
-      { name: 'Pending', value: pending, color: 'var(--warning)' },
-    ];
-  }, [leads]);
 
   const ensureProtocol = (url: string) => {
     if (!url) return '';
@@ -668,14 +659,14 @@ export default function Dashboard() {
           </div>
           <button
             onClick={() => setIsSidebarOpen(true)}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-white)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-muted)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-white)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             aria-label="Open menu"
           >
             <Menu size={22} />
           </button>
         </div>
         {((orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting')) || (auditStatus?.active && !orchestratorJob)) && (
-          <div style={{ background: 'rgba(99, 102, 241, 0.1)', padding: '1rem 2.5rem', borderBottom: '1px solid var(--primary)', display: 'flex', alignItems: 'center', gap: '2rem', animation: 'fadeIn 0.3s ease' }}>
+          <div style={{ background: 'var(--primary-tint-10)', padding: '1rem 2.5rem', borderBottom: '1px solid var(--primary)', display: 'flex', alignItems: 'center', gap: '2rem', animation: 'fadeIn 0.3s ease' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: '220px' }}>
               <RefreshCw size={18} className="animate-spin" color="var(--primary)" />
               <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -695,7 +686,7 @@ export default function Dashboard() {
                 </span>
               </div>
             </div>
-            <div style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ flex: 1, height: '8px', background: 'var(--surface-muted)', borderRadius: '4px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
               <div 
                 style={{ 
                    height: '100%', 
@@ -718,7 +709,8 @@ export default function Dashboard() {
                </span>
                <button 
                  onClick={orchestratorJob ? stopOrchestratorJob : stopAuditProcess}
-                 style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--error)', color: 'var(--error)', borderRadius: '4px', padding: '0.35rem 0.75rem', minHeight: '32px', fontSize: '0.7rem', cursor: 'pointer' }}
+                 aria-label="Stop processing"
+                 style={{ background: 'var(--error-tint)', border: '1px solid var(--error)', color: 'var(--error)', borderRadius: '4px', padding: '0.35rem 0.75rem', minHeight: '44px', fontSize: '0.7rem', cursor: 'pointer' }}
                >
                  STOP
                </button>
@@ -745,7 +737,7 @@ export default function Dashboard() {
               className="btn-primary" 
               onClick={startMassivePipeline}
               disabled={loading || !!(orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting'))}
-              style={{ background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)', border: 'none' }}
+              style={{ background: 'var(--primary)', border: 'none' }}
             >
               {orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting') ? (
                 <Loader2 size={18} className="animate-spin" />
@@ -794,160 +786,23 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <section style={{ marginBottom: '3.5rem' }}>
-          <div className="card card-no-hover" style={{ padding: '1.5rem 2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Lead Health Analysis</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Visual breakdown of your lead database status.</p>
-              </div>
-            </div>
-            <div className="grid-responsive-health">
-              <div style={{ height: '240px', width: '100%' }} role="img" aria-label="Lead health breakdown chart">
-                <ResponsiveContainer width="100%" height="100%" minHeight={200}>
-                  <PieChart>
-                    <Pie
-                      data={healthData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {healthData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ background: 'var(--surface-tooltip)', border: '1px solid var(--border-tooltip)', borderRadius: '8px', color: 'var(--text-heading)' }}
-                      itemStyle={{ color: 'var(--text-heading)' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1rem' }}>
-                 <div className="grid-health-stats">
-                    {healthData.map((item, idx) => (
-                      <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: item.color }} />
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{item.name}</span>
-                        </div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{item.value}</div>
-                      </div>
-                    ))}
-                 </div>
-                 <div style={{ padding: '1.25rem', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.1)' }}>
-                   <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--primary-light)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-                     <Shield size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
-                     <span><strong>Analytics Insight:</strong> {
-                       leads.length > 0 ? 
-                       `${Math.round((leads.filter(l => l.email).length / leads.length) * 100)}% of your leads have verified emails.` : 
-                       "Import leads to see deep health analytics."
-                     }</span>
-                   </p>
-                 </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        <HealthChart leads={leads} />
 
-
-
-        <section className="grid-responsive-stats" style={{ marginBottom: '3.5rem' }}>
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-               <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>TOTAL LEADS</span>
-               <BarChart3 size={18} />
-            </div>
-            <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>{leads.length}</div>
-          </div>
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--secondary)', marginBottom: '1rem' }}>
-               <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>PENDING</span>
-               <Shield size={18} />
-            </div>
-            <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>{leads.filter((l: Lead) => l.audit_status === 'Pending').length}</div>
-          </div>
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--error)', marginBottom: '1rem' }}>
-               <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>HIGH RISK</span>
-               <AlertTriangle size={18} />
-            </div>
-            <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>
-              {leads.filter((l: Lead) => (!!l.audit_results && l.audit_results.score < 50) || l.high_risk_flag).length}
-            </div>
-          </div>
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-light)', marginBottom: '1rem' }}>
-               <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>HEALTHY</span>
-               <CheckCircle size={18} />
-            </div>
-            <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>
-              {leads.filter((l: Lead) => l.audit_status === 'Completed').length}
-            </div>
-          </div>
-        </section>
+        <StatsCards leads={leads} />
 
         <div className="card card-no-hover" style={{ padding: '0', overflow: 'hidden' }}>
           <div className="table-container-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
-            <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', flexWrap: 'wrap', gap: '1.5rem', minWidth: 'min-content' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Prospect Inventory</h3>
-              <div className="filters-row" style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ position: 'relative', flex: '1', minWidth: '200px' }}>
-                  <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
-                  <input
-                    type="text"
-                    placeholder="Search leads..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    id="search-leads"
-                    aria-label="Search leads"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem 0.6rem 2.75rem', color: 'var(--text-white)', width: '100%', fontSize: '0.9rem', outline: 'none' }}
-                  />
-                </div>
-                <select
-                  value={filterSegment}
-                  onChange={(e) => setFilterSegment(e.target.value)}
-                  id="filter-segment"
-                  aria-label="Filter by segment"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', color: 'var(--text-white)', fontSize: '0.9rem', outline: 'none' }}
-                >
-                  <option value="all" style={{ background: 'var(--surface-dark)' }}>All Segments</option>
-                  {segmentOptions.map((seg) => (
-                    <option key={seg} value={seg} style={{ background: 'var(--surface-dark)' }}>{seg}</option>
-                  ))}
-                </select>
-
-                <select
-                  value={filterAuditStatus}
-                  onChange={(e) => setFilterAuditStatus(e.target.value)}
-                  id="filter-audit-status"
-                  aria-label="Filter by audit status"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', color: 'var(--text-white)', fontSize: '0.9rem', outline: 'none' }}
-                >
-                  <option value="all" style={{ background: 'var(--surface-dark)' }}>All Statuses</option>
-                  <option value="Completed" style={{ background: 'var(--surface-dark)' }}>Completed</option>
-                  <option value="Pending" style={{ background: 'var(--surface-dark)' }}>Pending</option>
-                  <option value="Failed" style={{ background: 'var(--surface-dark)' }}>Failed</option>
-                </select>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Score: {filterMinScore}+</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={filterMinScore}
-                    onChange={(e) => setFilterMinScore(parseInt(e.target.value))}
-                    id="filter-min-score"
-                    aria-label="Minimum score filter"
-                    style={{ accentColor: 'var(--primary)', width: '100px' }}
-                  />
-                </div>
-              </div>
-            </div>
+            <FilterBar
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              filterSegment={filterSegment}
+              setFilterSegment={setFilterSegment}
+              filterAuditStatus={filterAuditStatus}
+              setFilterAuditStatus={setFilterAuditStatus}
+              filterMinScore={filterMinScore}
+              setFilterMinScore={setFilterMinScore}
+              segmentOptions={segmentOptions}
+            />
 
             <div className="table-container">
               <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0', tableLayout: 'fixed' }}>
@@ -959,7 +814,7 @@ export default function Dashboard() {
                   <col style={{ width: '27%' }} />
                 </colgroup>
                 <thead>
-                  <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <tr style={{ background: 'var(--surface-subtle)' }}>
                     <th style={{ padding: '1rem 1.5rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>PROSPECT</th>
                     <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>AUDIT STATUS</th>
                     <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>INTELLIGENCE</th>
@@ -993,7 +848,7 @@ export default function Dashboard() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                 <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-white)' }}>{lead.company_name || lead.name || 'Unknown Entity'}</span>
                                 {lead.high_risk_flag && (
-                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                                  <span className="badge" style={{ background: 'var(--error-tint)', color: 'var(--error)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                                     <AlertCircle size={12} /> RISK
                                   </span>
                                 )}
@@ -1029,11 +884,11 @@ export default function Dashboard() {
                           </td>
                           <td style={{ padding: '1rem', textAlign: 'center', verticalAlign: 'middle' }}>
                             <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', color: 'var(--text-dim)' }}>
-                              {lead.facebook && <a href={ensureProtocol(lead.facebook)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Facebook size={16} /></a>}
-                              {lead.instagram && <a href={ensureProtocol(lead.instagram)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Instagram size={16} /></a>}
-                              {lead.linkedin && <a href={ensureProtocol(lead.linkedin)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Linkedin size={16} /></a>}
-                              {lead.tiktok && <a href={ensureProtocol(lead.tiktok)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Music size={16} /></a>}
-                              {lead.pinterest && <a href={ensureProtocol(lead.pinterest)} target="_blank" rel="noopener noreferrer" className="hover:text-white"><Pin size={16} /></a>}
+                              {lead.facebook && <a href={ensureProtocol(lead.facebook)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} Facebook page`} className="social-link"><Facebook size={16} /></a>}
+                              {lead.instagram && <a href={ensureProtocol(lead.instagram)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} Instagram page`} className="social-link"><Instagram size={16} /></a>}
+                              {lead.linkedin && <a href={ensureProtocol(lead.linkedin)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} LinkedIn page`} className="social-link"><Linkedin size={16} /></a>}
+                              {lead.tiktok && <a href={ensureProtocol(lead.tiktok)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} TikTok page`} className="social-link"><Music size={16} /></a>}
+                              {lead.pinterest && <a href={ensureProtocol(lead.pinterest)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} Pinterest page`} className="social-link"><Pin size={16} /></a>}
                               {!lead.facebook && !lead.instagram && !lead.linkedin && !lead.tiktok && !lead.pinterest && <span style={{ fontSize: '0.75rem', opacity: 0.3 }}>N/A</span>}
                             </div>
                           </td>
@@ -1041,19 +896,21 @@ export default function Dashboard() {
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
                               <button 
                                 className="btn-secondary" 
-                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '36px', minHeight: '36px' }}
+                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '44px', minHeight: '44px' }}
                                 onClick={() => handleEnrichLead(lead.unique_key)}
                                 disabled={processingLeads[lead.unique_key]}
                                 title="Harvest Contact Details"
+                                aria-label="Harvest contact details"
                               >
                                 {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
                               </button>
                               <button 
                                 className="btn-secondary" 
-                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '36px', minHeight: '36px', color: 'var(--accent)', borderColor: 'rgba(245, 158, 11, 0.2)' }}
+                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '44px', minHeight: '44px', color: 'var(--accent)', borderColor: 'rgba(245, 158, 11, 0.2)' }}
                                 onClick={() => handleDeepHunt(lead.unique_key)}
                                 disabled={processingLeads[lead.unique_key]}
                                 title="Deep Digital Hunt"
+                                aria-label="Deep digital hunt"
                               >
                                 {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
                               </button>
@@ -1156,7 +1013,7 @@ export default function Dashboard() {
             )}
 
             {linkedinDraft && (
-              <div style={{ marginTop: '0', padding: '1.5rem', background: 'rgba(10, 102, 194, 0.1)', borderRadius: '12px', border: '1px solid rgba(10, 102, 194, 0.2)', marginBottom: '2rem' }}>
+              <div style={{ marginTop: '0', padding: '1.5rem', background: 'var(--linkedin-tint)', borderRadius: '12px', border: '1px solid rgba(10, 102, 194, 0.2)', marginBottom: '2rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--linkedin)' }}>
                   <Linkedin size={18} />
                   <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>LinkedIn Connection Request</h4>
@@ -1165,7 +1022,7 @@ export default function Dashboard() {
                   {linkedinDraft}
                 </p>
                 {activeLead?.linkedin_hook && (
-                  <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', borderLeft: '3px solid var(--linkedin)' }}>
+                  <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--surface-muted)', borderRadius: '8px', borderLeft: '3px solid var(--linkedin)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
                       <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Personalized Connection Hook</div>
                       <button
@@ -1238,7 +1095,7 @@ export default function Dashboard() {
                   value={discoveryQuery}
                   onChange={(e) => setDiscoveryQuery(e.target.value)}
                   placeholder="e.g. Dental Clinics"
-                  style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'var(--text-white)' }}
+                  style={{ width: '100%', background: 'var(--surface-muted)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'var(--text-white)' }}
                 />
               </div>
               <div>
@@ -1249,7 +1106,7 @@ export default function Dashboard() {
                   value={discoveryLocation}
                   onChange={(e) => setDiscoveryLocation(e.target.value)}
                   placeholder="e.g. New York, NY"
-                  style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'var(--text-white)' }}
+                  style={{ width: '100%', background: 'var(--surface-muted)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', color: 'var(--text-white)' }}
                 />
               </div>
             </div>
@@ -1284,7 +1141,7 @@ export default function Dashboard() {
             </div>
             
             {(isDiscovering || (orchestratorJob && orchestratorJob.type === 'discovery')) && (
-                <div style={{ marginTop: '1.5rem', padding: '1.5rem', background: orchestratorJob?.current_phase === 'CAPTCHA Required' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(99, 102, 241, 0.05)', borderRadius: '16px', border: orchestratorJob?.current_phase === 'CAPTCHA Required' ? '1px solid var(--error)' : '1px solid var(--primary)', animation: orchestratorJob?.status === 'running' ? 'pulse 2s infinite' : 'none' }}>
+                <div style={{ marginTop: '1.5rem', padding: '1.5rem', background: orchestratorJob?.current_phase === 'CAPTCHA Required' ? 'var(--error-tint)' : 'var(--primary-tint-5)', borderRadius: '16px', border: orchestratorJob?.current_phase === 'CAPTCHA Required' ? '1px solid var(--error)' : '1px solid var(--primary)', animation: orchestratorJob?.status === 'running' ? 'pulse 2s infinite' : 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
                     {orchestratorJob?.current_phase === 'CAPTCHA Required' ? (
                       <AlertTriangle size={18} color="var(--error)" />
@@ -1302,7 +1159,7 @@ export default function Dashboard() {
                       Please perform a manual search on the server or use a proxy.
                       <button 
                         className="btn-secondary" 
-                        style={{ marginTop: '1rem', width: '100%', borderColor: 'rgba(255,255,255,0.1)', fontSize: '0.7rem' }}
+                        style={{ marginTop: '1rem', width: '100%', borderColor: 'var(--border-muted)', fontSize: '0.7rem' }}
                         onClick={() => { setIsDiscovering(false); setOrchestratorJob(null); }}
                       >
                         Acknowledge & Dismiss
@@ -1310,7 +1167,7 @@ export default function Dashboard() {
                     </div>
                   ) : (
                     <>
-                      <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ width: '100%', height: '4px', background: 'var(--border-muted)', borderRadius: '2px', overflow: 'hidden' }}>
                         <div 
                           style={{ 
                             width: orchestratorJob?.status === 'completed' ? '100%' : `${((discoveryStep + 1) / DISCOVERY_STEPS.length) * 100}%`, 
@@ -1350,13 +1207,13 @@ export default function Dashboard() {
             </h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
-              <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>API Configuration</h4>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Backend: <code>{API_BASE_URL}</code></p>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Database: Supabase (Connected)</p>
               </div>
               
-              <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Browser Persistence</h4>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-primary)' }}>Keep browser alive between audits</span>
@@ -1367,7 +1224,7 @@ export default function Dashboard() {
                     style={{
                       width: '40px',
                       height: '20px',
-                      background: browserPersistence ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+                      background: browserPersistence ? 'var(--primary)' : 'var(--border-muted)',
                       borderRadius: '10px',
                       position: 'relative',
                       cursor: 'pointer',
@@ -1391,7 +1248,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>Data Export Management</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem' }}>
                   <button 
@@ -1399,7 +1256,7 @@ export default function Dashboard() {
                     style={{ fontSize: '0.8rem', justifyContent: 'center' }}
                     onClick={async () => {
                       try {
-                        const res = await fetch(`${API_BASE_URL}/export`);
+                        const res = await apiFetch(`${API_BASE_URL}/export`);
                         const data = await res.json();
                         showToast(data.message || "Export generated!", 'success');
                       } catch {
@@ -1419,7 +1276,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
+              <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid var(--error-tint)' }}>
                 <h4 style={{ fontSize: '0.9rem', color: 'var(--error)', marginBottom: '0.5rem' }}>Danger Zone</h4>
                 <button className="btn-secondary" style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }} onClick={handleClearLeads}>
                   Clear All Leads
@@ -1437,7 +1294,7 @@ export default function Dashboard() {
       {campaign && (
         <div role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(900px, 95vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--primary)', borderRadius: '24px' }}>
-             <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)' }}>
+             <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-subtle)' }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                  <div style={{ background: 'var(--primary)', borderRadius: '10px', padding: '0.6rem' }}>
                     <Zap size={20} color="white" />
@@ -1450,7 +1307,7 @@ export default function Dashboard() {
                <button
                  onClick={() => setCampaign(null)}
                  aria-label="Close campaign strategy"
-                 style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', cursor: 'pointer' }}
+                 style={{ background: 'var(--surface-muted)', border: 'none', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', cursor: 'pointer' }}
                >
                  <X size={20} />
                </button>
@@ -1458,12 +1315,12 @@ export default function Dashboard() {
 
              <div style={{ flex: 1, overflowY: 'auto', padding: 'clamp(1rem, 3vw, 2rem)', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                 {campaign.map((item, idx) => (
-                  <div key={idx} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '16px', padding: '1.5rem', transition: 'all 0.2s' }}>
+                  <div key={idx} style={{ background: 'var(--surface-subtle)', border: '1px solid var(--border-subtle)', borderRadius: '16px', padding: '1.5rem', transition: 'all 0.2s' }}>
                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                         <div>
                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
                               <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-white)' }}>{item.company}</h4>
-                              <span style={{ fontSize: '0.7rem', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary-light)', padding: '0.1rem 0.5rem', borderRadius: '4px' }}>Lead {idx + 1}</span>
+                              <span style={{ fontSize: '0.7rem', background: 'var(--primary-tint-10)', color: 'var(--primary-light)', padding: '0.1rem 0.5rem', borderRadius: '4px' }}>Lead {idx + 1}</span>
                            </div>
                            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Greeting: <strong style={{ color: 'var(--text-primary)' }}>Hi {item.first_name || 'there'}</strong></p>
                         </div>
@@ -1485,7 +1342,7 @@ export default function Dashboard() {
                 ))}
              </div>
 
-             <div style={{ padding: '1.5rem 2rem', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+             <div style={{ padding: '1.5rem 2rem', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid var(--border-muted)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
                 <button className="btn-secondary" onClick={() => setCampaign(null)}>Close Library</button>
                 <button className="btn-primary" onClick={() => {
                    const allDrafts = campaign.map(c => `PROSPECT: ${c.company}\nDRAFT:\n${c.draft}\n\n`).join('-------------------\n');

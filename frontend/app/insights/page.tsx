@@ -11,7 +11,7 @@ import {
 import Link from 'next/link';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
-import { API_BASE_URL } from '@/utils/apiConfig';
+import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 import { createClient } from '@/utils/supabase/client';
 
 interface Stats {
@@ -49,7 +49,7 @@ export default function InsightsPage() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/stats`);
+      const response = await apiFetch(`${API_BASE_URL}/stats`);
       const data = await response.json();
       setStats(data);
     } catch (err) {
@@ -60,7 +60,7 @@ export default function InsightsPage() {
   const fetchInsightsData = useCallback(async () => {
     setFetchingInsights(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/insights`);
+      const response = await apiFetch(`${API_BASE_URL}/insights`);
       const data = await response.json();
       setInsights(data);
     } catch (err) {
@@ -115,7 +115,7 @@ export default function InsightsPage() {
           </div>
           <button
             onClick={() => setIsSidebarOpen(true)}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-muted)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             aria-label="Open menu"
           >
             <Menu size={22} />
@@ -138,7 +138,7 @@ export default function InsightsPage() {
           {/* Quick Metrics */}
           <section className="grid-responsive-stats" style={{ marginBottom: '2rem' }}>
             <div className="card stat-card">
-              <div className="stat-icon" style={{ background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)' }}>
+              <div className="stat-icon" style={{ background: 'var(--primary-tint-10)', color: 'var(--primary)' }}>
                 <Users size={20} />
               </div>
               <div>
@@ -147,7 +147,7 @@ export default function InsightsPage() {
               </div>
             </div>
             <div className="card stat-card">
-              <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)' }}>
+              <div className="stat-icon" style={{ background: 'var(--success-tint)', color: 'var(--success)' }}>
                 <Shield size={20} />
               </div>
               <div>
@@ -158,7 +158,7 @@ export default function InsightsPage() {
               </div>
             </div>
             <div className="card stat-card">
-              <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>
+              <div className="stat-icon" style={{ background: 'var(--warning-tint)', color: 'var(--warning)' }}>
                 <Target size={20} />
               </div>
               <div>
@@ -169,7 +169,7 @@ export default function InsightsPage() {
               </div>
             </div>
             <div className="card stat-card">
-              <div className="stat-icon" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error)' }}>
+              <div className="stat-icon" style={{ background: 'var(--error-tint)', color: 'var(--error)' }}>
                 <Zap size={20} />
               </div>
               <div>
@@ -215,7 +215,7 @@ export default function InsightsPage() {
               <div style={{ height: '300px', width: '100%' }} role="img" aria-label="SEO score distribution chart">
                 <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                   <BarChart data={stats?.seo_score_ranges || []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-muted)" vertical={false} />
                     <XAxis 
                       dataKey="range" 
                       axisLine={false} 
@@ -228,7 +228,7 @@ export default function InsightsPage() {
                       tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
                     />
                     <RechartsTooltip
-                      cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                      cursor={{ fill: 'var(--surface-muted)' }}
                       contentStyle={{ background: 'var(--surface-tooltip)', border: '1px solid var(--border-tooltip)', borderRadius: '8px' }}
                     />
                     <Bar dataKey="count" fill="var(--primary)" radius={[4, 4, 0, 0]} barSize={40} />
@@ -241,7 +241,7 @@ export default function InsightsPage() {
           {/* Strategic Analysis Section */}
           <section className="card" style={{ marginBottom: '2rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-              <div className="stat-icon" style={{ background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', width: '32px', height: '32px' }}>
+              <div className="stat-icon" style={{ background: 'var(--primary-tint-10)', color: 'var(--primary)', width: '32px', height: '32px' }}>
                 <TrendingUp size={18} />
               </div>
               <h3 className="card-title" style={{ marginBottom: 0 }}>AI Strategic Analysis</h3>
@@ -254,7 +254,7 @@ export default function InsightsPage() {
               </div>
             ) : insights ? (
               <div className="insights-full-view">
-                <div className="summary-banner" style={{ padding: '1.5rem', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.1)', marginBottom: '2rem' }}>
+                <div className="summary-banner" style={{ padding: '1.5rem', background: 'var(--primary-tint-5)', borderRadius: '12px', border: '1px solid var(--primary-tint-10)', marginBottom: '2rem' }}>
                   <p style={{ fontSize: '1.125rem', color: 'var(--primary-light)', lineHeight: 1.6, margin: 0 }}>
                     {insights.summary}
                   </p>
@@ -265,8 +265,8 @@ export default function InsightsPage() {
                     <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>Key Market Patterns</h4>
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       {insights.insights.map((insight, idx) => (
-                        <li key={idx} style={{ display: 'flex', gap: '0.75rem', padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                          <span style={{ flexShrink: 0, width: '1.5rem', height: '1.5rem', borderRadius: '50%', background: 'rgba(99,102,241,0.2)', color: 'var(--primary-medium)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
+                        <li key={idx} style={{ display: 'flex', gap: '0.75rem', padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                          <span style={{ flexShrink: 0, width: '1.5rem', height: '1.5rem', borderRadius: '50%', background: 'var(--primary-tint-20)', color: 'var(--primary-medium)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
                             {idx + 1}
                           </span>
                           <span style={{ color: 'var(--text-secondary)' }}>{insight}</span>
@@ -279,7 +279,7 @@ export default function InsightsPage() {
                     <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>High-Impact Priorities</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       {insights.top_priorities.map((priority, idx) => (
-                        <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', transition: 'border-color 0.2s' }}>
+                        <div key={idx} style={{ padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)', transition: 'border-color 0.2s' }}>
                           <div style={{ fontWeight: 700, color: 'var(--text-white)', marginBottom: '0.25rem' }}>{priority.name}</div>
                           <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{priority.reason}</div>
                         </div>

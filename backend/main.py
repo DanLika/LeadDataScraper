@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends, Security, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -6,10 +6,12 @@ import os
 import pandas as pd
 import aiofiles
 from datetime import datetime
-from typing import Optional
+from pathlib import PurePath
+from typing import Optional, List
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, constr
 from postgrest.exceptions import APIError
+from fastapi.security import APIKeyHeader
 
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.agentic_router import AgenticRouter
@@ -21,11 +23,21 @@ from fastapi.responses import FileResponse
 
 logger = get_logger(__name__)
 
+# --- API Key Authentication ---
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-def error_response(message, status_code=500, details=None) -> JSONResponse:
+async def verify_api_key(key: Optional[str] = Security(api_key_header)) -> str:
+    expected = os.getenv("API_SECRET_KEY")
+    if not expected:
+        logger.warning("API_SECRET_KEY not set — all requests are allowed. Set it in .env for production.")
+        return "no-auth"
+    if not key or key != expected:
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+    return key
+
+
+def error_response(message, status_code=500) -> JSONResponse:
     body = {"error": message}
-    if details:
-        body["details"] = details
     return JSONResponse(content=body, status_code=status_code)
 
 
@@ -38,6 +50,25 @@ class CampaignUpdate(BaseModel):
     name: Optional[str] = None
     status: Optional[str] = None
 
+class LeadProcessRequest(BaseModel):
+    unique_key: str
+
+class AskRequest(BaseModel):
+    instruction: dict
+
+class DiscoveryRequest(BaseModel):
+    query: constr(min_length=1, max_length=500)
+    location: Optional[str] = Field(default="", max_length=200)
+
+class PipelineRequest(BaseModel):
+    filters: Optional[dict] = None
+    lead_ids: Optional[List[str]] = None
+    tasks: Optional[List[str]] = None
+
+class ExecutePlanRequest(BaseModel):
+    task: str
+    params: Optional[dict] = None
+
 load_dotenv()
 
 app = FastAPI(title="LeadDataScraper API")
@@ -47,8 +78,6 @@ auditor = ParallelAuditor()
 orchestrator = TaskOrchestrator()
 
 # Configure CORS
-# SECURITY WARNING: Using ["*"] for allow_origins is overly permissive and allows any site
-# to make cross-origin requests to this API. Specific domains should be listed in ALLOWED_ORIGINS.
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 
@@ -56,8 +85,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
 
 @app.get("/")
@@ -65,7 +94,7 @@ async def root():
     """Health check endpoint to verify API status."""
     return {"message": "LeadDataScraper API is running", "status": "online"}
 
-@app.get("/leads")
+@app.get("/leads", dependencies=[Depends(verify_api_key)])
 async def list_leads():
     """Retrieve all leads from the database ordered by creation date."""
     try:
@@ -75,10 +104,10 @@ async def list_leads():
         return {"leads": response.data}
     except APIError as e:
         logger.error("Database API Error fetching leads: %s", e, exc_info=True)
-        return error_response("Failed to fetch leads from database", status_code=502, details=str(e))
+        return error_response("Failed to fetch leads from database", status_code=502)
     except Exception as e:
         logger.error("Unexpected error fetching leads: %s", e, exc_info=True)
-        return error_response("An unexpected error occurred while fetching leads", details=str(e))
+        return error_response("An unexpected error occurred while fetching leads")
 
 def validate_csv_upload(file: UploadFile, contents: bytes) -> Optional[JSONResponse]:
     """Validate uploaded file is a CSV and within size limits."""
@@ -94,7 +123,7 @@ def validate_csv_upload(file: UploadFile, contents: bytes) -> Optional[JSONRespo
 
     return None
 
-@app.post("/upload")
+@app.post("/upload", dependencies=[Depends(verify_api_key)])
 async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """
     Handle CSV file upload, map columns using AI, and upsert leads to the database.
@@ -105,8 +134,9 @@ async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = Fil
     if validation_error:
         return validation_error
 
-    # Save uploaded file temporarily
-    temp_path = f"tmp_{file.filename}"
+    # Save uploaded file temporarily — sanitize filename to prevent path traversal
+    safe_name = PurePath(file.filename).name
+    temp_path = f"tmp_{safe_name}"
     async with aiofiles.open(temp_path, "wb") as buffer:
         await buffer.write(contents)
 
@@ -172,23 +202,19 @@ def process_csv_background(temp_path: str):
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-@app.post("/process-lead")
-async def process_single_lead(payload: dict):
+@app.post("/process-lead", dependencies=[Depends(verify_api_key)])
+async def process_single_lead(payload: LeadProcessRequest):
     """Trigger a single lead SEO audit and enrichment via orchestrator."""
-    unique_key = payload.get("unique_key")
-    if not unique_key:
-        return error_response("unique_key is required", status_code=400)
+    job_id = await orchestrator.run_massive_pipeline(lead_ids=[payload.unique_key])
+    return {"status": "started", "unique_key": payload.unique_key, "job_id": job_id}
 
-    job_id = await orchestrator.run_massive_pipeline(lead_ids=[unique_key])
-    return {"status": "started", "unique_key": unique_key, "job_id": job_id}
-
-@app.post("/process-all")
+@app.post("/process-all", dependencies=[Depends(verify_api_key)])
 async def process_all_pending():
     """Trigger the audit orchestrator to process all pending leads."""
     job_id = await orchestrator.run_massive_pipeline(tasks=["audit"])
     return {"status": "job_started", "job_id": job_id}
 
-@app.get("/audit-status")
+@app.get("/audit-status", dependencies=[Depends(verify_api_key)])
 async def get_audit_status():
     """
     Get the current status of the batch audit process.
@@ -209,10 +235,9 @@ async def get_audit_status():
         }
     return {"active": False, "processed": 0, "total": 0}
 
-@app.post("/audit/stop")
+@app.post("/audit/stop", dependencies=[Depends(verify_api_key)])
 async def stop_audit():
     """Signal the orchestrator to stop all running jobs."""
-    # Single query update all running jobs to stopped
     db.client.table("orchestration_jobs").update({
         "status": "stopped",
         "current_phase": "Stopped by user"
@@ -221,13 +246,12 @@ async def stop_audit():
     auditor.stop()
     return {"status": "stopped"}
 
-@app.get("/health/schema")
+@app.get("/health/schema", dependencies=[Depends(verify_api_key)])
 async def health_schema():
     missing = db.check_schema()
     return {
         "status": "healthy" if not missing else "degraded",
-        "missing_columns": missing,
-        "migration_sql": "ALTER TABLE leads " + ", ".join([f"ADD COLUMN IF NOT EXISTS {col} TEXT" for col in missing]) + ";" if missing else ""
+        "missing_columns_count": len(missing),
     }
 
 @app.on_event("startup")
@@ -248,14 +272,14 @@ async def startup_event():
         logger.info("Database schema is up to date.")
     await orchestrator.recover_interrupted_jobs()
 
-@app.post("/ask")
-async def ask_ai(payload: dict, background_tasks: BackgroundTasks):
+@app.post("/ask", dependencies=[Depends(verify_api_key)])
+async def ask_ai(payload: AskRequest, background_tasks: BackgroundTasks):
     """
     Process natural language instructions.
     Can execute simple tasks immediately or propose a multi-step plan for confirmation.
     """
     try:
-        instruction_obj = payload.get("instruction", {})
+        instruction_obj = payload.instruction
         if not instruction_obj:
              return error_response("Missing 'instruction' object", status_code=400)
 
@@ -276,9 +300,9 @@ async def ask_ai(payload: dict, background_tasks: BackgroundTasks):
         return {"plan": plan, "response": "I've analyzed your request. Should I proceed with the task: " + plan.get("task", "Unknown") + "?"}
     except Exception as e:
         logger.error("Error in /ask: %s", e, exc_info=True)
-        return error_response("Failed to process instruction", details=str(e))
+        return error_response("Failed to process instruction")
 
-@app.get("/insights")
+@app.get("/insights", dependencies=[Depends(verify_api_key)])
 async def get_insights():
     try:
         plan = {"task": "GET_INSIGHTS"}
@@ -286,9 +310,9 @@ async def get_insights():
         return result
     except Exception as e:
         logger.error("Error getting insights: %s", e, exc_info=True)
-        return error_response("Insights currently unavailable", details=str(e))
+        return error_response("Insights currently unavailable")
 
-@app.get("/stats")
+@app.get("/stats", dependencies=[Depends(verify_api_key)])
 async def get_stats():
     """Retrieve structured statistics about leads for charting."""
     try:
@@ -333,120 +357,94 @@ async def get_stats():
         }
     except Exception as e:
         logger.error("Error fetching stats: %s", e, exc_info=True)
-        return error_response("Failed to fetch stats", details=str(e))
+        return error_response("Failed to fetch stats")
 
-@app.post("/draft-outreach")
-async def draft_outreach(payload: dict):
-    unique_key = payload.get("unique_key")
-    if not unique_key:
-        return error_response("unique_key is required", status_code=400)
-
+@app.post("/draft-outreach", dependencies=[Depends(verify_api_key)])
+async def draft_outreach(payload: LeadProcessRequest):
     plan = {
         "task": "OUTREACH_DRAFT",
-        "params": {"unique_key": unique_key}
+        "params": {"unique_key": payload.unique_key}
     }
 
     result = await router.execute_task(plan)
     return result
 
-@app.post("/draft-linkedin")
-async def draft_linkedin(payload: dict):
-    unique_key = payload.get("unique_key")
-    if not unique_key:
-        return error_response("unique_key is required", status_code=400)
-
+@app.post("/draft-linkedin", dependencies=[Depends(verify_api_key)])
+async def draft_linkedin(payload: LeadProcessRequest):
     plan = {
         "task": "LINKEDIN_DRAFT",
-        "params": {"unique_key": unique_key}
+        "params": {"unique_key": payload.unique_key}
     }
 
     result = await router.execute_task(plan)
     return result
 
-@app.post("/execute")
-async def execute_plan(plan: dict, background_tasks: BackgroundTasks):
+@app.post("/execute", dependencies=[Depends(verify_api_key)])
+async def execute_plan(plan: ExecutePlanRequest, background_tasks: BackgroundTasks):
     """Execute a multi-step plan previously proposed by the AI."""
-    task = plan.get("task")
-    if task == "SEO_AUDIT":
+    plan_dict = plan.model_dump()
+    if plan.task == "SEO_AUDIT":
         job_id = await orchestrator.run_massive_pipeline(tasks=["audit"])
         return {"result": {"message": "Scaling SEO Audit started", "job_id": job_id}}
 
-    result = await router.execute_task(plan)
+    result = await router.execute_task(plan_dict)
     return {"result": result}
 
-@app.post("/hunt-lead")
-async def hunt_single_lead(payload: dict):
-    unique_key = payload.get("unique_key")
-    if not unique_key:
-        return error_response("unique_key is required", status_code=400)
+@app.post("/hunt-lead", dependencies=[Depends(verify_api_key)])
+async def hunt_single_lead(payload: LeadProcessRequest):
+    job_id = await orchestrator.run_massive_pipeline(lead_ids=[payload.unique_key], tasks=["hunt"])
+    return {"status": "hunting_started", "unique_key": payload.unique_key, "job_id": job_id}
 
-    job_id = await orchestrator.run_massive_pipeline(lead_ids=[unique_key], tasks=["hunt"])
-    return {"status": "hunting_started", "unique_key": unique_key, "job_id": job_id}
-
-@app.post("/hunt-all")
+@app.post("/hunt-all", dependencies=[Depends(verify_api_key)])
 async def hunt_all_leads():
     """Start a deep digital hunt for all leads missing social data."""
     job_id = await orchestrator.run_massive_pipeline(tasks=["hunt"])
     return {"status": "job_started", "job_id": job_id}
 
-@app.post("/discovery/start")
-async def start_discovery(payload: dict):
+@app.post("/discovery/start", dependencies=[Depends(verify_api_key)])
+async def start_discovery(payload: DiscoveryRequest):
     """Start a deep discovery search on Google Maps for new leads in the background."""
-    query = payload.get("query")
-    location = payload.get("location", "")
+    job_id = await orchestrator.run_discovery_job(payload.query, payload.location)
+    return {"status": "discovery_started", "job_id": job_id, "query": payload.query, "location": payload.location}
 
-    if not query:
-        return error_response("query is required", status_code=400)
-
-    job_id = await orchestrator.run_discovery_job(query, location)
-
-    return {"status": "discovery_started", "job_id": job_id, "query": query, "location": location}
-
-@app.post("/enrich/start")
-async def start_enrichment(payload: dict):
+@app.post("/enrich/start", dependencies=[Depends(verify_api_key)])
+async def start_enrichment(payload: LeadProcessRequest):
     """Trigger the enrichment engine to find missing digital footprints via orchestrator."""
-    unique_key = payload.get("unique_key")
-    if not unique_key:
-        return error_response("unique_key is required", status_code=400)
+    job_id = await orchestrator.run_massive_pipeline(lead_ids=[payload.unique_key], tasks=["enrich"])
+    return {"status": "enrichment_started", "unique_key": payload.unique_key, "job_id": job_id}
 
-    job_id = await orchestrator.run_massive_pipeline(lead_ids=[unique_key], tasks=["enrich"])
-    return {"status": "enrichment_started", "unique_key": unique_key, "job_id": job_id}
-
-@app.delete("/leads/clear")
+@app.delete("/leads/clear", dependencies=[Depends(verify_api_key)])
 async def clear_leads():
     """Purge all leads and job history (Danger Zone)."""
     db.delete_all_leads()
     db.delete_all_jobs()
     return {"status": "cleared", "message": "All leads and jobs have been deleted."}
 
-@app.post("/orchestrator/start")
-async def start_massive_pipeline(payload: dict):
-    filters = payload.get("filters")
-    lead_ids = payload.get("lead_ids")
-    tasks = payload.get("tasks")
-    job_id = await orchestrator.run_massive_pipeline(filters=filters, lead_ids=lead_ids, tasks=tasks)
+@app.post("/orchestrator/start", dependencies=[Depends(verify_api_key)])
+async def start_massive_pipeline(payload: PipelineRequest):
+    job_id = await orchestrator.run_massive_pipeline(filters=payload.filters, lead_ids=payload.lead_ids, tasks=payload.tasks)
     return {"status": "job_started", "job_id": job_id}
 
-@app.get("/orchestrator/status/{job_id}")
+@app.get("/orchestrator/status/{job_id}", dependencies=[Depends(verify_api_key)])
 async def get_job_status(job_id: str):
     status = await orchestrator.get_job_status(job_id)
     return status
 
-@app.post("/orchestrator/stop/{job_id}")
+@app.post("/orchestrator/stop/{job_id}", dependencies=[Depends(verify_api_key)])
 async def stop_job(job_id: str):
     result = await orchestrator.stop_job(job_id)
     return result
 
-@app.get("/export")
+@app.get("/export", dependencies=[Depends(verify_api_key)])
 async def trigger_export():
     try:
         export_leads()
         return {"message": "Exports generated successfully in the 'exports' directory."}
     except Exception as e:
         logger.error("Export error: %s", e, exc_info=True)
-        return error_response("Export failed", details=str(e))
+        return error_response("Export failed")
 
-@app.get("/export/download")
+@app.get("/export/download", dependencies=[Depends(verify_api_key)])
 async def download_full_export():
     try:
         # 1. Always regenerate for fresh data
@@ -471,9 +469,9 @@ async def download_full_export():
         )
     except Exception as e:
         logger.error("Export download error: %s", e, exc_info=True)
-        return error_response("Export download failed", details=str(e))
+        return error_response("Export download failed")
 
-@app.get("/export/outreach")
+@app.get("/export/outreach", dependencies=[Depends(verify_api_key)])
 async def download_outreach_export():
     try:
         export_leads()
@@ -492,14 +490,18 @@ async def download_outreach_export():
         )
     except Exception as e:
         logger.error("Outreach export error: %s", e, exc_info=True)
-        return error_response("Outreach export failed", details=str(e))
+        return error_response("Outreach export failed")
 
 
 # ============================================================
 # Campaign Management Endpoints (Step 4: Outreach)
 # ============================================================
 
-@app.post("/campaigns")
+def _is_table_missing_error(e: Exception) -> bool:
+    """Check if a Supabase error indicates a missing table (PGRST205)."""
+    return "PGRST205" in str(e)
+
+@app.post("/campaigns", dependencies=[Depends(verify_api_key)])
 async def create_campaign(campaign: CampaignCreate):
     """Create a new outreach campaign."""
     try:
@@ -517,20 +519,28 @@ async def create_campaign(campaign: CampaignCreate):
         result = db.client.table("campaigns").insert(campaign_data).execute()
         return {"campaign": result.data[0] if result.data else campaign_data}
     except Exception as e:
+        if _is_table_missing_error(e):
+            logger.warning("Campaigns table not found. Run the SQL from supabase_schema.sql to create it.")
+            return error_response(
+                "Campaigns table not created yet. Please run the campaigns migration SQL in Supabase SQL Editor.",
+                status_code=503,
+            )
         logger.error("Error creating campaign: %s", e, exc_info=True)
-        return error_response("Failed to create campaign", details=str(e))
+        return error_response("Failed to create campaign")
 
-@app.get("/campaigns")
+@app.get("/campaigns", dependencies=[Depends(verify_api_key)])
 async def list_campaigns():
     """List all campaigns."""
     try:
         result = db.client.table("campaigns").select("*").order("created_at", desc=True).execute()
         return {"campaigns": result.data or []}
     except Exception as e:
+        if _is_table_missing_error(e):
+            return {"campaigns": [], "warning": "Campaigns table not created yet."}
         logger.error("Error listing campaigns: %s", e, exc_info=True)
-        return error_response("Failed to list campaigns", details=str(e))
+        return error_response("Failed to list campaigns")
 
-@app.get("/campaigns/{campaign_id}")
+@app.get("/campaigns/{campaign_id}", dependencies=[Depends(verify_api_key)])
 async def get_campaign(campaign_id: str):
     """Get campaign details with message statistics."""
     try:
@@ -557,9 +567,9 @@ async def get_campaign(campaign_id: str):
         }
     except Exception as e:
         logger.error("Error getting campaign %s: %s", campaign_id, e, exc_info=True)
-        return error_response("Failed to get campaign", details=str(e))
+        return error_response("Failed to get campaign")
 
-@app.post("/campaigns/{campaign_id}/generate")
+@app.post("/campaigns/{campaign_id}/generate", dependencies=[Depends(verify_api_key)])
 async def generate_campaign_messages(campaign_id: str, background_tasks: BackgroundTasks):
     """Generate personalized outreach messages for all leads in the campaign's segment."""
     try:
@@ -640,9 +650,9 @@ async def generate_campaign_messages(campaign_id: str, background_tasks: Backgro
         return {"status": "generated", "lead_count": len(leads)}
     except Exception as e:
         logger.error("Error generating campaign messages: %s", e, exc_info=True)
-        return error_response("Failed to generate campaign messages", details=str(e))
+        return error_response("Failed to generate campaign messages")
 
-@app.post("/campaigns/{campaign_id}/start")
+@app.post("/campaigns/{campaign_id}/start", dependencies=[Depends(verify_api_key)])
 async def start_campaign(campaign_id: str):
     """Mark campaign as active (actual sending would be handled by email_sender integration)."""
     try:
@@ -652,9 +662,9 @@ async def start_campaign(campaign_id: str):
         return {"status": "active", "message": "Campaign started. Messages will be sent according to rate limits."}
     except Exception as e:
         logger.error("Error starting campaign %s: %s", campaign_id, e, exc_info=True)
-        return error_response("Failed to start campaign", details=str(e))
+        return error_response("Failed to start campaign")
 
-@app.post("/campaigns/{campaign_id}/pause")
+@app.post("/campaigns/{campaign_id}/pause", dependencies=[Depends(verify_api_key)])
 async def pause_campaign(campaign_id: str):
     """Pause a running campaign."""
     try:
@@ -664,9 +674,9 @@ async def pause_campaign(campaign_id: str):
         return {"status": "paused"}
     except Exception as e:
         logger.error("Error pausing campaign %s: %s", campaign_id, e, exc_info=True)
-        return error_response("Failed to pause campaign", details=str(e))
+        return error_response("Failed to pause campaign")
 
-@app.get("/campaigns/{campaign_id}/export")
+@app.get("/campaigns/{campaign_id}/export", dependencies=[Depends(verify_api_key)])
 async def export_campaign_messages(campaign_id: str):
     """Export campaign messages as CSV for import into external tools."""
     try:
@@ -700,8 +710,9 @@ async def export_campaign_messages(campaign_id: str):
         )
     except Exception as e:
         logger.error("Error exporting campaign messages: %s", e, exc_info=True)
-        return error_response("Failed to export campaign messages", details=str(e))
+        return error_response("Failed to export campaign messages")
 
 
 if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    debug = os.getenv("DEBUG", "False").lower() == "true"
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=debug)

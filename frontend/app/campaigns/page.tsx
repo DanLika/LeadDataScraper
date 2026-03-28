@@ -4,10 +4,12 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Mail, Linkedin, Play, Pause, Download, Plus, ArrowLeft,
   Loader2, Send, Users, CheckCircle,
-  Eye, X, Shield
+  Eye, X, Shield, Menu
 } from 'lucide-react';
 import Link from 'next/link';
-import { API_BASE_URL } from '@/utils/apiConfig';
+import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
+import Sidebar from '../components/Sidebar';
+import AIChat from '../components/AIChat';
 
 interface Campaign {
   id: string;
@@ -46,10 +48,12 @@ export default function CampaignsPage() {
   const [newName, setNewName] = useState('');
   const [newChannel, setNewChannel] = useState('email');
   const [newSegment, setNewSegment] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const fetchCampaigns = useCallback(async () => {
     try {
-      const resp = await fetch(`${API_BASE_URL}/campaigns`);
+      const resp = await apiFetch(`${API_BASE_URL}/campaigns`);
       const data = await resp.json();
       setCampaigns(data.campaigns || []);
     } catch (err) {
@@ -61,7 +65,7 @@ export default function CampaignsPage() {
 
   const fetchCampaignDetails = useCallback(async (id: string) => {
     try {
-      const resp = await fetch(`${API_BASE_URL}/campaigns/${id}`);
+      const resp = await apiFetch(`${API_BASE_URL}/campaigns/${id}`);
       const data = await resp.json();
       if (data.campaign) {
         setSelectedCampaign(data.campaign);
@@ -82,7 +86,7 @@ export default function CampaignsPage() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/campaigns`, {
+      const resp = await apiFetch(`${API_BASE_URL}/campaigns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName, channel: newChannel, segment_filter: newSegment || null }),
@@ -104,7 +108,7 @@ export default function CampaignsPage() {
   const handleGenerate = async (campaignId: string) => {
     setGenerating(true);
     try {
-      await fetch(`${API_BASE_URL}/campaigns/${campaignId}/generate`, { method: 'POST' });
+      await apiFetch(`${API_BASE_URL}/campaigns/${campaignId}/generate`, { method: 'POST' });
       await fetchCampaignDetails(campaignId);
     } catch (err) {
       console.error('Failed to generate messages:', err);
@@ -115,7 +119,7 @@ export default function CampaignsPage() {
 
   const handleStartPause = async (campaignId: string, action: 'start' | 'pause') => {
     try {
-      await fetch(`${API_BASE_URL}/campaigns/${campaignId}/${action}`, { method: 'POST' });
+      await apiFetch(`${API_BASE_URL}/campaigns/${campaignId}/${action}`, { method: 'POST' });
       await fetchCampaigns();
       if (selectedCampaign?.id === campaignId) {
         await fetchCampaignDetails(campaignId);
@@ -149,7 +153,41 @@ export default function CampaignsPage() {
 
   return (
     <div className="dashboard-container">
-      <main className="main-content" style={{ marginLeft: 0, width: '100%' }}>
+      <Sidebar
+        view="all"
+        setView={() => {}}
+        showDiscoveryModal={false}
+        setShowDiscoveryModal={() => {}}
+        showSettings={false}
+        setShowSettings={() => {}}
+        leads={[]}
+        fetchingInsights={false}
+        insights={null}
+        fetchInsights={() => {}}
+        setSearchTerm={() => {}}
+        isOpenMobile={isSidebarOpen}
+        setIsOpenMobile={setIsSidebarOpen}
+        onCollapsedChange={setIsSidebarCollapsed}
+      />
+
+      <main className="main-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="mobile-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div className="logo-icon" style={{ width: '32px', height: '32px', borderRadius: '8px' }}>
+              <Shield size={18} color="white" />
+            </div>
+            <strong style={{ fontSize: '1rem', letterSpacing: '-0.02em' }}>LeadScout</strong>
+          </div>
+          <button
+            onClick={() => setIsSidebarOpen(true)}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-muted)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            aria-label="Open menu"
+          >
+            <Menu size={22} />
+          </button>
+        </div>
+
+        <div className="main-content-wrapper" style={{ padding: '2rem' }}>
         <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
@@ -168,7 +206,7 @@ export default function CampaignsPage() {
 
         {/* Create Campaign Modal */}
         {showCreate && (
-          <div className="card" style={{ marginBottom: '2rem', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+          <div className="card" style={{ marginBottom: '2rem', border: '1px solid hsla(var(--primary-hsl), 0.3)' }}>
             <h3 style={{ marginBottom: '1.5rem' }}>Create New Campaign</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
@@ -178,7 +216,7 @@ export default function CampaignsPage() {
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                   placeholder="e.g. Q1 Cold Outreach - Dental Clinics"
-                  style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
+                  style={{ width: '100%', padding: '0.75rem', background: 'var(--surface-muted)', border: '1px solid var(--border-muted)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
                 />
               </div>
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
@@ -188,7 +226,7 @@ export default function CampaignsPage() {
                     id="campaign-channel"
                     value={newChannel}
                     onChange={e => setNewChannel(e.target.value)}
-                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--surface-muted)', border: '1px solid var(--border-muted)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
                   >
                     <option value="email">Email</option>
                     <option value="linkedin">LinkedIn</option>
@@ -202,7 +240,7 @@ export default function CampaignsPage() {
                     value={newSegment}
                     onChange={e => setNewSegment(e.target.value)}
                     placeholder="e.g. Performance Optimization"
-                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--surface-muted)', border: '1px solid var(--border-muted)', borderRadius: '8px', color: 'var(--text-white)', fontSize: '0.95rem' }}
                   />
                 </div>
               </div>
@@ -280,7 +318,7 @@ export default function CampaignsPage() {
                   {messages.slice(0, 50).map((msg, idx) => (
                     <div key={idx} style={{
                       padding: '1rem',
-                      borderBottom: '1px solid rgba(255,255,255,0.05)',
+                      borderBottom: '1px solid var(--surface-muted)',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
@@ -294,7 +332,7 @@ export default function CampaignsPage() {
                             padding: '0.15rem 0.5rem',
                             borderRadius: '10px',
                             fontSize: '0.7rem',
-                            background: msg.status === 'sent' ? 'rgba(16,185,129,0.1)' : 'rgba(148,163,184,0.1)',
+                            background: msg.status === 'sent' ? 'var(--success-tint)' : 'rgba(148,163,184,0.1)',
                             color: msg.status === 'sent' ? 'var(--success)' : 'var(--text-muted)'
                           }}>
                             {msg.status}
@@ -308,7 +346,7 @@ export default function CampaignsPage() {
                       <button
                         aria-label="Preview message"
                         onClick={() => setPreviewMessage(msg)}
-                        style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ background: 'var(--surface-muted)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <Eye size={16} />
                       </button>
@@ -361,7 +399,7 @@ export default function CampaignsPage() {
                 <div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Body</span>
                   <div style={{
-                    background: 'rgba(255,255,255,0.03)',
+                    background: 'var(--surface-elevated)',
                     padding: '1rem',
                     borderRadius: '8px',
                     whiteSpace: 'pre-wrap',
@@ -432,7 +470,10 @@ export default function CampaignsPage() {
             )}
           </>
         )}
+        </div>
       </main>
+
+      <AIChat sidebarCollapsed={isSidebarCollapsed} />
     </div>
   );
 }

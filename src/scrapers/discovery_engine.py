@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import re
+from urllib.parse import quote_plus
 from typing import List, Optional
 from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
 from src.utils.supabase_helper import SupabaseHelper
@@ -32,7 +33,7 @@ class DiscoveryEngine:
 
             try:
                 # 1. Navigate to Google Maps
-                url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
+                url = f"https://www.google.com/maps/search/{quote_plus(search_query)}"
                 await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 await asyncio.sleep(5) # Give it a moment to load markers
 

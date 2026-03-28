@@ -75,10 +75,7 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
 
     try:
         timeout = aiohttp.ClientTimeout(total=20)
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -95,7 +92,11 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
                 except (aiohttp.ClientConnectorSSLError, ssl.SSLError):
                     results["red_flags"].append("SSL Certificate Error")
                     results["has_ssl"] = False
-                    async with session.get(url, timeout=12, ssl=ssl_ctx) as response:
+                    # Fallback: allow connection to inspect content despite bad cert
+                    fallback_ssl = ssl.create_default_context()
+                    fallback_ssl.check_hostname = False
+                    fallback_ssl.verify_mode = ssl.CERT_NONE
+                    async with session.get(url, timeout=12, ssl=fallback_ssl) as response:
                         html = await response.text()
                         results["is_up"] = True
                         results["response_time"] = round(time.time() - start_time, 2)
