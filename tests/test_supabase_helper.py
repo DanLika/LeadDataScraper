@@ -231,5 +231,53 @@ class TestSupabaseHelperUpsert(unittest.TestCase):
             self.assertIn("DATABASE SCHEMA MISMATCH:", mock_logger.error.call_args[0][0])
             mock_logger.warning.assert_called_with("Please run the SQL migration script provided in the implementation plan.")
 
+class TestSupabaseHelperUpdateLeadInfo(unittest.TestCase):
+    def setUp(self):
+        with patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_ANON_KEY": "test-key"}), \
+             patch("src.utils.supabase_helper.create_client") as mock_create:
+            mock_create.return_value = MagicMock()
+            self.helper = SupabaseHelper()
+            self.helper.client = MagicMock()
+
+    def test_update_lead_info_no_client(self):
+        """Test update_lead_info when self.client is None."""
+        self.helper.client = None
+        result = self.helper.update_lead_info("test_key", {"foo": "bar"})
+        self.assertIsNone(result)
+
+    def test_update_lead_info_success(self):
+        """Test successful update_lead_info."""
+        unique_key = "test_key"
+        data = {"foo": "bar"}
+        mock_execute = MagicMock(return_value="success_result")
+        mock_eq = MagicMock(return_value=MagicMock(execute=mock_execute))
+        mock_update = MagicMock(return_value=MagicMock(eq=mock_eq))
+        mock_table = MagicMock(return_value=MagicMock(update=mock_update))
+        self.helper.client.table = mock_table
+
+        result = self.helper.update_lead_info(unique_key, data)
+
+        self.assertEqual(result, "success_result")
+        mock_table.assert_called_once_with("leads")
+        mock_update.assert_called_once_with(data)
+        mock_eq.assert_called_once_with("unique_key", unique_key)
+        mock_execute.assert_called_once()
+
+    def test_update_lead_info_error(self):
+        """Test update_lead_info handling an exception."""
+        unique_key = "test_key"
+        data = {"foo": "bar"}
+        mock_execute = MagicMock(side_effect=Exception("DB Update Error"))
+        mock_eq = MagicMock(return_value=MagicMock(execute=mock_execute))
+        mock_update = MagicMock(return_value=MagicMock(eq=mock_eq))
+        mock_table = MagicMock(return_value=MagicMock(update=mock_update))
+        self.helper.client.table = mock_table
+
+        with patch("src.utils.supabase_helper.logger") as mock_logger:
+            result = self.helper.update_lead_info(unique_key, data)
+            self.assertIsNone(result)
+            mock_logger.error.assert_called_once()
+            self.assertIn("Error updating lead info for %s: %s", mock_logger.error.call_args[0][0])
+
 if __name__ == "__main__":
     unittest.main()
