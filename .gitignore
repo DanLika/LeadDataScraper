@@ -51,5 +51,10 @@ logs/
 # IDE / Tools
 .claude/
 .cursor/
+.continue/
+.kiro/
+.trae/
+.agents/
 .mcp.json
 .coverage
+skills-lock.json
