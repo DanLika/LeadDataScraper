@@ -280,7 +280,7 @@ async def ask_ai(payload: AskRequest, background_tasks: BackgroundTasks):
     """
     try:
         instruction_obj = payload.instruction
-        if not instruction_obj:
+        if instruction_obj is None:
              return error_response("Missing 'instruction' object", status_code=400)
 
         prompt = instruction_obj.get("text")
