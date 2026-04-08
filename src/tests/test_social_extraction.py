@@ -1,7 +1,6 @@
 import unittest
 import asyncio
 from src.scrapers.seo_audit import perform_seo_audit_async
-from src.core.parallel_auditor import ParallelAuditor
 
 class TestSocialExtraction(unittest.TestCase):
     async def test_regex_extraction(self):
@@ -31,21 +30,6 @@ class TestSocialExtraction(unittest.TestCase):
     def test_run_async(self):
         asyncio.run(self.test_regex_extraction())
 
-    async def async_test_hunt(self):
-        auditor = ParallelAuditor()
-        lead = {
-            "unique_key": "test_hunt",
-            "name": "Test Business",
-            "website": "http://example.com"
-        }
-        # This requires LeadHunter and actual network/LLM if not mocked
-        # result = await auditor.hunt_single_lead(lead)
-        # self.assertIn("facebook", result)
-        pass
-
-    def test_hunt_flow(self):
-        # asyncio.run(self.async_test_hunt())
-        pass
 
 if __name__ == '__main__':
     unittest.main()
