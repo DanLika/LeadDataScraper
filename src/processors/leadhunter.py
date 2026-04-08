@@ -13,6 +13,28 @@ from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# --- Precompiled regexes and sets for performance ---
+FB_EXCLUDE_RE = re.compile(r'search|directory|public|groups|/l\.php|sharer\.php')
+INSTA_EXCLUDE_RE = re.compile(r'explore|accounts/login|p/|direct/')
+TT_EXCLUDE_RE = re.compile(r'/share|/video/')
+PIN_EXCLUDE_RE = re.compile(r'/pin/|/search/|/explore/|/create/')
+
+JUNK_EMAILS_TUPLE = (
+    'example.com', 'email.com', 'yourname', 'sentry.io', 'wixpress.com',
+    'domain.com', 'test.com', 'info@wix.com', 'noreply', 'support@wix.com',
+    'placeholder', 'my-email', 'abuse@', 'postmaster@', 'security@',
+    'generic@', 'office@domain.com', 'spam@', 'mailer-daemon'
+)
+
+TITLES_TO_SKIP_SET = frozenset([
+    "dr", "dr.", "prof", "prof.", "ceo", "founder", "owner",
+    "md", "director", "manager", "representative", "support",
+    "the", "company", "services", "global", "inc", "ltd", "agency",
+    "group", "team", "mr", "mrs", "ms", "sir"
+])
+
+SUBPAGE_LINK_TUPLE = ('contact', 'about', 'get in touch', 'reach us')
+
 # --- Crawlbase API Tokens (Configurable via ENV) ---
 CRAWLBASE_NORMAL_TOKEN = os.environ.get('CRAWLBASE_NORMAL_TOKEN')
 CRAWLBASE_JS_TOKEN = os.environ.get('CRAWLBASE_JS_TOKEN')
@@ -134,14 +156,7 @@ class LeadHunter:
             # Filter out obvious junk
             for email in emails:
                 email = email.lower()
-                # Expanded junk list based on production data
-                junk_list = [
-                    'example.com', 'email.com', 'yourname', 'sentry.io', 'wixpress.com',
-                    'domain.com', 'test.com', 'info@wix.com', 'noreply', 'support@wix.com',
-                    'placeholder', 'my-email', 'abuse@', 'postmaster@', 'security@',
-                    'generic@', 'office@domain.com', 'spam@', 'mailer-daemon'
-                ]
-                if any(x in email for x in junk_list) or len(email) < 5:
+                if any(x in email for x in JUNK_EMAILS_TUPLE) or len(email) < 5:
                     continue
                 return email
         return None
@@ -197,19 +212,19 @@ class LeadHunter:
 
                 # Cleaning logic to ensure profile links
                 if 'facebook.com' in href and not fb:
-                    if not any(x in href for x in ['search', 'directory', 'public', 'groups', '/l.php', 'sharer.php']):
+                    if not FB_EXCLUDE_RE.search(href):
                         fb = href
                 if 'instagram.com' in href and not insta:
-                    if not any(x in href for x in ['explore', 'accounts/login', 'p/', 'direct/']):
+                    if not INSTA_EXCLUDE_RE.search(href):
                         insta = href
                 if 'linkedin.com' in href and not li:
                     if 'company' in href or '/in/' in href:
                         li = href
                 if 'tiktok.com' in href and not tt:
-                    if '@' in href and not any(x in href for x in ['/share', '/video/']):
+                    if '@' in href and not TT_EXCLUDE_RE.search(href):
                         tt = href
                 if 'pinterest.com' in href and not pin:
-                    if not any(x in href for x in ['/pin/', '/search/', '/explore/', '/create/']):
+                    if not PIN_EXCLUDE_RE.search(href):
                         pin = href
         return fb, insta, li, tt, pin
 
@@ -233,17 +248,10 @@ class LeadHunter:
         # Clean string from common separators
         parts = re.split(r'[,\s&|/()]+', text.strip())
 
-        titles_to_skip = {
-            "dr", "dr.", "prof", "prof.", "ceo", "founder", "owner",
-            "md", "director", "manager", "representative", "support",
-            "the", "company", "services", "global", "inc", "ltd", "agency",
-            "group", "team", "mr", "mrs", "ms", "sir"
-        }
-
         for part in parts:
             if not part: continue
             p_lower = part.lower()
-            if p_lower in titles_to_skip:
+            if p_lower in TITLES_TO_SKIP_SET:
                 continue
             if len(p_lower) < 2:
                 continue
@@ -357,7 +365,7 @@ class LeadHunter:
         for a in soup.find_all('a', href=True):
             text = a.get_text().lower()
             href = a['href'].lower()
-            if any(x in text for x in ['contact', 'about', 'get in touch', 'reach us']):
+            if any(x in text for x in SUBPAGE_LINK_TUPLE):
                 link = a['href']
                 if not (link.startswith('http') or link.startswith('//')):
                     base_url = base_url.rstrip('/')
