@@ -4,7 +4,6 @@ from src.scrapers.seo_audit import perform_seo_audit_async
 from src.utils.supabase_helper import SupabaseHelper
 from src.processors.leadhunter import LeadHunter
 from src.utils.logging_config import get_logger
-import time
 
 logger = get_logger(__name__)
 
