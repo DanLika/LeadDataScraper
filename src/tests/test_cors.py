@@ -11,7 +11,7 @@ from unittest.mock import patch
 import sys
 backend_path = os.path.join(os.getcwd(), "backend")
 if backend_path not in sys.path:
-    sys.path.append(backend_path)
+    sys.path.insert(0, backend_path)
 
 from main import app
 

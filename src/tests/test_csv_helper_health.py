@@ -74,5 +74,6 @@ class TestCSVHelperHealth(unittest.TestCase):
         self.assertEqual(df, mock_df)
         mock_pd.read_csv.assert_called_with("valid.csv", dtype=str)
 
+
 if __name__ == '__main__':
     unittest.main()
