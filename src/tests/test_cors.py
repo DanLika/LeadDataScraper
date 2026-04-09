@@ -13,7 +13,7 @@ backend_path = os.path.join(os.getcwd(), "backend")
 if backend_path not in sys.path:
     sys.path.append(backend_path)
 
-from main import app
+from backend.main import app
 
 def test_cors_default_origin():
     # By default, ALLOWED_ORIGINS is http://localhost:3000
