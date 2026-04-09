@@ -598,8 +598,6 @@ async def generate_campaign_messages(campaign_id: str, background_tasks: Backgro
 
         # Generate messages in background
         async def generate_messages():
-            from src.processors.leadhunter import LeadHunter
-            hunter = LeadHunter()
             messages_to_insert = []
 
             for lead in leads:
