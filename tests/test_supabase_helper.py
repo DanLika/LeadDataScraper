@@ -75,6 +75,35 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertFalse(result)
         self.helper.client.rpc.assert_not_called()
 
+    def test_auto_migrate_toctou_sql_injection(self):
+        """Test that auto_migrate is protected against TOCTOU string mutation SQL injection."""
+        class SneakyCol:
+            def __init__(self):
+                self.calls = 0
+            def __str__(self):
+                self.calls += 1
+                if self.calls == 1:
+                    return "valid_col"
+                return "valid_col TEXT; DROP TABLE leads; --"
+
+        missing_columns = [SneakyCol()]
+
+        mock_rpc = MagicMock()
+        mock_rpc.execute.return_value = None
+        self.helper.client.rpc.return_value = mock_rpc
+
+        result = self.helper.auto_migrate(missing_columns)
+
+        self.assertTrue(result)
+        self.helper.client.rpc.assert_called_once()
+        args, kwargs = self.helper.client.rpc.call_args
+        self.assertEqual(args[0], "exec_sql")
+        sql = kwargs["query"] if "query" in kwargs else args[1]["query"]
+
+        # Ensure the executed SQL uses the FIRST string representation, not the SECOND mutated one
+        self.assertIn("ADD COLUMN IF NOT EXISTS valid_col TEXT", sql)
+        self.assertNotIn("DROP TABLE leads", sql)
+
     def test_check_schema_no_client(self):
         """Test check_schema when client is None."""
         self.helper.client = None
