@@ -3,6 +3,7 @@ import aiohttp
 import ssl
 import re
 import time
+import os
 from bs4 import BeautifulSoup
 from typing import Optional
 
@@ -93,13 +94,16 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
                     results["red_flags"].append("SSL Certificate Error")
                     results["has_ssl"] = False
                     # Fallback: allow connection to inspect content despite bad cert
-                    fallback_ssl = ssl.create_default_context()
-                    fallback_ssl.check_hostname = False
-                    fallback_ssl.verify_mode = ssl.CERT_NONE
-                    async with session.get(url, timeout=12, ssl=fallback_ssl) as response:
-                        html = await response.text()
-                        results["is_up"] = True
-                        results["response_time"] = round(time.time() - start_time, 2)
+                    if os.getenv("ALLOW_INSECURE_SSL", "false").lower() == "true":
+                        fallback_ssl = ssl.create_default_context()
+                        fallback_ssl.check_hostname = False
+                        fallback_ssl.verify_mode = ssl.CERT_NONE
+                        async with session.get(url, timeout=12, ssl=fallback_ssl) as response:
+                            html = await response.text()
+                            results["is_up"] = True
+                            results["response_time"] = round(time.time() - start_time, 2)
+                    else:
+                        results["red_flags"].append("Insecure SSL fallback disabled")
         else:
             results["is_up"] = True
             results["response_time"] = 0.1
