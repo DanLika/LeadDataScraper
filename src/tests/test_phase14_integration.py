@@ -77,7 +77,7 @@ async def test_full_audit_enrichment_flow():
     with patch.object(hunter.client.aio.models, 'generate_content', new_callable=AsyncMock) as mock_gen:
         mock_gen.return_value = mock_response
         
-        pain_points = await hunter.analyze_pain_points_async(
+        await hunter.analyze_pain_points_async(
             audit_results['page_text'], 
             business_name="Elite Shopify Store",
             audit_results=audit_results
