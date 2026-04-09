@@ -6,7 +6,6 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from src.processors.leadhunter import LeadHunter
-from src.core.parallel_auditor import ParallelAuditor
 
 async def test_stability():
     hunter = LeadHunter()
