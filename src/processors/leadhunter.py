@@ -124,23 +124,27 @@ class LeadHunter:
             domain = website.replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
             queries.append(f'site:{domain} "email" OR "contact"')
 
-        for query in queries:
-            html = await self._ddg_search_async(query)
+        # Gather all search requests concurrently
+        tasks = [self._ddg_search_async(q) for q in queries]
+        html_results = await asyncio.gather(*tasks)
+
+        # Expanded junk list based on production data
+        junk_list = [
+            'example.com', 'email.com', 'yourname', 'sentry.io', 'wixpress.com',
+            'domain.com', 'test.com', 'info@wix.com', 'noreply', 'support@wix.com',
+            'placeholder', 'my-email', 'abuse@', 'postmaster@', 'security@',
+            'generic@', 'office@domain.com', 'spam@', 'mailer-daemon'
+        ]
+        email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+
+        for html in html_results:
             if not html: continue
 
-            email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
             emails = re.findall(email_regex, html, re.IGNORECASE)
 
             # Filter out obvious junk
             for email in emails:
                 email = email.lower()
-                # Expanded junk list based on production data
-                junk_list = [
-                    'example.com', 'email.com', 'yourname', 'sentry.io', 'wixpress.com',
-                    'domain.com', 'test.com', 'info@wix.com', 'noreply', 'support@wix.com',
-                    'placeholder', 'my-email', 'abuse@', 'postmaster@', 'security@',
-                    'generic@', 'office@domain.com', 'spam@', 'mailer-daemon'
-                ]
                 if any(x in email for x in junk_list) or len(email) < 5:
                     continue
                 return email
