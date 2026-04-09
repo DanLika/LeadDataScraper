@@ -6,7 +6,7 @@ from src.utils.supabase_helper import SupabaseHelper
 from src.utils.json_helper import extract_json_from_response
 from src.utils.logging_config import get_logger
 import pandas as pd
-from src.core.data_manager import merge_and_deduplicate
+from src.utils.csv_helper import merge_and_deduplicate
 
 load_dotenv()
 

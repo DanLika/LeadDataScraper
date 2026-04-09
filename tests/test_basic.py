@@ -6,7 +6,7 @@ import sys
 sys.path.append(os.path.abspath(os.curdir))
 
 from src.processors.google_maps import process_gmaps_df
-from src.core.data_manager import merge_and_deduplicate
+from src.utils.csv_helper import merge_and_deduplicate
 
 def test_gmaps_processing():
     print("Testing Google Maps Processing...")
