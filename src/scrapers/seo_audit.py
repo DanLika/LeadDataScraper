@@ -6,6 +6,11 @@ import time
 from bs4 import BeautifulSoup
 from typing import Optional
 
+FB_EXCLUDE = re.compile(r'sharer|messenger|plugins')
+IG_EXCLUDE = re.compile(r'explore|p/|reels')
+TT_EXCLUDE = re.compile(r'/share|/video/')
+PIN_EXCLUDE = re.compile(r'/pin/|/search/|/explore/')
+
 def calculate_seo_score(results: dict) -> int:
     """Calculates a numerical SEO Health Score from 0-100."""
     score = 0
@@ -213,19 +218,19 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
             
             # Basic Social Link detection (regex fallback)
             if 'facebook.com' in href and not results.get("facebook"):
-                if not any(x in href.lower() for x in ['sharer', 'messenger', 'plugins']):
+                if not FB_EXCLUDE.search(href.lower()):
                     results["facebook"] = href
             if 'instagram.com' in href and not results.get("instagram"):
-                if not any(x in href.lower() for x in ['explore', 'p/', 'reels']):
+                if not IG_EXCLUDE.search(href.lower()):
                     results["instagram"] = href
             if 'linkedin.com' in href and not results.get("linkedin"):
                 if 'company' in href or '/in/' in href:
                     results["linkedin"] = href
             if 'tiktok.com' in href and not results.get("tiktok"):
-                if '@' in href and not any(x in href for x in ['/share', '/video/']):
+                if '@' in href and not TT_EXCLUDE.search(href.lower()):
                     results["tiktok"] = href
             if 'pinterest.com' in href and not results.get("pinterest"):
-                if not any(x in href for x in ['/pin/', '/search/', '/explore/']):
+                if not PIN_EXCLUDE.search(href.lower()):
                     results["pinterest"] = href
 
         # 3. Score Calculation
