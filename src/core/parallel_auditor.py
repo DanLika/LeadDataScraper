@@ -37,73 +37,68 @@ class ParallelAuditor:
         self.status["stop_requested"] = True
         self.status["active"] = False
 
+    async def _scrape_business_details(self, hunter, website: str):
+        if website and website != 'nan':
+            return await hunter.scrape_business_details_async(website)
+        return None, None, None, None
+
+    async def _hunt_for_email(self, hunter, search_name: str, website: str, existing_email: str, scraped_email: str):
+        final_email = existing_email or scraped_email
+        if not final_email:
+            final_email = await hunter.search_for_email_async(search_name, website)
+        return final_email
+
+    async def _enrich_business_data(self, hunter, page_text: str, search_name: str):
+        if page_text:
+            return await hunter.enrich_business_data_async(page_text, search_name)
+        return {}
+
     async def hunt_single_lead(self, lead: Dict):
         """
         Performs a deep hunt for a single lead, focusing on social links and business info.
         """
         unique_key = lead.get("unique_key")
-        business_name = lead.get("name")
-        phone = lead.get("phone")
-        website = lead.get("website")
-        existing_email = lead.get("email")
-        update_payload = {}
-
         try:
             hunter = LeadHunter()
 
             # 1. Scrape business details from website if we have it
-            scraped_name, scraped_phone, scraped_email, page_text = None, None, None, None
-            if website and website != 'nan':
-                scraped_name, scraped_phone, scraped_email, page_text = await hunter.scrape_business_details_async(website)
+            website = lead.get("website")
+            scraped_name, scraped_phone, scraped_email, page_text = await self._scrape_business_details(hunter, website)
 
             # 2. Search for social links
-            # Use the best available name for search
-            search_name = scraped_name or business_name
-            fb, insta, linkedin, tiktok, pinterest = await hunter.trazi_social_linkove_async(search_name, scraped_phone or phone)
+            search_name = scraped_name or lead.get("name")
+            target_phone = scraped_phone or lead.get("phone")
+            fb, insta, linkedin, tiktok, pinterest = await hunter.trazi_social_linkove_async(search_name, target_phone)
 
             # 3. Email Hunting if missing
-            final_email = existing_email or scraped_email
-            hunted_email = None
-            if not final_email:
-                hunted_email = await hunter.search_for_email_async(search_name, website)
-                final_email = hunted_email
-
-            if final_email:
-                update_payload["email"] = final_email
+            final_email = await self._hunt_for_email(hunter, search_name, website, lead.get("email"), scraped_email)
 
             # 4. AI Enrichment (Company size, leadership, etc.)
-            enrichment_data = {}
-            if page_text:
-                enrichment_data = await hunter.enrich_business_data_async(page_text, search_name)
+            enrichment_data = await self._enrich_business_data(hunter, page_text, search_name)
 
             # 5. Outreach Readiness Logic
-            # First Name extraction for personalization
             contact_person = enrichment_data.get("leadership_team", "")
             first_name = hunter.extract_personal_name(contact_person) if contact_person else ""
-
-            # Priority link for manual research
             priority_link = hunter.get_priority_link(fb, insta, website)
-
-            # Manual review flag (No email + has social)
             needs_manual_review = not final_email and (fb or insta or linkedin or tiktok or pinterest)
 
-            # Scoring & Segmentation
-            outreach_score = hunter.calculate_outreach_score(
-                {**lead, **update_payload, **enrichment_data},
-                {"facebook": fb, "instagram": insta, "linkedin": linkedin, "tiktok": tiktok, "pinterest": pinterest}
-            )
-
-            segment = hunter.segment_lead(
-                {**lead, **update_payload, **enrichment_data},
-                enrichment_data.get("pain_points", [])
-            )
-
-            # 6. Prepare update payload
-            update_payload.update(enrichment_data)
+            update_payload = {**enrichment_data}
+            if final_email:
+                update_payload["email"] = final_email
             if scraped_name:
                 update_payload["company_name"] = scraped_name
             if scraped_phone:
                 update_payload["phone"] = scraped_phone
+
+            outreach_score = hunter.calculate_outreach_score(
+                {**lead, **update_payload},
+                {"facebook": fb, "instagram": insta, "linkedin": linkedin, "tiktok": tiktok, "pinterest": pinterest}
+            )
+
+            segment = hunter.segment_lead(
+                {**lead, **update_payload},
+                enrichment_data.get("pain_points", [])
+            )
 
             update_payload.update({
                 "first_name": first_name,
@@ -128,14 +123,15 @@ class ParallelAuditor:
                 "tiktok": tiktok,
                 "pinterest": pinterest,
                 "company_name": scraped_name,
-                "phone": scraped_phone or phone,
+                "phone": target_phone,
                 "email": final_email,
                 "first_name": first_name,
                 "priority_link": priority_link,
                 "needs_manual_review": needs_manual_review,
                 "outreach_score": outreach_score,
                 "segment": segment,
-                "enrichment_data": enrichment_data
+                "enrichment_data": enrichment_data,
+                "update_payload": update_payload
             }
         except asyncio.TimeoutError:
             logger.warning("Hunt Timeout for %s", unique_key)
