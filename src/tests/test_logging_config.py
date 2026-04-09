@@ -27,7 +27,6 @@ def test_setup_logging(mock_get_logger, mock_stream_handler, mock_rotating_file_
 
     # Assertions
     # 1. Verify directory creation
-    log_dir = os.path.join(os.path.dirname(os.path.abspath("src/utils/logging_config.py")), "..", "..", "logs")
     # Actually, the path is relative to the file.
     # Let's just check if makedirs was called with a path ending in 'logs'
     mock_makedirs.assert_called_once()
