@@ -279,13 +279,64 @@ class ParallelAuditor:
 
             results = await self.run_batch(current_batch, task_type=task_type)
 
-            # Update stats
+            # Update stats and collect payload for bulk database upsert
+            leads_to_upsert = []
             for r in results:
                 self.status["processed"] += 1
                 if r.get("status") == "Completed":
                     self.status["completed"] += 1
                 else:
                     self.status["failed"] += 1
+
+                unique_key = r.get("unique_key")
+                if not unique_key:
+                    continue
+
+                if r.get("status") == "Completed":
+                    # Prepare generic update payload by unpacking the result dictionary
+                    # This avoids hardcoding schema fields in the orchestrator
+                    update_payload = {"unique_key": unique_key}
+
+                    if task_type == "audit":
+                        update_payload["audit_status"] = "Completed"
+                        audit_data = r.get("result", {})
+                        update_payload["audit_results"] = audit_data
+
+                        # Only handle the dynamic fields returned inside the result object
+                        # We merge them in so the database can update them if they match columns
+                        if isinstance(audit_data, dict):
+                            for key, value in audit_data.items():
+                                if key not in ["unique_key", "audit_status", "audit_results", "emails", "score"]:
+                                    update_payload[key] = value
+
+                        # Map expected top-level fields for the db schema from the audit results
+                        if "emails" in audit_data and audit_data["emails"]:
+                            update_payload["email"] = audit_data["emails"][0]
+                        if "score" in audit_data:
+                            try:
+                                update_payload["seo_score"] = float(audit_data["score"])
+                            except (ValueError, TypeError):
+                                update_payload["seo_score"] = 0
+                    else:
+                        # For generic tasks (like hunt), unpack all top-level keys
+                        for key, value in r.items():
+                            if key not in ["status", "unique_key", "error", "enrichment_data"]:
+                                update_payload[key] = value
+
+                        if r.get("enrichment_data"):
+                            update_payload.update(r["enrichment_data"])
+
+                    leads_to_upsert.append(update_payload)
+                else:
+                    if task_type == "audit":
+                        leads_to_upsert.append({
+                            "unique_key": unique_key,
+                            "audit_status": "Failed"
+                        })
+
+            # Perform a single bulk upsert to reduce database round-trips
+            if leads_to_upsert:
+                self.db.upsert_leads(leads_to_upsert)
 
             logger.info("Finished chunk. Resuming in 2 seconds...")
             await asyncio.sleep(2)
