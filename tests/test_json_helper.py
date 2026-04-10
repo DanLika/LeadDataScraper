@@ -14,6 +14,8 @@ from src.utils.json_helper import extract_json_from_response
     ('{"k": 10', None),
     ('', None),
     (None, None),
+    ('Here is some broken JSON: {invalid json} and then another {also invalid} but finally {"valid": 1}', {"valid": 1}),
+    ('Just some text {with braces} but no json', None),
 ])
 def test_extract_json_from_response(input_text, expected):
     """
