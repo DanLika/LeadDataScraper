@@ -1,11 +1,10 @@
 import asyncio
 import uuid
-import json
 import random
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.parallel_auditor import ParallelAuditor
 from src.scrapers.enrichment_engine import EnrichmentEngine
