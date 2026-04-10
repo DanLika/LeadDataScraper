@@ -33,7 +33,7 @@ def clean_phone(phone_str):
         return np.nan
     cleaned = ''
     if phone_str.startswith('+'):
-        cleaned = '+' + re.sub(r'[^+\d]', '', phone_str)
+        cleaned = re.sub(r'[^+\d]', '', phone_str)
     else:
         cleaned = re.sub(r'[^+\d]', '', phone_str)
     
