@@ -6,6 +6,8 @@ import time
 from bs4 import BeautifulSoup
 from typing import Optional
 
+EMAIL_REGEX = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', re.IGNORECASE)
+
 def calculate_seo_score(results: dict) -> int:
     """Calculates a numerical SEO Health Score from 0-100."""
     score = 0
@@ -232,8 +234,7 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
         results["score"] = calculate_seo_score(results)
 
         # 4. Email Extraction
-        email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        results["emails"] = list(set(re.findall(email_regex, html, re.IGNORECASE)))
+        results["emails"] = list(set(EMAIL_REGEX.findall(html)))
         results["page_text"] = soup.get_text(separator=' ', strip=True)[:3000]
 
     return results
