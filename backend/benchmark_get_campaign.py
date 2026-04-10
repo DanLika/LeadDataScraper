@@ -1,5 +1,4 @@
 import time
-import sys
 
 # Mock classes for Supabase Client
 class MockResponse:
