@@ -88,7 +88,7 @@ class TestCheckSchemaBenchmark(unittest.TestCase):
         self.assertEqual(len(missing), 22)
 
     def test_check_schema_all_fail_fallback(self):
-        # All optimized paths fail, fallback to individual checks
+        # All optimized paths fail, fallback to iterative bulk checks
         self.execute_mock.execute.reset_mock()
 
         def execute_side_effect():
@@ -98,10 +98,11 @@ class TestCheckSchemaBenchmark(unittest.TestCase):
             # Second call: RPC
             if self.execute_mock.execute.call_count == 2:
                 raise Exception("RPC failed")
-            # Remaining calls: individual selects
-            # Mocking that 1st individual select fails
+            # Remaining calls: iterative bulk checks
+            # Call 3: we report "enrichment_status" missing
             if self.execute_mock.execute.call_count == 3:
-                 raise Exception("column \"enrichment_status\" does not exist")
+                raise Exception("column \"enrichment_status\" does not exist")
+            # Call 4: successful select of remaining 23 columns
             return MockResponse()
 
         self.execute_mock.execute.side_effect = execute_side_effect
@@ -113,8 +114,8 @@ class TestCheckSchemaBenchmark(unittest.TestCase):
         print(f"Total execute() calls: {call_count}")
         print(f"Missing columns found: {len(missing)}")
 
-        # 1 (bulk) + 1 (RPC) + 24 (individual) = 26 calls
-        self.assertEqual(call_count, 26, f"Should have 26 calls, got {call_count}")
+        # 1 (bulk) + 1 (RPC) + 2 (iterative bulk checks: 1 fail, 1 success) = 4 calls
+        self.assertEqual(call_count, 4, f"Should have 4 calls, got {call_count}")
         self.assertEqual(len(missing), 1)
         self.assertEqual(missing[0], "enrichment_status")
 

@@ -155,15 +155,37 @@ class SupabaseHelper:
             except Exception as rpc_e:
                 logger.debug("RPC schema check failed: %s", rpc_e)
 
-            # Optimization 3: Individual checks (ultimate fallback for restricted environments)
+            # Optimization 3: Iterative bulk checks (ultimate fallback for restricted environments)
             # This only runs if bulk select fails AND RPC is unavailable or fails.
             missing = []
-            for col in required_cols:
+            remaining_cols = list(required_cols)
+
+            while remaining_cols:
                 try:
-                    self.client.table("leads").select(col).limit(1).execute()
+                    # Attempt to select all remaining columns
+                    self.client.table("leads").select(",".join(remaining_cols)).limit(1).execute()
+                    # If successful, all remaining columns exist, so we are done
+                    break
                 except Exception as e:
-                    if "column" in str(e) and "does not exist" in str(e):
-                        missing.append(col)
+                    error_msg = str(e)
+                    # Example: "column \"enrichment_status\" does not exist"
+                    if "column" in error_msg and "does not exist" in error_msg:
+                        # Extract the missing column name using regex
+                        match = re.search(r'column "([^"]+)" does not exist', error_msg)
+                        if match:
+                            missing_col = match.group(1)
+                            missing.append(missing_col)
+                            if missing_col in remaining_cols:
+                                remaining_cols.remove(missing_col)
+                            else:
+                                # Fallback to prevent infinite loop if regex matches something unexpected
+                                break
+                        else:
+                            # Fallback to prevent infinite loop if regex fails to match
+                            break
+                    else:
+                        # Non-schema related error, abort optimization 3
+                        break
             return missing
         except Exception as e:
             logger.error("Error checking schema: %s", e, exc_info=True)

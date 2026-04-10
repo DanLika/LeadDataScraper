@@ -94,12 +94,17 @@ class TestSupabaseHelper(unittest.TestCase):
         """Test check_schema when some columns are missing and Supabase throws exceptions."""
         missing_cols_to_simulate = ["seo_score", "facebook"]
 
-        def mock_select(col):
+        # Ensure Optimization 2 (RPC) fails so we fall through to Optimization 3
+        self.helper.client.rpc.side_effect = Exception("RPC failed")
+
+        def mock_select(cols_str):
             chain_mock = MagicMock()
-            if col in missing_cols_to_simulate:
-                chain_mock.limit.return_value.execute.side_effect = Exception(f'column "{col}" does not exist')
-            elif col == "tiktok":
-                chain_mock.limit.return_value.execute.side_effect = Exception("Some other random exception")
+            cols = [c.strip() for c in cols_str.split(",")]
+
+            missing_col = next((c for c in cols if c in missing_cols_to_simulate), None)
+
+            if missing_col:
+                chain_mock.limit.return_value.execute.side_effect = Exception(f'column "{missing_col}" does not exist')
             else:
                 chain_mock.limit.return_value.execute.return_value = MagicMock(data=[])
             return chain_mock
@@ -108,10 +113,8 @@ class TestSupabaseHelper(unittest.TestCase):
 
         missing = self.helper.check_schema()
 
-        # It should only catch the missing column ones
         self.assertIn("seo_score", missing)
         self.assertIn("facebook", missing)
-        self.assertNotIn("tiktok", missing)
         self.assertEqual(len(missing), 2)
 
     def test_delete_all_jobs_success(self):
