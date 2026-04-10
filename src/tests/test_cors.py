@@ -1,84 +1,43 @@
+import sys
 import os
 import pytest
-from fastapi.testclient import TestClient
 from unittest.mock import patch
+from fastapi.testclient import TestClient
 
-# We need to import the app. Since main.py is in 'backend/', we might need to adjust PYTHONPATH
-# or import it relatively if possible.
-# Given the structure, let's try to import it by adding 'backend' to sys.path if needed,
-# but the plan says PYTHONPATH will be set to '.'.
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.curdir))
 
-import sys
-backend_path = os.path.join(os.getcwd(), "backend")
-if backend_path not in sys.path:
-    sys.path.append(backend_path)
+def test_cors_middleware_strict_wildcard():
+    # Patch os.environ to set ALLOWED_ORIGINS to '*'
+    with patch.dict(os.environ, {"ALLOWED_ORIGINS": "*"}):
+        # We need to reload or re-import the app to pick up the new env var
+        # However, to avoid global state issues and since main.py evaluates env vars at import time,
+        # it's best to temporarily remove it from sys.modules
+        if 'backend.main' in sys.modules:
+            del sys.modules['backend.main']
 
-from main import app
+        from backend.main import app
 
-def test_cors_default_origin():
-    # By default, ALLOWED_ORIGINS is http://localhost:3000
-    client = TestClient(app)
+        client = TestClient(app)
+        response = client.options("/", headers={"Origin": "http://evil.com", "Access-Control-Request-Method": "GET"})
 
-    # Allowed origin
-    response = client.options("/", headers={
-        "Origin": "http://localhost:3000",
-        "Access-Control-Request-Method": "GET"
-    })
-    assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+        assert response.status_code == 200
+        # When allow_credentials is False, access-control-allow-credentials header should be omitted
+        assert "access-control-allow-credentials" not in response.headers
+        assert response.headers.get("access-control-allow-origin") == "*"
 
-    # Disallowed origin
-    response = client.options("/", headers={
-        "Origin": "http://evil.com",
-        "Access-Control-Request-Method": "GET"
-    })
-    # FastAPI/CORSMiddleware returns 200 for OPTIONS even if origin is not allowed,
-    # but the 'access-control-allow-origin' header will be missing.
-    assert "access-control-allow-origin" not in response.headers
+def test_cors_middleware_specific_origin():
+    # Patch os.environ to set ALLOWED_ORIGINS to specific URL
+    with patch.dict(os.environ, {"ALLOWED_ORIGINS": "http://example.com"}):
+        if 'backend.main' in sys.modules:
+            del sys.modules['backend.main']
 
-def test_cors_custom_origins():
-    # Mocking environment variable before app initialization is tricky because main.py
-    # executes app.add_middleware at module level.
-    # However, CORSMiddleware in FastAPI reads origins at initialization.
+        from backend.main import app
 
-    # Let's try to reload the module or just test the current configuration.
-    # Testing multiple configurations in one process might require re-creating the app.
-    pass
+        client = TestClient(app)
+        response = client.options("/", headers={"Origin": "http://example.com", "Access-Control-Request-Method": "GET"})
 
-@patch.dict(os.environ, {"ALLOWED_ORIGINS": "http://myapp.com, https://another.com"})
-def test_cors_from_env():
-    # Since the middleware is already added to the 'app' object in main.py,
-    # we'd need to re-import or re-initialize to test the env var logic properly.
-    # For now, we've verified the code logic in main.py.
-    # Let's at least verify that multiple origins are handled if we were to re-init.
-
-    from fastapi.middleware.cors import CORSMiddleware
-    from fastapi import FastAPI
-
-    test_app = FastAPI()
-
-    origins_env = "http://myapp.com, https://another.com"
-    allowed_origins = [origin.strip() for origin in origins_env.split(",") if origin.strip()]
-
-    test_app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    client = TestClient(test_app)
-
-    for origin in ["http://myapp.com", "https://another.com"]:
-        response = client.options("/", headers={
-            "Origin": origin,
-            "Access-Control-Request-Method": "GET"
-        })
-        assert response.headers.get("access-control-allow-origin") == origin
-
-    response = client.options("/", headers={
-        "Origin": "http://unauthorized.com",
-        "Access-Control-Request-Method": "GET"
-    })
-    assert "access-control-allow-origin" not in response.headers
+        assert response.status_code == 200
+        # When allow_credentials is True, access-control-allow-credentials should be present and 'true'
+        assert response.headers.get("access-control-allow-credentials") == "true"
+        assert response.headers.get("access-control-allow-origin") == "http://example.com"
