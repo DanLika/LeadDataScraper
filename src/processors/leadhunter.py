@@ -2,7 +2,7 @@ import aiohttp
 import asyncio
 import re
 from bs4 import BeautifulSoup
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 import os
 import random
 import json
@@ -383,65 +383,85 @@ class LeadHunter:
             logger.debug("Subpage scrape failed for %s", url)
             return None
 
-    def calculate_outreach_score(self, lead: dict, socials: Optional[dict] = None) -> int:
-        """
-        Calculates a lead's outreach value score (0-100).
-        """
+    def _score_data_completeness(self, lead: dict, socials: dict) -> int:
         score = 0
-        s_data = socials or {}
+        if lead.get('email') or lead.get('EXTRACTED_EMAIL'):
+            score += 20
+        if lead.get('phone'):
+            score += 10
 
-        # 1. Data Completeness (+60 max)
-        if lead.get('email') or lead.get('EXTRACTED_EMAIL'): score += 20
-        if lead.get('phone'): score += 10
-
-        # Check social presence
         has_social = (
-            s_data.get('facebook') or s_data.get('instagram') or s_data.get('linkedin') or
+            socials.get('facebook') or socials.get('instagram') or socials.get('linkedin') or
             lead.get('facebook') or lead.get('instagram') or lead.get('linkedin')
         )
-        if has_social: score += 15
+        if has_social:
+            score += 15
+        return score
 
-        # Reputation (New for Phase 17)
+    def _score_reputation(self, lead: dict) -> int:
+        score = 0
         rating = lead.get('rating') or lead.get('Rating')
         reviews = lead.get('reviews') or lead.get('Reviews')
         try:
             if rating:
                 rating_val = float(str(rating).replace(',', '.'))
-                # Low rating (< 4.0) is a pain point
-                if rating_val < 4.0: score += 15
+                if rating_val < 4.0:
+                    score += 15
             if reviews:
                 num_str = re.sub(r'\D', '', str(reviews))
                 reviews_val = int(num_str) if num_str else 0
-                # Low review count is a growth opportunity
-                if reviews_val < 20: score += 10
+                if reviews_val < 20:
+                    score += 10
         except (ValueError, TypeError):
             pass
+        return score
 
-        # 2. Enrichment & Intent (+20 max)
+    def _score_enrichment(self, lead: dict) -> int:
+        score = 0
         e_data = lead.get('enrichment_data', {})
         if not e_data and any(k in lead for k in ['company_size', 'leadership_team']):
             e_data = lead
 
         if isinstance(e_data, str):
-            try: e_data = json.loads(e_data)
-            except Exception: e_data = {}
+            try:
+                e_data = json.loads(e_data)
+            except Exception:
+                e_data = {}
 
         if e_data.get('leadership_team') and e_data['leadership_team'] not in ['Unknown', '', None]:
             score += 10
         if e_data.get('company_size') and e_data['company_size'] not in ['Unknown', '', None]:
             score += 10
+        return score
 
-        # 3. Urgency / Pain Points (+20 max)
+    def _score_urgency(self, lead: dict) -> int:
+        score = 0
         audit = lead.get('audit_results', {})
         if isinstance(audit, str):
-            try: audit = json.loads(audit)
-            except Exception: audit = {}
+            try:
+                audit = json.loads(audit)
+            except Exception:
+                audit = {}
 
         pain_points = lead.get('pain_points', []) or (audit and audit.get('pain_points', []))
         is_high_risk = lead.get('high_risk_flag') or (audit and audit.get('high_risk_flag'))
 
         if is_high_risk or len(pain_points) > 0:
             score += 20
+        return score
+
+    def calculate_outreach_score(self, lead: dict, socials: Optional[dict] = None) -> int:
+        """
+        Calculates a lead's outreach value score (0-100).
+        """
+        s_data = socials or {}
+
+        score = sum([
+            self._score_data_completeness(lead, s_data),
+            self._score_reputation(lead),
+            self._score_enrichment(lead),
+            self._score_urgency(lead)
+        ])
 
         return min(score, 100)
 
