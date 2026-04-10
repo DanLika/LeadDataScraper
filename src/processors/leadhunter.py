@@ -13,6 +13,8 @@ from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+EMAIL_REGEX = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', re.IGNORECASE)
+
 # --- Crawlbase API Tokens (Configurable via ENV) ---
 CRAWLBASE_NORMAL_TOKEN = os.environ.get('CRAWLBASE_NORMAL_TOKEN')
 CRAWLBASE_JS_TOKEN = os.environ.get('CRAWLBASE_JS_TOKEN')
@@ -128,8 +130,7 @@ class LeadHunter:
             html = await self._ddg_search_async(query)
             if not html: continue
 
-            email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-            emails = re.findall(email_regex, html, re.IGNORECASE)
+            emails = EMAIL_REGEX.findall(html)
 
             # Filter out obvious junk
             for email in emails:
@@ -344,8 +345,7 @@ class LeadHunter:
         return None
 
     def _extract_email_from_text(self, text: str) -> Optional[str]:
-        email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        match = re.search(email_regex, text)
+        match = EMAIL_REGEX.search(text)
         if match:
             email = match.group().lower()
             if not any(x in email for x in ['example.com', 'email.com', 'yourname', 'sentry.io', 'wixpress.com']):
