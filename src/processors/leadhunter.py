@@ -13,6 +13,14 @@ from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# --- Precompiled Regex Patterns ---
+_SECURITY_PATTERN = re.compile(r'critical|missing ssl|security')
+_PERFORMANCE_PATTERN = re.compile(r'slow|latency|load time|performance')
+_MOBILE_PATTERN = re.compile(r'mobile|viewport|responsive')
+_MARKETING_PATTERN = re.compile(r'pixel|analytics|tracking|ga4')
+_ENTERPRISE_PATTERN = re.compile(r'enterprise|fortune|corporate')
+_LOCAL_SMB_PATTERN = re.compile(r'small|local|home|residential|shop')
+
 # --- Crawlbase API Tokens (Configurable via ENV) ---
 CRAWLBASE_NORMAL_TOKEN = os.environ.get('CRAWLBASE_NORMAL_TOKEN')
 CRAWLBASE_JS_TOKEN = os.environ.get('CRAWLBASE_JS_TOKEN')
@@ -445,59 +453,58 @@ class LeadHunter:
 
         return min(score, 100)
 
+    def _get_reputation_segment(self, lead: dict) -> Optional[str]:
+        """Helper to determine reputation-based segments safely."""
+        rating = lead.get('rating') or lead.get('Rating')
+        reviews = lead.get('reviews') or lead.get('Reviews')
+        try:
+            rating_val = float(str(rating).replace(',', '.')) if rating else None
+
+            if rating_val is not None and rating_val < 3.8:
+                return "Reputation Repair"
+
+            if reviews:
+                num_str = re.sub(r'\D', '', str(reviews))
+                reviews_val = int(num_str) if num_str else 0
+                # If rating is absent, we assume 5.0 implicitly per original logic
+                eff_rating = rating_val if rating_val is not None else 5.0
+                if reviews_val < 10 and eff_rating >= 4.0:
+                    return "New Business / Growth"
+        except (ValueError, TypeError):
+            pass
+        return None
+
     def segment_lead(self, lead: dict, pain_points: Optional[str] = None) -> str:
         """
         Categorizes a lead into an actionable outreach segment.
         """
         score = lead.get('outreach_score')
-        if score is None:
-            score = 0
+        score = score if score is not None else 0
         p_str = (pain_points or str(lead.get('pain_points', ''))).lower()
 
         # 1. High Priority Gaps
-        if any(x in p_str for x in ["critical", "missing ssl", "security"]):
-            return "Security/Critical Fix"
-
-        if any(x in p_str for x in ["slow", "latency", "load time", "performance"]):
-            return "Performance Optimization"
-
-        if any(x in p_str for x in ["mobile", "viewport", "responsive"]):
-            return "Mobile Experience"
+        if _SECURITY_PATTERN.search(p_str): return "Security/Critical Fix"
+        if _PERFORMANCE_PATTERN.search(p_str): return "Performance Optimization"
+        if _MOBILE_PATTERN.search(p_str): return "Mobile Experience"
 
         # 2. Reputation Segments (New for Phase 17)
-        rating = lead.get('rating') or lead.get('Rating')
-        reviews = lead.get('reviews') or lead.get('Reviews')
-        try:
-            if rating:
-                rating_val = float(str(rating).replace(',', '.'))
-                if rating_val < 3.8: return "Reputation Repair"
-            if reviews:
-                num_str = re.sub(r'\D', '', str(reviews))
-                reviews_val = int(num_str) if num_str else 0
-                if reviews_val < 10 and (rating_val if rating else 5.0) >= 4.0:
-                    return "New Business / Growth"
-        except (ValueError, TypeError):
-            pass
+        rep_segment = self._get_reputation_segment(lead)
+        if rep_segment:
+            return rep_segment
 
         # 3. Marketing Gaps
-        if any(x in p_str for x in ["pixel", "analytics", "tracking", "ga4"]):
-            return "Marketing Analytics"
+        if _MARKETING_PATTERN.search(p_str): return "Marketing Analytics"
 
         # 4. Niche Enrichment
-        e_data = lead.get('enrichment_data', {})
-        if not e_data: e_data = lead # Fallback to direct lead dict
-
+        e_data = lead.get('enrichment_data', {}) or lead
         target = str(e_data.get('target_clients', '')).lower()
-        if "enterprise" in target or "fortune" in target or "corporate" in target:
-            return "Enterprise B2B"
-        elif any(x in target for x in ["small", "local", "home", "residential", "shop"]):
-            return "Local SMB"
 
-        if score > 75:
-            return "High Value / Outreach Ready"
-        elif score > 50:
-            return "Warm / Needs Personalization"
+        if _ENTERPRISE_PATTERN.search(target): return "Enterprise B2B"
+        if _LOCAL_SMB_PATTERN.search(target): return "Local SMB"
 
+        # 5. Score Fallback
+        if score > 75: return "High Value / Outreach Ready"
+        if score > 50: return "Warm / Needs Personalization"
         return "Low Priority Prospect"
 
 
