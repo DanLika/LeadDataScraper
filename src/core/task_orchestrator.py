@@ -1,6 +1,5 @@
 import asyncio
 import uuid
-import json
 import random
 import pandas as pd
 import numpy as np
@@ -128,6 +127,67 @@ class TaskOrchestrator:
         """
         self.db.client.table("orchestration_jobs").update(updates).eq("id", job_id).execute()
 
+    def _get_total_leads(self, lead_ids: List[str], filters: Dict[str, Any]) -> int:
+        """Count total leads to process, either from explicit IDs or via DB query."""
+        if lead_ids:
+            return len(lead_ids)
+
+        query = self.db.client.table("leads").select("unique_key", count="exact")
+        query = query.or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED").lt("retry_count", 3)
+
+        if filters:
+            for k, v in filters.items():
+                query = query.eq(k, v)
+
+        response = query.execute()
+        return response.count if hasattr(response, 'count') else 0
+
+    def _fetch_chunk(self, lead_ids: List[str], processed_count: int, chunk_size: int, total_leads: int) -> List[Dict[str, Any]]:
+        """Fetch the next chunk of leads from DB or explicit ID list."""
+        if lead_ids:
+            slice_start = processed_count
+            slice_end = min(processed_count + chunk_size, total_leads)
+            if slice_start >= total_leads:
+                return []
+
+            current_ids = lead_ids[slice_start:slice_end]
+            chunk_resp = self.db.client.table("leads").select("*").in_("unique_key", current_ids).execute()
+        else:
+            chunk_resp = self.db.client.table("leads").select("*") \
+                .or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED") \
+                .lt("retry_count", 3) \
+                .order("last_processed_at", nullsfirst=True) \
+                .limit(chunk_size).execute()
+
+        return chunk_resp.data if chunk_resp.data else []
+
+    async def _process_and_upsert_chunk(self, chunk: List[Dict[str, Any]], auditor: ParallelAuditor, enricher: EnrichmentEngine, tasks: List[str]) -> bool:
+        """Process a chunk of leads concurrently and batch-upsert results. Returns True if any succeeded."""
+        tasks_list = [self._process_single_lead(lead, auditor, enricher, tasks) for lead in chunk]
+        results = await asyncio.gather(*tasks_list, return_exceptions=True)
+
+        leads_to_upsert = []
+        batch_success = False
+        for res in results:
+            if isinstance(res, dict) and 'unique_key' in res:
+                leads_to_upsert.append(res)
+                if not res.get('last_error'):
+                    batch_success = True
+            elif isinstance(res, Exception):
+                logger.error("Task exception: %s", res)
+
+        if leads_to_upsert:
+            self.db.upsert_leads(leads_to_upsert)
+
+        return batch_success
+
+    def _calculate_wait_time(self, consecutive_failures: int) -> float:
+        """Calculate wait time with exponential backoff on failures."""
+        base_wait = 2
+        if consecutive_failures > 0:
+            return min(base_wait * (2 ** consecutive_failures) + random.uniform(0, 2), 120)
+        return base_wait + random.uniform(0, 1)
+
     async def _process_in_chunks(self, job_id: str, **kwargs):
         """
         Processes leads in chunks with batch updates and centralized concurrency.
@@ -144,19 +204,7 @@ class TaskOrchestrator:
             tasks = ["audit", "enrich"]
 
         try:
-            # 1. Get total leads count
-            if lead_ids:
-                total_leads = len(lead_ids)
-            else:
-                query = self.db.client.table("leads").select("unique_key", count="exact")
-                query = query.or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED").lt("retry_count", 3)
-
-                if filters:
-                    for k, v in filters.items():
-                        query = query.eq(k, v)
-
-                response = query.execute()
-                total_leads = response.count if hasattr(response, 'count') else 0
+            total_leads = self._get_total_leads(lead_ids, filters)
 
             await self._update_job_status(job_id, {
                 "status": "running",
@@ -178,45 +226,13 @@ class TaskOrchestrator:
                 if status_check.get("status") in ["stopped", "failed"]:
                     return
 
-                # Fetch next chunk
-                if lead_ids:
-                    slice_start = processed_count
-                    slice_end = min(processed_count + chunk_size, total_leads)
-                    if slice_start >= total_leads:
-                        break
-
-                    current_ids = lead_ids[slice_start:slice_end]
-                    chunk_resp = self.db.client.table("leads").select("*").in_("unique_key", current_ids).execute()
-                else:
-                    chunk_resp = self.db.client.table("leads").select("*") \
-                        .or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED") \
-                        .lt("retry_count", 3) \
-                        .order("last_processed_at", nullsfirst=True) \
-                        .limit(chunk_size).execute()
-
-                chunk = chunk_resp.data if chunk_resp.data else []
+                chunk = self._fetch_chunk(lead_ids, processed_count, chunk_size, total_leads)
                 if not chunk:
                     break
 
                 await self._update_job_status(job_id, {"current_phase": f"Processing batch ({processed_count}/{total_leads})"})
 
-                # Process chunk items with semaphore
-                tasks_list = [self._process_single_lead(lead, auditor, enricher, tasks) for lead in chunk]
-                results = await asyncio.gather(*tasks_list, return_exceptions=True)
-
-                # Batch update Supabase
-                leads_to_upsert = []
-                batch_success = False
-                for res in results:
-                    if isinstance(res, dict) and 'unique_key' in res:
-                        leads_to_upsert.append(res)
-                        if not res.get('last_error'):
-                            batch_success = True
-                    elif isinstance(res, Exception):
-                        logger.error("Task exception: %s", res)
-
-                if leads_to_upsert:
-                    self.db.upsert_leads(leads_to_upsert)
+                batch_success = await self._process_and_upsert_chunk(chunk, auditor, enricher, tasks)
 
                 if not batch_success and len(chunk) > 0:
                     consecutive_failures += 1
@@ -229,11 +245,7 @@ class TaskOrchestrator:
                 processed_count += len(chunk)
                 await self._update_job_status(job_id, {"processed_count": processed_count})
 
-                base_wait = 2
-                if consecutive_failures > 0:
-                    wait_time = min(base_wait * (2 ** consecutive_failures) + random.uniform(0, 2), 120)
-                else:
-                    wait_time = base_wait + random.uniform(0, 1)
+                wait_time = self._calculate_wait_time(consecutive_failures)
                 await asyncio.sleep(wait_time)
 
             await self._update_job_status(job_id, {
