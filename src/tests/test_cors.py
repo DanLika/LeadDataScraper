@@ -8,12 +8,7 @@ from unittest.mock import patch
 # Given the structure, let's try to import it by adding 'backend' to sys.path if needed,
 # but the plan says PYTHONPATH will be set to '.'.
 
-import sys
-backend_path = os.path.join(os.getcwd(), "backend")
-if backend_path not in sys.path:
-    sys.path.append(backend_path)
-
-from main import app
+from backend.main import app
 
 def test_cors_default_origin():
     # By default, ALLOWED_ORIGINS is http://localhost:3000
