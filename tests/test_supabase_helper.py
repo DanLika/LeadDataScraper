@@ -231,5 +231,19 @@ class TestSupabaseHelperUpsert(unittest.TestCase):
             self.assertIn("DATABASE SCHEMA MISMATCH:", mock_logger.error.call_args[0][0])
             mock_logger.warning.assert_called_with("Please run the SQL migration script provided in the implementation plan.")
 
+    def test_upsert_leads_exception_generic(self):
+        """Test upsert_leads handling generic exception."""
+        leads_data = [{"unique_key": "123", "name": "Test Lead"}]
+        test_exception = Exception("Some generic database error")
+        mock_execute = MagicMock(side_effect=test_exception)
+        mock_upsert = MagicMock(return_value=MagicMock(execute=mock_execute))
+        mock_table = MagicMock(return_value=MagicMock(upsert=mock_upsert))
+        self.helper.client.table = mock_table
+
+        with patch("src.utils.supabase_helper.logger") as mock_logger:
+            result = self.helper.upsert_leads(leads_data)
+            self.assertIsNone(result)
+            mock_logger.error.assert_called_once_with("Error upserting leads: %s", test_exception, exc_info=True)
+
 if __name__ == "__main__":
     unittest.main()
