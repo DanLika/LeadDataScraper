@@ -6,6 +6,7 @@ import os
 import pandas as pd
 import aiofiles
 from datetime import datetime
+import uuid
 from pathlib import PurePath
 from typing import Optional, List
 from dotenv import load_dotenv
@@ -135,8 +136,7 @@ async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = Fil
         return validation_error
 
     # Save uploaded file temporarily — sanitize filename to prevent path traversal
-    safe_name = PurePath(file.filename).name
-    temp_path = f"tmp_{safe_name}"
+    temp_path = f"tmp_{uuid.uuid4().hex}.csv"
     async with aiofiles.open(temp_path, "wb") as buffer:
         await buffer.write(contents)
 
