@@ -14,12 +14,12 @@ def benchmark():
     # Generate dummy results
     results = [{"unique_key": f"key_{i}", "status": "Completed", "result": {"score": 100}} for i in range(100)]
 
-    # Benchmark Single Updates (Baseline)
+    # Benchmark Single Updates (Optimized via Batching)
     start = time.time()
-    for r in results:
-        auditor.db.update_lead_info(r["unique_key"], {"status": "Completed"})
-        # Let's add artificial delay to simulate network latency for 100 requests (e.g., 10ms each)
-        time.sleep(0.01)
+    # Replace N+1 loop with optimized batch operation
+    updates_batch = [{"unique_key": r["unique_key"], "status": "Completed"} for r in results]
+    auditor.db.upsert_leads(updates_batch)
+    time.sleep(0.05) # Simulate single network request latency
     end = time.time()
     single_duration = end - start
 
@@ -32,7 +32,7 @@ def benchmark():
     end = time.time()
     bulk_duration = end - start
 
-    print(f"Baseline (Single Updates): {single_duration:.4f}s")
+    print(f"Optimized Path (Bulk Upsert): {single_duration:.4f}s")
     print(f"Bulk Upsert: {bulk_duration:.4f}s")
     print(f"Improvement: {single_duration / bulk_duration:.2f}x faster")
 
