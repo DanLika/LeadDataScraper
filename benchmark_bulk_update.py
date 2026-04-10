@@ -1,7 +1,6 @@
 import time
 from unittest.mock import MagicMock
 from src.core.parallel_auditor import ParallelAuditor
-from src.utils.supabase_helper import SupabaseHelper
 
 def benchmark():
     auditor = ParallelAuditor()
