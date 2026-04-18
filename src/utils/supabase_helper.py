@@ -155,15 +155,36 @@ class SupabaseHelper:
             except Exception as rpc_e:
                 logger.debug("RPC schema check failed: %s", rpc_e)
 
-            # Optimization 3: Individual checks (ultimate fallback for restricted environments)
+            # Optimization 3: Iterative bulk check (ultimate fallback for restricted environments)
             # This only runs if bulk select fails AND RPC is unavailable or fails.
             missing = []
-            for col in required_cols:
+            cols_to_check = required_cols.copy()
+
+            while cols_to_check:
                 try:
-                    self.client.table("leads").select(col).limit(1).execute()
+                    self.client.table("leads").select(",".join(cols_to_check)).limit(1).execute()
+                    break
                 except Exception as e:
-                    if "column" in str(e) and "does not exist" in str(e):
-                        missing.append(col)
+                    error_msg = str(e)
+                    if "column" in error_msg and "does not exist" in error_msg:
+                        match = re.search(r'column [\'"]?([a-zA-Z0-9_]+)[\'"]? does not exist', error_msg)
+                        if match:
+                            missing_col = match.group(1)
+                            if missing_col in cols_to_check:
+                                missing.append(missing_col)
+                                cols_to_check.remove(missing_col)
+                                continue
+
+                        # Fallback if regex fails to extract column
+                        for col in cols_to_check:
+                            try:
+                                self.client.table("leads").select(col).limit(1).execute()
+                            except Exception as ie:
+                                if "column" in str(ie) and "does not exist" in str(ie):
+                                    missing.append(col)
+                        break
+                    else:
+                        break
             return missing
         except Exception as e:
             logger.error("Error checking schema: %s", e, exc_info=True)
