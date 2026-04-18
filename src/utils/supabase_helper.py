@@ -180,10 +180,11 @@ class SupabaseHelper:
         # Validate column names to prevent SQL injection
         valid_columns = []
         for col in missing_columns:
-            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(col)):
-                valid_columns.append(col)
+            col_str = str(col)
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\Z", col_str):
+                valid_columns.append(col_str)
             else:
-                logger.warning("Auto-migration: Skipping invalid column name '%s' to prevent SQL injection", col)
+                logger.warning("Auto-migration: Skipping invalid column name '%s' to prevent SQL injection", col_str)
 
         if not valid_columns:
             logger.warning("Auto-migration: No valid columns to migrate.")
