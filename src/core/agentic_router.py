@@ -302,13 +302,15 @@ class AgenticRouter:
         if not self.client:
             return {"error": "AI model not initialized. Set GEMINI_API_KEY."}
 
-        # Fetch full lead and audit context
-        response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
-        leads = response.data if hasattr(response, 'data') else []
-        if not leads:
-            return {"error": "Lead not found in database"}
-
-        lead = leads[0]
+        # Use provided lead_data if available to avoid N+1 queries, otherwise fetch
+        lead = params.get("lead_data")
+        if not lead:
+            # Fetch full lead and audit context
+            response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+            leads = response.data if hasattr(response, 'data') else []
+            if not leads:
+                return {"error": "Lead not found in database"}
+            lead = leads[0]
         audit = lead.get("audit_results", {})
 
         prompt = f"""
@@ -602,7 +604,10 @@ class AgenticRouter:
                 first_name = hunter.extract_personal_name(name_src)
 
                 # Generate personalized draft
-                draft_result = await self._generate_outreach_draft({"unique_key": unique_key})
+                draft_result = await self._generate_outreach_draft({
+                    "unique_key": unique_key,
+                    "lead_data": lead
+                })
 
                 campaign_leads.append({
                     "unique_key": unique_key,
