@@ -3,10 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import os
+import uuid
 import pandas as pd
 import aiofiles
 from datetime import datetime
-from pathlib import PurePath
 from typing import Optional, List
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, constr
@@ -81,10 +81,16 @@ orchestrator = TaskOrchestrator()
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 
+allow_credentials = True
+if "*" in allowed_origins:
+    logger.warning("Wildcard '*' detected in ALLOWED_ORIGINS. Disabling allow_credentials for security.")
+    allow_credentials = False
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
@@ -134,9 +140,8 @@ async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = Fil
     if validation_error:
         return validation_error
 
-    # Save uploaded file temporarily — sanitize filename to prevent path traversal
-    safe_name = PurePath(file.filename).name
-    temp_path = f"tmp_{safe_name}"
+    # Save uploaded file temporarily — use UUID to prevent path traversal
+    temp_path = f"tmp_{uuid.uuid4().hex}.csv"
     async with aiofiles.open(temp_path, "wb") as buffer:
         await buffer.write(contents)
 

@@ -267,7 +267,7 @@ class AgenticRouter:
         if not self.db.client:
             return {"error": "Database not connected"}
         if not self.client:
-            return {"error": "AI model not initialized. Set GEMINI_API_KEY."}
+            return {"error": "AI model not initialized."}
 
         # Fetch limited data for context (to avoid token limits)
         response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(50).execute()
@@ -300,15 +300,16 @@ class AgenticRouter:
         if not unique_key:
             return {"error": "unique_key is required for outreach drafting"}
         if not self.client:
-            return {"error": "AI model not initialized. Set GEMINI_API_KEY."}
+            return {"error": "AI model not initialized."}
 
-        # Fetch full lead and audit context
-        response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
-        leads = response.data if hasattr(response, 'data') else []
-        if not leads:
-            return {"error": "Lead not found in database"}
-
-        lead = leads[0]
+        # Use provided lead_data if available to avoid N+1 queries, otherwise fetch
+        lead = params.get("lead_data")
+        if not lead:
+            response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+            leads = response.data if hasattr(response, 'data') else []
+            if not leads:
+                return {"error": "Lead not found in database"}
+            lead = leads[0]
         audit = lead.get("audit_results", {})
 
         prompt = f"""
@@ -601,8 +602,11 @@ class AgenticRouter:
                 # Use hunter to get a clean first name
                 first_name = hunter.extract_personal_name(name_src)
 
-                # Generate personalized draft
-                draft_result = await self._generate_outreach_draft({"unique_key": unique_key})
+                # Generate personalized draft — pass lead_data to avoid N+1 DB query
+                draft_result = await self._generate_outreach_draft({
+                    "unique_key": unique_key,
+                    "lead_data": lead
+                })
 
                 campaign_leads.append({
                     "unique_key": unique_key,

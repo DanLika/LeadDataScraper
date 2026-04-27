@@ -139,20 +139,29 @@ class EnrichmentEngine:
                         viewport={'width': 1280, 'height': 800}
                     )
 
-                    # Fetch up to 3 pages using the SAME browser context
-                    for url in urls_to_check[:3]:
-                        if not url or not str(url).startswith('http'): continue
+                    # Fetch up to 3 pages concurrently using the SAME browser context
+                    async def fetch_page(url):
+                        if not url or not str(url).startswith('http'):
+                            return None
                         page = await context.new_page()
                         try:
                             # Shorter navigation timeout per page to avoid whole job hang
                             await page.goto(url, wait_until="domcontentloaded", timeout=20000)
                             text = await page.evaluate("() => document.body.innerText")
                             if text and len(text.strip()) > 100:
-                                content_blocks.append(text[:5000])
+                                return text[:5000]
+                            return None
                         except Exception as e:
                             logger.warning("Error fetching %s: %s", url, e)
+                            return None
                         finally:
                             await page.close()
+
+                    tasks = [fetch_page(url) for url in urls_to_check[:3]]
+                    results = await asyncio.gather(*tasks)
+                    for res in results:
+                        if res:
+                            content_blocks.append(res)
                 except Exception as e:
                     logger.error("Browser failure: %s", e, exc_info=True)
                 finally:

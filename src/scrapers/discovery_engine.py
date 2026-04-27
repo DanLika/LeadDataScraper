@@ -35,7 +35,10 @@ class DiscoveryEngine:
                 # 1. Navigate to Google Maps
                 url = f"https://www.google.com/maps/search/{quote_plus(search_query)}"
                 await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(5) # Give it a moment to load markers
+                try:
+                    await page.wait_for_selector("div[role='article'], a[href*='/maps/place/']", timeout=10000)
+                except PlaywrightTimeoutError:
+                    pass
 
                 # 2. Scroll to load more results
                 # Google Maps uses a scrollable div for results. Usually it's the one with specific role.
