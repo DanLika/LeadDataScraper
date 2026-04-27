@@ -263,19 +263,22 @@ async def health_schema():
 async def startup_event():
     setup_logging()
     logger.info("Lead Data Scraper Backend Starting...")
-    missing = db.check_schema()
-    if missing:
-        logger.warning("DATABASE SCHEMA MISMATCH: Missing columns: %s", missing)
-        logger.warning("Attempting automatic migration...")
-        migrated = db.auto_migrate(missing)
-        if migrated:
-            logger.info("Migration successful - columns added.")
+    try:
+        missing = db.check_schema()
+        if missing:
+            logger.warning("DATABASE SCHEMA MISMATCH: Missing columns: %s", missing)
+            logger.warning("Attempting automatic migration...")
+            migrated = db.auto_migrate(missing)
+            if migrated:
+                logger.info("Migration successful - columns added.")
+            else:
+                logger.warning("Auto-migration failed. Run this SQL manually in Supabase SQL Editor:")
+                logger.warning("   ALTER TABLE leads %s;", ', '.join([f'ADD COLUMN IF NOT EXISTS {col} TEXT' for col in missing]))
         else:
-            logger.warning("Auto-migration failed. Run this SQL manually in Supabase SQL Editor:")
-            logger.warning("   ALTER TABLE leads %s;", ', '.join([f'ADD COLUMN IF NOT EXISTS {col} TEXT' for col in missing]))
-    else:
-        logger.info("Database schema is up to date.")
-    await orchestrator.recover_interrupted_jobs()
+            logger.info("Database schema is up to date.")
+        await orchestrator.recover_interrupted_jobs()
+    except Exception as e:
+        logger.warning("Startup DB checks skipped — database unreachable: %s", e)
 
 @app.post("/ask", dependencies=[Depends(verify_api_key)])
 async def ask_ai(payload: AskRequest, background_tasks: BackgroundTasks):
