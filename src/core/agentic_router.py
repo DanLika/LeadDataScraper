@@ -365,7 +365,7 @@ class AgenticRouter:
         if not unique_key:
             return {"error": "unique_key is required"}
         if not self.client:
-            return {"error": "AI model not initialized. Set GEMINI_API_KEY."}
+            return {"error": "AI model not initialized."}
 
         response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
         leads = response.data if hasattr(response, 'data') else []
@@ -415,7 +415,7 @@ class AgenticRouter:
         if not self.db.client:
             return {"error": "Database not connected"}
         if not self.client:
-            return {"error": "AI model not initialized. Set GEMINI_API_KEY."}
+            return {"error": "AI model not initialized."}
 
         # Fetch recent leads with audit results
         response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(200).execute()
