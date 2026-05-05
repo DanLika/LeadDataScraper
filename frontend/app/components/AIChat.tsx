@@ -145,7 +145,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
   }
 
   return (
-    <div style={{
+    <div className="ai-chat-fixed" style={{
       position: 'fixed',
       bottom: isMobile ? '1rem' : '2rem',
       left: isMobile ? '1rem' : (isTablet ? '100px' : (sidebarCollapsed ? '100px' : '300px')),

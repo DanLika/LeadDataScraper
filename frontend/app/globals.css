@@ -1089,10 +1089,10 @@ select:focus-visible {
   /* AI Chat mobile positioning fix */
   .ai-chat-fixed,
   [class*="ai-chat"] {
-    max-height: 50vh;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    max-height: 50vh !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
     border-radius: 16px 16px 0 0;
   }
 
