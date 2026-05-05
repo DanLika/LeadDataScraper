@@ -11,9 +11,9 @@ logger = get_logger(__name__)
 class SupabaseHelper:
     def __init__(self):
         url: str = os.environ.get("SUPABASE_URL")
-        # Prefer service role key for backend (bypasses RLS intentionally for server-side ops).
-        # Falls back to anon key for backwards compatibility.
-        key: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+        # Prefer anon key for backend to enforce RLS (Row Level Security).
+        # Falls back to service role key only if anon key is not available.
+        key: str = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if not url or not key:
             logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY not found in environment.")
             self.client = None
