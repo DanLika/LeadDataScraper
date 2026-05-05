@@ -188,20 +188,3 @@ def export_outreach_ready_csv(df, output_path):
     logger.info("Outreach ready export created with %d leads: %s", len(export_df), output_path)
     return export_df
 
-def export_facebook_links(df: pd.DataFrame, output_path: str):
-    """
-    Extracts unique Facebook links from the DataFrame and saves them to a CSV.
-    Matches the logic in the user's Colab script.
-    """
-    if 'facebook' not in df.columns:
-        logger.warning("'facebook' column not found. Creating empty export.")
-        df_fb = pd.DataFrame(columns=['Facebook Link'])
-    else:
-        # Standardize and filter
-        fb_series = df['facebook'].astype(str).replace(['', 'nan', 'no social found', 'None'], np.nan)
-        valid_links = fb_series[fb_series.notna()].unique()
-        df_fb = pd.DataFrame(valid_links, columns=['Facebook Link'])
-
-    save_csv(df_fb, output_path)
-    logger.info("Extracted %d unique Facebook links to '%s'.", len(df_fb), output_path)
-    return df_fb
