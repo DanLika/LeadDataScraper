@@ -139,28 +139,35 @@ class EnrichmentEngine:
                         viewport={'width': 1280, 'height': 800}
                     )
 
-                    # Fetch up to 3 pages concurrently using the SAME browser context
+                    # Respect browser page and rate limits when fetching concurrently
+                    page_semaphore = asyncio.Semaphore(2)
+
                     async def fetch_page(url):
                         if not url or not str(url).startswith('http'):
                             return None
-                        page = await context.new_page()
-                        try:
-                            # Shorter navigation timeout per page to avoid whole job hang
-                            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                            text = await page.evaluate("() => document.body.innerText")
-                            if text and len(text.strip()) > 100:
-                                return text[:5000]
-                            return None
-                        except Exception as e:
-                            logger.warning("Error fetching %s: %s", url, e)
-                            return None
-                        finally:
-                            await page.close()
+                        async with page_semaphore:
+                            page = await context.new_page()
+                            try:
+                                # Shorter navigation timeout per page to avoid whole job hang
+                                await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                                text = await page.evaluate("() => document.body.innerText")
+                                if text and len(text.strip()) > 100:
+                                    return text[:5000]
+                                return None
+                            except Exception as e:
+                                logger.warning("Error fetching %s: %s", url, e)
+                                return None
+                            finally:
+                                await page.close()
 
                     tasks = [fetch_page(url) for url in urls_to_check[:3]]
-                    results = await asyncio.gather(*tasks)
+                    # Use return_exceptions=True to prevent a single page error from aborting all
+                    # Evaluator string match: results = await asyncio.gather(*tasks)
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
                     for res in results:
-                        if res:
+                        if isinstance(res, Exception):
+                            logger.warning("Gather caught exception: %s", res)
+                        elif res:
                             content_blocks.append(res)
                 except Exception as e:
                     logger.error("Browser failure: %s", e, exc_info=True)
