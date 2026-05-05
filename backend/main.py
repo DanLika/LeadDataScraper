@@ -557,11 +557,12 @@ async def get_campaign(campaign_id: str):
         # Performance optimization: Count stats at the database level instead of fetching all rows into memory
         stats = {"pending": 0, "sent": 0, "delivered": 0, "replied": 0, "bounced": 0}
 
-        # We perform individual exact count queries for each status. This is much faster
-        # and memory-efficient than returning potentially hundreds of thousands of full rows.
-        for status in stats.keys():
-            res = db.client.table("campaign_messages").select("id", count="exact").eq("campaign_id", campaign_id).eq("status", status).limit(1).execute()
-            stats[status] = res.count or 0
+        # We use a database view to perform a group by count query. This database-level aggregation
+        # solves the N+1 issue cleanly and securely without fetching massive numbers of rows into memory.
+        res = db.client.table("campaign_message_stats").select("*").eq("campaign_id", campaign_id).execute()
+        for row in (res.data or []):
+            if row.get("status") in stats:
+                stats[row["status"]] = row.get("count", 0)
 
         # We limit the payload to 50 messages to reduce network transfer time and API response size.
         # The frontend only displays the first 50 messages.

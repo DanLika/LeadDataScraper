@@ -90,3 +90,9 @@ CREATE TABLE IF NOT EXISTS campaign_messages (
 CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
 CREATE INDEX IF NOT EXISTS idx_campaign_messages_campaign_id ON campaign_messages(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_campaign_messages_status ON campaign_messages(status);
+
+-- Database view for campaign message statistics to avoid N+1 queries
+CREATE OR REPLACE VIEW campaign_message_stats AS
+SELECT campaign_id, status, count(*) as count
+FROM campaign_messages
+GROUP BY campaign_id, status;
