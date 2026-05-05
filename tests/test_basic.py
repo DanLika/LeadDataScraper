@@ -38,6 +38,14 @@ def test_deduplication():
     assert len(final) == 3
     print("✅ Deduplication test passed!")
 
+def test_deduplication_empty_list():
+    print("\nTesting Deduplication with Empty List...")
+    final = merge_and_deduplicate([])
+    assert isinstance(final, pd.DataFrame)
+    assert final.empty
+    print("✅ Deduplication with empty list test passed!")
+
 if __name__ == "__main__":
     test_gmaps_processing()
     test_deduplication()
+    test_deduplication_empty_list()
