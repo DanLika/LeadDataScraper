@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 from google import genai
 from dotenv import load_dotenv
 from src.utils.supabase_helper import SupabaseHelper
@@ -369,7 +370,8 @@ class AgenticRouter:
 
         response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
         leads = response.data if hasattr(response, 'data') else []
-        if not leads: return {"error": "Lead not found"}
+        if not leads:
+            return {"error": "Lead not found"}
 
         lead = leads[0]
         prompt = f"""
@@ -593,26 +595,48 @@ class AgenticRouter:
             from src.processors.leadhunter import LeadHunter
             hunter = LeadHunter()
 
-            campaign_leads = []
+            # Prepare tasks for parallel execution
+            draft_tasks = []
+            extracted_names = []
+            unique_keys = []
+
             for lead in leads:
                 # Extract first name for personalization
                 name_src = lead.get("leadership_team") or lead.get("name") or ""
                 unique_key = lead.get("unique_key")
+                unique_keys.append(unique_key)
 
                 # Use hunter to get a clean first name
                 first_name = hunter.extract_personal_name(name_src)
+                extracted_names.append(first_name)
 
                 # Generate personalized draft — pass lead_data to avoid N+1 DB query
-                draft_result = await self._generate_outreach_draft({
-                    "unique_key": unique_key,
-                    "lead_data": lead
-                })
+                draft_tasks.append(
+                    self._generate_outreach_draft({
+                        "unique_key": unique_key,
+                        "lead_data": lead
+                    })
+                )
+
+            # Run tasks concurrently
+            draft_results = await asyncio.gather(*draft_tasks, return_exceptions=True)
+
+            campaign_leads = []
+            for i, lead in enumerate(leads):
+                draft_result = draft_results[i]
+
+                # Handle potential exceptions gracefully
+                if isinstance(draft_result, Exception):
+                    logger.error("Failed to generate draft for %s: %s", unique_keys[i], draft_result)
+                    draft_text = "No draft generated due to an error."
+                else:
+                    draft_text = draft_result.get("draft", "No draft generated.")
 
                 campaign_leads.append({
-                    "unique_key": unique_key,
+                    "unique_key": unique_keys[i],
                     "company": lead.get("company_name") or lead.get("name"),
-                    "first_name": first_name or "there",
-                    "draft": draft_result.get("draft", "No draft generated.")
+                    "first_name": extracted_names[i] or "there",
+                    "draft": draft_text
                 })
 
             return {
