@@ -52,8 +52,8 @@ class TestFix1_SSLBypassRemoved(unittest.TestCase):
             "SSL fallback context creation still exists in the function!")
 
 
-class TestFix2_UUIDTempFilenames(unittest.TestCase):
-    """Verify file upload uses UUID filenames, not user-controlled names."""
+class TestFix2_TempfileTempFilenames(unittest.TestCase):
+    """Verify file upload uses tempfile filenames, not user-controlled names."""
 
     def test_no_purepath_in_backend(self):
         """PurePath import should be removed from backend/main.py."""
@@ -64,37 +64,36 @@ class TestFix2_UUIDTempFilenames(unittest.TestCase):
         self.assertNotIn('from pathlib import PurePath', content,
             "PurePath import still exists — path traversal protection may be weak!")
 
-    def test_uuid_import_present(self):
-        """UUID module should be imported."""
+    def test_tempfile_import_present(self):
+        """tempfile module should be imported."""
         backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'main.py')
         with open(backend_path, 'r') as f:
             content = f.read()
 
-        self.assertIn('import uuid', content,
-            "UUID import is missing from backend/main.py!")
+        self.assertIn('import tempfile', content,
+            "tempfile import is missing from backend/main.py!")
 
-    def test_temp_path_uses_uuid(self):
-        """Temp path construction should use uuid4, not user filename."""
+    def test_temp_path_uses_tempfile(self):
+        """Temp path construction should use tempfile, not user filename."""
         backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'main.py')
         with open(backend_path, 'r') as f:
             content = f.read()
 
-        self.assertIn('uuid.uuid4()', content,
-            "UUID-based temp path not found — still using user-controlled filename!")
+        self.assertIn('tempfile.mkstemp', content,
+            "tempfile.mkstemp not found — still using user-controlled filename!")
         self.assertNotIn('PurePath(file.filename)', content,
             "User-controlled filename is still being used for temp file!")
 
-    def test_uuid4_generates_valid_filename(self):
-        """Verify UUID4 hex produces a safe filename."""
-        test_path = f"tmp_{uuid.uuid4().hex}.csv"
-        # Must not contain path separators
-        self.assertNotIn('/', test_path)
-        self.assertNotIn('\\', test_path)
-        self.assertNotIn('..', test_path)
+    def test_tempfile_generates_valid_filename(self):
+        """Verify tempfile produces a safe filename."""
+        import tempfile
+        import os
+        fd, test_path = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)
+        os.remove(test_path)
         # Must have correct format
-        self.assertTrue(test_path.startswith('tmp_'))
         self.assertTrue(test_path.endswith('.csv'))
-        self.assertEqual(len(test_path), 4 + 32 + 4)  # tmp_ + 32 hex chars + .csv
+        self.assertTrue(os.path.isabs(test_path))
 
 
 class TestFix3_APIKeyLeakPrevention(unittest.TestCase):

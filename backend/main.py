@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import os
+import tempfile
 import uuid
 import pandas as pd
 import aiofiles
@@ -140,8 +141,9 @@ async def upload_leads(background_tasks: BackgroundTasks, file: UploadFile = Fil
     if validation_error:
         return validation_error
 
-    # Save uploaded file temporarily — use UUID to prevent path traversal
-    temp_path = f"tmp_{uuid.uuid4().hex}.csv"
+    # Save uploaded file temporarily — use secure tempfile to prevent path traversal and polluting cwd
+    fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)
     async with aiofiles.open(temp_path, "wb") as buffer:
         await buffer.write(contents)
 
