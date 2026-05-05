@@ -47,22 +47,17 @@ class TestSupabaseHelper(unittest.TestCase):
         result = self.helper.auto_migrate(missing_columns)
 
         self.assertTrue(result)
-        self.helper.client.rpc.assert_called_once()
-        args, kwargs = self.helper.client.rpc.call_args
-        self.assertEqual(args[0], "exec_sql")
 
-        sql = args[1]["query"]
-        self.assertIn("valid_column", sql)
-        self.assertIn("invalid_column_123", sql)
-        self.assertNotIn("123invalid", sql)
-        self.assertNotIn("invalid column", sql)
-        self.assertNotIn("DROP TABLE leads;", sql)
-        self.assertNotIn("in'valid" , sql)
+        # Verify rpc was called correctly for valid columns
+        self.assertEqual(self.helper.client.rpc.call_count, 2)
 
-        self.assertEqual(
-            sql,
-            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS valid_column TEXT, ADD COLUMN IF NOT EXISTS invalid_column_123 TEXT;"
-        )
+        calls = self.helper.client.rpc.call_args_list
+
+        self.assertEqual(calls[0][0][0], "add_column")
+        self.assertEqual(calls[0][0][1], {"table_name": "leads", "column_name": "valid_column"})
+
+        self.assertEqual(calls[1][0][0], "add_column")
+        self.assertEqual(calls[1][0][1], {"table_name": "leads", "column_name": "invalid_column_123"})
 
     def test_auto_migrate_no_valid_columns(self):
         missing_columns = ["123invalid", "invalid column", "invalid;DROP TABLE leads;"]
@@ -94,11 +89,18 @@ class TestSupabaseHelper(unittest.TestCase):
         """Test check_schema when some columns are missing and Supabase throws exceptions."""
         missing_cols_to_simulate = ["seo_score", "facebook"]
 
-        def mock_select(col):
+        def mock_select(columns):
             chain_mock = MagicMock()
-            if col in missing_cols_to_simulate:
-                chain_mock.limit.return_value.execute.side_effect = Exception(f'column "{col}" does not exist')
-            elif col == "tiktok":
+            # If bulk select (comma separated)
+            if "," in columns:
+                # PostgREST aborts on the first missing column
+                chain_mock.limit.return_value.execute.side_effect = Exception(f'column "{missing_cols_to_simulate[0]}" does not exist')
+                return chain_mock
+
+            # If individual select
+            if columns in missing_cols_to_simulate:
+                chain_mock.limit.return_value.execute.side_effect = Exception(f'column "{columns}" does not exist')
+            elif columns == "tiktok":
                 chain_mock.limit.return_value.execute.side_effect = Exception("Some other random exception")
             else:
                 chain_mock.limit.return_value.execute.return_value = MagicMock(data=[])

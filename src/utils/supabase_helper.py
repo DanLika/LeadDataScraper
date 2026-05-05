@@ -140,23 +140,8 @@ class SupabaseHelper:
                     logger.error("Error during bulk schema check: %s", e)
                     return []
 
-            # Optimization 2: Use information_schema if RPC is available (efficient fallback)
-            try:
-                # Using the existing exec_sql RPC from auto_migrate
-                sql = """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_name = 'leads'
-                """
-                response = self.client.rpc("exec_sql", {"query": sql}).execute()
-                if response.data:
-                    existing_cols = {row['column_name'] for row in response.data}
-                    return [col for col in required_cols if col not in existing_cols]
-            except Exception as rpc_e:
-                logger.debug("RPC schema check failed: %s", rpc_e)
-
-            # Optimization 3: Individual checks (ultimate fallback for restricted environments)
-            # This only runs if bulk select fails AND RPC is unavailable or fails.
+            # Optimization 2: Individual checks (ultimate fallback for restricted environments)
+            # This only runs if bulk select fails.
             missing = []
             for col in required_cols:
                 try:
@@ -191,13 +176,12 @@ class SupabaseHelper:
             return False
 
         try:
-            # Try using rpc to run ALTER TABLE (requires a Supabase SQL function)
-            sql = "ALTER TABLE leads " + ", ".join(
-                [f"ADD COLUMN IF NOT EXISTS {col} TEXT" for col in valid_columns]
-            ) + ";"
-            self.client.rpc("exec_sql", {"query": sql}).execute()
+            # Use safe parameterized RPC for each column instead of raw SQL injection
+            for col in valid_columns:
+                self.client.rpc("add_column", {"table_name": "leads", "column_name": col}).execute()
+
             logger.info("Auto-migration: Added columns %s", valid_columns)
             return True
         except Exception as e:
-            logger.warning("RPC migration failed (exec_sql function may not exist): %s", e)
+            logger.warning("RPC migration failed (add_column function may not exist): %s", e)
             return False
