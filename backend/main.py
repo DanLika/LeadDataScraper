@@ -46,10 +46,6 @@ class CampaignCreate(BaseModel):
     channel: str  # email, linkedin, multi
     segment_filter: Optional[str] = None
 
-class CampaignUpdate(BaseModel):
-    name: Optional[str] = None
-    status: Optional[str] = None
-
 class LeadProcessRequest(BaseModel):
     unique_key: str
 
