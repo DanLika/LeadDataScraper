@@ -1089,6 +1089,8 @@ select:focus-visible {
   /* AI Chat mobile positioning fix */
   .ai-chat-fixed,
   [class*="ai-chat"] {
+    position: fixed !important;
+    z-index: 100;
     max-height: 50vh;
     bottom: 0;
     left: 0;
