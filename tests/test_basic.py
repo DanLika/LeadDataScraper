@@ -36,6 +36,10 @@ def test_deduplication():
     final = merge_and_deduplicate([df1, df2])
     print(f"Final Count: {len(final)}")
     assert len(final) == 3
+
+    # Test empty list edge case
+    final_empty = merge_and_deduplicate([])
+    assert final_empty.empty, "merge_and_deduplicate should return an empty DataFrame for empty input"
     print("✅ Deduplication test passed!")
 
 if __name__ == "__main__":
