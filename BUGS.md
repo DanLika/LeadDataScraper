@@ -2,6 +2,29 @@
 
 Date: 2026-05-12. Pytest: 99→101 passed. Next build: clean (was 2 warnings).
 
+## Round 2 — Fixed (2026-05-12 second pass)
+
+A. **`backend/main.py:116` — `/docs`, `/openapi.json`, `/redoc` publicly readable**
+   Per CLAUDE.md only `/` is meant to be public, but FastAPI's default Swagger UI was exposing the full API surface. Now gated by `ENABLE_DOCS=true`; off by default. Set env in dev to restore.
+
+B. **`backend/main.py` `verify_api_key`/`verify_admin_token` — plain `!=` compare**
+   Vulnerable to timing attack on secret length/prefix. Switched to `secrets.compare_digest`. Both API key and admin token paths now constant-time.
+
+C. **`backend/main.py:208` — `/upload` read entire body before size check**
+   `await file.read()` buffers the full payload (up to whatever client sends) before validation rejects >50MB. DoS vector. Replaced with streamed `read_capped()` that aborts at 50MB and returns 413.
+
+D. **`backend/main.py:131` — `Limiter(headers_enabled=True)` crashed every rate-limited success path**
+   slowapi tried to inject `X-RateLimit-*` headers but required the endpoint to declare `response: Response` — none did. Any successful `/upload`, `/leads`, `/stats`, etc. returned 500. Flipped to `headers_enabled=False`. No frontend consumes those headers; verified via grep.
+
+E. **`frontend/app/api/proxy/[...path]/route.ts` — forwarded client-controlled XFF**
+   Client could send `X-Forwarded-For: spoof` and bypass per-IP rate limits at the backend. Now strips XFF / X-Real-IP / Forwarded from the incoming request and re-emits XFF only from Vercel's `x-vercel-forwarded-for` (edge-set, unforgeable). On non-Vercel deploys (e.g. Render-only), backend collapses to a single proxy-IP bucket — acceptable trade.
+
+F. **`requirements.txt` — `slowapi` missing locally**
+   Already pinned in requirements but not installed in dev environment; reinstalled. Tests now run from a fresh checkout.
+
+G. **`frontend/app/api/proxy/[...path]/route.ts:58` — unused `err` in catch**
+   ESLint warning. Removed binding.
+
 ## Fixed
 
 1. **`src/processors/google_maps.py:65` — Pandas dtype TypeError**

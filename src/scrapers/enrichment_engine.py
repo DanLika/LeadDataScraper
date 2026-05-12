@@ -7,6 +7,7 @@ from google import genai
 from dotenv import load_dotenv
 from src.utils.json_helper import extract_json_from_response
 from src.utils.logging_config import get_logger
+from src.utils.ssrf_guard import SSRFError, assert_safe_url
 
 load_dotenv()
 
@@ -142,6 +143,11 @@ class EnrichmentEngine:
                     # Fetch up to 3 pages concurrently using the SAME browser context
                     async def fetch_page(url):
                         if not url or not str(url).startswith('http'):
+                            return None
+                        try:
+                            await assert_safe_url(url)
+                        except SSRFError as e:
+                            logger.warning("Blocked enrichment URL %s: %s", url, e)
                             return None
                         page = await context.new_page()
                         try:

@@ -18,6 +18,11 @@ const HOP_BY_HOP = new Set([
   'te',
   'trailers',
   'accept-encoding',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'forwarded',
 ]);
 
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
@@ -39,6 +44,14 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   });
   headers.set('X-API-Key', API_SECRET_KEY);
 
+  // Trust only platform-injected client IP. The standard XFF/X-Real-IP were
+  // stripped above (HOP_BY_HOP) because clients can forge them when Next is
+  // exposed directly. x-vercel-forwarded-for is set by the Vercel edge and
+  // unreachable to clients; we re-emit it as XFF so the backend's rate limiter
+  // can bucket per user.
+  const trustedIp = req.headers.get('x-vercel-forwarded-for') || '';
+  if (trustedIp) headers.set('X-Forwarded-For', trustedIp.split(',')[0].trim());
+
   const method = req.method.toUpperCase();
   const init: RequestInit & { duplex?: 'half' } = {
     method,
@@ -55,7 +68,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   let upstream: Response;
   try {
     upstream = await fetch(target, init);
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { error: 'Upstream backend unreachable' },
       { status: 502 },

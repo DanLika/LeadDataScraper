@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import os
+import secrets
 import uuid
 import pandas as pd
 import aiofiles
@@ -35,7 +36,7 @@ async def verify_api_key(key: Optional[str] = Security(api_key_header)) -> str:
     if not expected:
         logger.warning("API_SECRET_KEY not set — requests are blocked. Set it in .env for production.")
         raise HTTPException(status_code=403, detail="API Key Verification is not configured")
-    if not key or key != expected:
+    if not key or not secrets.compare_digest(key, expected):
         raise HTTPException(status_code=403, detail="Invalid or missing API key")
     return key
 
@@ -51,7 +52,7 @@ async def verify_admin_token(token: Optional[str] = Security(admin_token_header)
     if not expected:
         logger.warning("ADMIN_TOKEN not set — destructive endpoints are disabled.")
         raise HTTPException(status_code=403, detail="Admin token not configured")
-    if not token or token != expected:
+    if not token or not secrets.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="Invalid or missing admin token")
     return token
 
@@ -113,7 +114,14 @@ async def lifespan(app: FastAPI):
         logger.warning("Startup DB checks skipped — database unreachable: %s", e)
     yield
 
-app = FastAPI(title="LeadDataScraper API", lifespan=lifespan)
+_docs_enabled = os.getenv("ENABLE_DOCS", "false").lower() == "true"
+app = FastAPI(
+    title="LeadDataScraper API",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
+)
 db = SupabaseHelper()
 router = AgenticRouter()
 auditor = ParallelAuditor()
@@ -128,7 +136,7 @@ def _rate_limit_key(request: Request) -> str:
         return fwd.split(",")[0].strip()
     return get_remote_address(request)
 
-limiter = Limiter(key_func=_rate_limit_key, headers_enabled=True)
+limiter = Limiter(key_func=_rate_limit_key, headers_enabled=False)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Note: only endpoints decorated with @limiter.limit(...) are rate-limited.
@@ -183,19 +191,35 @@ async def list_leads(request: Request):
         logger.error("Unexpected error fetching leads: %s", e, exc_info=True)
         return error_response("An unexpected error occurred while fetching leads")
 
-def validate_csv_upload(file: UploadFile, contents: bytes) -> Optional[JSONResponse]:
-    """Validate uploaded file is a CSV and within size limits."""
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
+
+
+def validate_csv_metadata(file: UploadFile) -> Optional[JSONResponse]:
+    """Validate filename + content-type before reading body."""
     if not file.filename or not file.filename.lower().endswith('.csv'):
         return error_response("Only CSV files are allowed.", status_code=400)
 
     if file.content_type and file.content_type not in ["text/csv", "application/vnd.ms-excel", "application/octet-stream"]:
         return error_response(f"Invalid content type: {file.content_type}. Expected text/csv.", status_code=400)
-
-    max_size = 50 * 1024 * 1024  # 50MB
-    if len(contents) > max_size:
-        return error_response(f"File too large. Maximum size is 50MB, got {len(contents) / (1024*1024):.1f}MB.", status_code=400)
-
     return None
+
+
+async def read_capped(file: UploadFile, max_bytes: int) -> tuple[Optional[bytes], Optional[JSONResponse]]:
+    """Stream-read upload, abort once size exceeds max_bytes."""
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)  # 1MB
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            return None, error_response(
+                f"File too large. Maximum size is {max_bytes // (1024*1024)}MB.",
+                status_code=413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks), None
 
 @app.post("/upload", dependencies=[Depends(verify_api_key)])
 @limiter.limit("5/minute")
@@ -204,10 +228,12 @@ async def upload_leads(request: Request, background_tasks: BackgroundTasks, file
     Handle CSV file upload, map columns using AI, and upsert leads to the database.
     Processing happens in the background.
     """
-    contents = await file.read()
-    validation_error = validate_csv_upload(file, contents)
-    if validation_error:
-        return validation_error
+    meta_error = validate_csv_metadata(file)
+    if meta_error:
+        return meta_error
+    contents, size_error = await read_capped(file, MAX_UPLOAD_BYTES)
+    if size_error:
+        return size_error
 
     # Save uploaded file temporarily — UUID name under system tempdir to
     # prevent path traversal and keep uploads out of the cwd.

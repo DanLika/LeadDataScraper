@@ -6,6 +6,8 @@ import time
 from bs4 import BeautifulSoup
 from typing import Optional
 
+from src.utils.ssrf_guard import SSRFError, SSRFGuardResolver, assert_safe_scheme
+
 # Pre-compiled regex patterns for social URL filtering (performance optimization)
 FB_EXCLUDE = re.compile(r'sharer|messenger|plugins')
 IG_EXCLUDE = re.compile(r'explore|p/|reels')
@@ -184,6 +186,14 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
     if not url.startswith(('http://', 'https://')):
         url = 'https://' + url
 
+    try:
+        assert_safe_scheme(url)
+    except SSRFError as e:
+        return {
+            "url": url, "is_up": False, "score": 0, "tech_flags": {},
+            "red_flags": [f"Blocked URL: {e}"]
+        }
+
     results = {
         "url": url,
         "is_up": False,
@@ -226,7 +236,8 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
 
         if not html:
             start_time = time.time()
-            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            connector = aiohttp.TCPConnector(resolver=SSRFGuardResolver())
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
                 try:
                     async with session.get(url, timeout=12) as response:
                         html = await response.text()
@@ -235,6 +246,8 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
                 except (aiohttp.ClientConnectorSSLError, ssl.SSLError):
                     results["red_flags"].append("SSL Certificate Error")
                     results["has_ssl"] = False
+                except SSRFError as e:
+                    results["red_flags"].append(f"Blocked URL: {e}")
         else:
             results["is_up"] = True
             results["response_time"] = 0.1
