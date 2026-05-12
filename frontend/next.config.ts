@@ -22,29 +22,27 @@ const cspDirectives = [
   `connect-src 'self' ${SUPABASE_URL} ${SUPABASE_URL.replace(/^https:/, "wss:")}`.trim(),
 ].filter(Boolean);
 
+const baseHeaders = [
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Content-Security-Policy", value: cspDirectives.join("; ") },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+];
+// HSTS is gated to production. In dev (localhost/HTTP) the directive is
+// either ignored or, if served briefly over HTTPS, pins the hostname for two
+// years — annoying when local tooling certificates change.
+if (process.env.NODE_ENV === "production") {
+  baseHeaders.push({
+    key: "Strict-Transport-Security",
+    value: "max-age=63072000; includeSubDomains; preload",
+  });
+}
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
-    return [
-      {
-        source: "/(.*)",
-        headers: [
-          { key: "X-Frame-Options", value: "DENY" },
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "X-XSS-Protection", value: "1; mode=block" },
-          { key: "Content-Security-Policy", value: cspDirectives.join("; ") },
-          {
-            key: "Strict-Transport-Security",
-            value: "max-age=63072000; includeSubDomains; preload",
-          },
-          {
-            key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
-          },
-        ],
-      },
-    ];
+    return [{ source: "/(.*)", headers: baseHeaders }];
   },
   productionBrowserSourceMaps: false,
 };

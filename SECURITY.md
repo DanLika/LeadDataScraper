@@ -3,16 +3,22 @@
 ## Trust boundaries
 
 ```
-Browser  ─/api/proxy/*─►  Next.js server  ─X-API-Key─►  FastAPI  ─service_role─►  Supabase (RLS on)
+Browser ─auth cookie─► Next.js server ─X-API-Key─► FastAPI ─service_role─► Supabase (RLS on)
 ```
 
-- The **browser** holds no secrets. Only `NEXT_PUBLIC_SUPABASE_URL` and the
-  publishable anon key, both of which are useless because Supabase RLS blocks
-  anon access on every data table.
+- The **browser** holds a Supabase Auth session cookie. It holds **no API
+  secrets** — only `NEXT_PUBLIC_SUPABASE_URL` and the publishable anon key,
+  both useless because Supabase RLS blocks anon reads/writes on every data
+  table.
+- **Authentication** is handled by Supabase Auth via `@supabase/ssr`. The root
+  `frontend/middleware.ts` redirects unauthenticated traffic to `/login`. The
+  `/api/proxy/[...path]` handler re-checks `auth.getUser()` on every request
+  (defence-in-depth) and 401s if the session cookie is missing or invalid.
 - The **Next.js server** (Node runtime) is the only place that knows the
-  backend `API_SECRET_KEY`. Every browser request flows through
+  backend `API_SECRET_KEY`. Authenticated browser requests flow through
   `frontend/app/api/proxy/[...path]/route.ts`, which forwards to
-  `BACKEND_URL` and injects `X-API-Key`.
+  `BACKEND_URL` and injects `X-API-Key`. State-changing methods are also
+  gated by an `Origin`-header allowlist (CSRF defence).
 - The **FastAPI backend** validates `X-API-Key` and uses Supabase's
   `service_role` key to perform all reads/writes. Service role bypasses RLS
   by design.
@@ -24,8 +30,10 @@ Browser  ─/api/proxy/*─►  Next.js server  ─X-API-Key─►  FastAPI  ─
 
 | Layer | Control | Why |
 |------|---------|-----|
-| Browser | CSP + `X-Frame-Options: DENY` + `Referrer-Policy: strict-origin-when-cross-origin` + HSTS + `Permissions-Policy` (camera/mic/geo off) | Clickjacking, XSS, mixed-content, info-leak defence — set in `frontend/next.config.ts` |
-| Network | Explicit `ALLOWED_ORIGINS` (no `*`) | CORS-locks the API to trusted origins |
+| Browser | CSP + `X-Frame-Options: DENY` + `Referrer-Policy: strict-origin-when-cross-origin` + HSTS (prod only) + `Permissions-Policy` (camera/mic/geo off) | Clickjacking, XSS, mixed-content, info-leak defence — set in `frontend/next.config.ts` |
+| Page access | Root `frontend/middleware.ts` redirects unauthenticated users to `/login` (Supabase Auth, HTTP-only cookie) | No anonymous browse of the dashboard |
+| Proxy gate | `/api/proxy/[...path]` re-runs `auth.getUser()` and 401s without a session; rejects state-changing methods whose `Origin` is not in `ALLOWED_ORIGINS` | Auth gate covers fetch/XHR (middleware redirects only HTML); CSRF defence-in-depth |
+| Network | Explicit `ALLOWED_ORIGINS` (no `*`) + backend startup `assert "*" not in allowed_origins` | CORS-locks the API to trusted origins; fail-loud if a future edit drops the wildcard strip |
 | API auth | `X-API-Key` header on every endpoint, validated with `secrets.compare_digest` | Constant-time compare; key never enters the browser bundle |
 | Destructive ops | `X-Admin-Token` second secret on `DELETE /leads/clear`, constant-time compare | Defence-in-depth: a leaked API key cannot wipe the DB |
 | API surface | `/docs`, `/redoc`, `/openapi.json` disabled unless `ENABLE_DOCS=true` | Hide endpoint enumeration in prod |

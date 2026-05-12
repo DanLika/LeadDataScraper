@@ -16,6 +16,11 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - `src/core/agentic_router.py` — AI instruction routing (natural language → task execution)
 
 ## API Security
+- **Frontend access requires a Supabase Auth session.** Root `frontend/middleware.ts`
+  (wraps `utils/supabase/middleware.ts`) redirects anonymous traffic to `/login`.
+  The `/api/proxy/[...path]` handler re-runs `auth.getUser()` and 401s on
+  unauthenticated fetch/XHR. State-changing methods also reject foreign `Origin`.
+  Provision users in the Supabase Auth dashboard (no public signup).
 - All endpoints (except `/` health check) require `X-API-Key` header — validated by `verify_api_key` dependency (constant-time compare via `secrets.compare_digest`)
 - API key is set via `API_SECRET_KEY` env var in backend `.env`
 - Interactive docs (`/docs`, `/openapi.json`, `/redoc`) are **disabled by default**.

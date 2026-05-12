@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/utils/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,6 +10,13 @@ const API_SECRET_KEY = process.env.API_SECRET_KEY || '';
 // 'x-forwarded-for' on Render or other XFF-using hosts. Never trust a header
 // that clients can set when Next is the public entry point.
 const TRUSTED_CLIENT_IP_HEADER = (process.env.TRUSTED_CLIENT_IP_HEADER || 'x-vercel-forwarded-for').toLowerCase();
+// Origin allowlist for state-changing methods. Comma-separated. Defaults to
+// the dev origin; production must set ALLOWED_ORIGINS to its public URL(s).
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 const HOP_BY_HOP = new Set([
   'host',
@@ -35,6 +43,28 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
       { error: 'API_SECRET_KEY not configured on server' },
       { status: 500 },
     );
+  }
+
+  // 1) Auth gate. Middleware already redirects HTML pages, but proxy traffic
+  // (fetch/XHR) skips the redirect — so we re-check the session here. Without
+  // this, anyone who can reach the proxy URL gets the server-side API key
+  // attached to every request.
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
+  // 2) Origin gate for state-changing methods — defence-in-depth CSRF block.
+  // Same-origin XHR sends Origin; cross-origin attempts with a different
+  // Origin are rejected even if the attacker tricks a logged-in user into
+  // visiting their site (browser still sends our session cookie because we
+  // use SameSite=Lax, but the Origin header reveals the cross-site call).
+  if (!SAFE_METHODS.has(req.method.toUpperCase())) {
+    const origin = req.headers.get('origin');
+    if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+      return NextResponse.json({ error: 'origin not allowed' }, { status: 403 });
+    }
   }
 
   const { path } = await ctx.params;

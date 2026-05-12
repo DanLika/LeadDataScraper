@@ -35,15 +35,20 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (
-    !user &&
-    !request.nextUrl.pathname.startsWith('/login') &&
-    !request.nextUrl.pathname.startsWith('/auth')
-  ) {
-    // no user, potentially redirect to login page
-    // const url = request.nextUrl.clone()
-    // url.pathname = '/login'
-    // return NextResponse.redirect(url)
+  // Anonymous traffic is redirected to /login. Auth callback + /login itself
+  // stay open so users can sign in. /api/auth/* handles credential exchange.
+  // The /api/proxy/[...path] route re-checks auth.getUser() — defence-in-depth
+  // because middleware doesn't run on every Node-runtime route shape.
+  const path = request.nextUrl.pathname
+  const isPublic =
+    path.startsWith('/login') ||
+    path.startsWith('/auth') ||
+    path.startsWith('/api/auth')
+  if (!user && !isPublic) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('next', path + request.nextUrl.search)
+    return NextResponse.redirect(url)
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're

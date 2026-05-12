@@ -74,8 +74,13 @@ class CampaignUpdate(BaseModel):
 class LeadProcessRequest(BaseModel):
     unique_key: str
 
+class AskInstruction(BaseModel):
+    # Cap the prompt that flows into Gemini to bound billing per request and
+    # keep raw prompt-injection blobs from being forwarded.
+    text: constr(min_length=1, max_length=4000)
+
 class AskRequest(BaseModel):
-    instruction: dict
+    instruction: AskInstruction
 
 class DiscoveryRequest(BaseModel):
     query: constr(min_length=1, max_length=500)
@@ -167,6 +172,12 @@ if not allowed_origins:
         "and the browser will block cross-origin requests. Set ALLOWED_ORIGINS to a "
         "comma-separated list of trusted origins for production."
     )
+
+# Refuse to start with a wildcard + credentials combination. Browsers reject it
+# anyway, but the assert here makes the security invariant explicit: a future
+# edit that drops the strip above will fail loudly instead of silently shipping
+# `Access-Control-Allow-Origin: *` with cookie credentials.
+assert "*" not in allowed_origins, "CORS misconfiguration: '*' is incompatible with allow_credentials=True"
 
 app.add_middleware(
     CORSMiddleware,
@@ -365,14 +376,7 @@ async def ask_ai(request: Request, payload: AskRequest, background_tasks: Backgr
     Can execute simple tasks immediately or propose a multi-step plan for confirmation.
     """
     try:
-        instruction_obj = payload.instruction
-        if not instruction_obj:
-             return error_response("Missing 'instruction' object", status_code=400)
-
-        prompt = instruction_obj.get("text")
-
-        if not prompt:
-            return error_response("Missing 'text' in 'instruction'", status_code=400)
+        prompt = payload.instruction.text
 
         # 1. Route the instruction to a task
         plan = await router.route_instruction(prompt)
