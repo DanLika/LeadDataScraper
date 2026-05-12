@@ -21,6 +21,19 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   The `/api/proxy/[...path]` handler re-runs `auth.getUser()` and 401s on
   unauthenticated fetch/XHR. State-changing methods also reject foreign `Origin`.
   Provision users in the Supabase Auth dashboard (no public signup).
+- Auth middleware public-path allowlist (`/login`, `/auth`, `/api/auth`) uses
+  exact match or trailing-slash subpath — not raw `startsWith`. Prevents a
+  future `/login-internal` or `/authentication-guide` route from being silently
+  unauthenticated by string-prefix overlap.
+- `/login?next=<path>` is sanitised by `sanitizeNext()` in
+  `frontend/app/login/page.tsx`. Only same-origin relative paths are accepted
+  (must start with `/`, must NOT start with `//` or `/\`). Closes open-redirect
+  → phishing-assist on the auth flow.
+- Supabase session cookies set via `setAll()` in
+  `frontend/utils/supabase/middleware.ts` are floored to `SameSite=Lax`,
+  `HttpOnly=true`, `Secure=true` (prod) — Supabase's own options win via spread
+  order, but the floor protects against a future SDK change that loosens
+  defaults.
 - All endpoints (except `/` health check) require `X-API-Key` header — validated by `verify_api_key` dependency (constant-time compare via `secrets.compare_digest`)
 - API key is set via `API_SECRET_KEY` env var in backend `.env`
 - Interactive docs (`/docs`, `/openapi.json`, `/redoc`) are **disabled by default**.

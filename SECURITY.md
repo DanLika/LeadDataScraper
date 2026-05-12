@@ -31,7 +31,9 @@ Browser ─auth cookie─► Next.js server ─X-API-Key─► FastAPI ─servic
 | Layer | Control | Why |
 |------|---------|-----|
 | Browser | CSP + `X-Frame-Options: DENY` + `Referrer-Policy: strict-origin-when-cross-origin` + HSTS (prod only) + `Permissions-Policy` (camera/mic/geo off) | Clickjacking, XSS, mixed-content, info-leak defence — set in `frontend/next.config.ts` |
-| Page access | Root `frontend/middleware.ts` redirects unauthenticated users to `/login` (Supabase Auth, HTTP-only cookie) | No anonymous browse of the dashboard |
+| Page access | Root `frontend/middleware.ts` redirects unauthenticated users to `/login` (Supabase Auth, HTTP-only cookie). Public allowlist is exact-match or trailing-slash subpath only (`/login`, `/auth`, `/api/auth`) — `/login-anything` and `/authentication-guide` will NOT bypass auth. | No anonymous browse of the dashboard; no string-prefix overlap footgun for future routes |
+| Login redirect | `/login?next=<path>` is sanitised by `sanitizeNext()` — must start with `/` AND not start with `//` or `/\`. Protocol-relative URLs (`//evil.com`), backslash variants (`/\evil.com`), and absolute URLs (`https://evil.com`) all collapse to `/`. | Closes open-redirect → phishing-assist on the auth flow |
+| Session cookies | `setAll()` in `frontend/utils/supabase/middleware.ts` floors options to `SameSite=Lax`, `HttpOnly=true`, `Secure=true` in production (Supabase overrides take precedence via spread order) | Defence-in-depth against a future SDK change that drops/loosens defaults |
 | Proxy gate | `/api/proxy/[...path]` re-runs `auth.getUser()` and 401s without a session; rejects state-changing methods whose `Origin` is not in `ALLOWED_ORIGINS` | Auth gate covers fetch/XHR (middleware redirects only HTML); CSRF defence-in-depth |
 | Network | Explicit `ALLOWED_ORIGINS` (no `*`) + backend startup `assert "*" not in allowed_origins` | CORS-locks the API to trusted origins; fail-loud if a future edit drops the wildcard strip |
 | API auth | `X-API-Key` header on every endpoint, validated with `secrets.compare_digest` | Constant-time compare; key never enters the browser bundle |
