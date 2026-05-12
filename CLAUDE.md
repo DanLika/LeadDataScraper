@@ -16,8 +16,10 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - `src/core/agentic_router.py` — AI instruction routing (natural language → task execution)
 
 ## API Security
-- **Frontend access requires a Supabase Auth session.** Root `frontend/middleware.ts`
-  (wraps `utils/supabase/middleware.ts`) redirects anonymous traffic to `/login`.
+- **Frontend access requires a Supabase Auth session.** Root `frontend/proxy.ts`
+  (Next 16 convention; wraps `utils/supabase/middleware.ts`) redirects anonymous
+  traffic to `/login`. Do not also create `frontend/middleware.ts` — Next 16
+  errors on duplicate convention files and the dev/prod server fails to boot.
   The `/api/proxy/[...path]` handler re-runs `auth.getUser()` and 401s on
   unauthenticated fetch/XHR. State-changing methods also reject foreign `Origin`.
   Provision users in the Supabase Auth dashboard (no public signup).
