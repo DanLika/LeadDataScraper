@@ -29,7 +29,8 @@ Browser  ─/api/proxy/*─►  Next.js server  ─X-API-Key─►  FastAPI  ─
 | API auth | `X-API-Key` header on every endpoint, validated with `secrets.compare_digest` | Constant-time compare; key never enters the browser bundle |
 | Destructive ops | `X-Admin-Token` second secret on `DELETE /leads/clear`, constant-time compare | Defence-in-depth: a leaked API key cannot wipe the DB |
 | API surface | `/docs`, `/redoc`, `/openapi.json` disabled unless `ENABLE_DOCS=true` | Hide endpoint enumeration in prod |
-| Client IP | Proxy strips client-sent `X-Forwarded-For`/`X-Real-IP`/`Forwarded`; re-emits the platform-trusted header (`TRUSTED_CLIENT_IP_HEADER` env) | Anti-spoof for rate limiter buckets |
+| Client IP | Proxy strips client-sent `X-Forwarded-For`/`X-Real-IP`/`Forwarded`; re-emits the platform-trusted header (`TRUSTED_CLIENT_IP_HEADER` env). Backend honours XFF **only** when the request also carries a valid `X-API-Key` (proven via `secrets.compare_digest`) — i.e. it came through the proxy. Forged XFF without the key falls back to the TCP peer IP. | Anti-spoof for rate limiter buckets even if FastAPI is reached directly |
+| Outbound fetch | `src/utils/ssrf_guard.py` blocks loopback, RFC1918, link-local, CGNAT (100.64/10), multicast, reserved, 0.0.0.0, IPv4-mapped-v6, octal/decimal/hex literal IPs, `metadata.google.internal`, and non-`http(s)` schemes. Wired via `SSRFGuardResolver` (aiohttp TCPConnector) in `seo_audit.py` so every redirect re-resolves; `enrichment_engine.py` pre-checks before `page.goto`. | Stops cloud-metadata / internal-network SSRF via user-supplied lead URLs |
 | AI/job abuse | `slowapi` per-IP rate limits on `/ask`, `/draft-*`, `/insights`, `/execute`, `/upload`, `/hunt-*`, `/discovery/start`, `/process-all`, `/enrich/start`, `/leads/clear` | Gemini billing + Playwright spawn protection |
 | Polling abuse | Per-IP caps on `/leads`, `/stats`, `/audit-status` | Reads can still flood the backend |
 | Database | RLS + revoke on data tables | Even if the anon key leaks, no rows are readable |
@@ -75,8 +76,12 @@ Browser  ─/api/proxy/*─►  Next.js server  ─X-API-Key─►  FastAPI  ─
 | `/hunt-all`, `/process-all` | 3 / min |
 | `DELETE /leads/clear` | 3 / hour (also requires `X-Admin-Token`) |
 
-The limiter honours `X-Forwarded-For` so the trusted Next.js proxy passes the
-real client IP through.
+The limiter honours `X-Forwarded-For` **only when the request also carries a
+valid `X-API-Key`** (constant-time compared). The Next.js proxy is the only
+legitimate holder of that key, so a matching key proves the XFF was set by
+the proxy (which strips client-supplied XFF). Requests without — or with an
+invalid — key are bucketed by their TCP peer IP, so forged XFF cannot spread
+load across rate-limit buckets even if the FastAPI port is exposed directly.
 
 ## Reporting
 

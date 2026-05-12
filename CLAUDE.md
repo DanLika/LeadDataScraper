@@ -39,7 +39,12 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   The proxy strips client-controlled XFF / X-Real-IP / Forwarded headers and
   re-emits XFF from the platform-injected header named in
   `TRUSTED_CLIENT_IP_HEADER` (default `x-vercel-forwarded-for`; set to
-  `x-forwarded-for` on Render) to prevent spoof-based rate-limit bypass.
+  `x-forwarded-for` on Render). Additionally, `_rate_limit_key` in
+  `backend/main.py` only honours XFF when the request carries a valid
+  `X-API-Key` (constant-time compared). Forged XFF without the key falls
+  back to the TCP peer IP — so even if the FastAPI port is ever exposed
+  directly, attackers cannot spoof XFF to spread load across rate-limit
+  buckets.
 - Browser security headers set in `frontend/next.config.ts`: CSP
   (`script-src 'self'` in prod; `connect-src` whitelists Supabase URL + wss),
   HSTS (2y + preload), `X-Frame-Options: DENY`, `X-Content-Type-Options`,
