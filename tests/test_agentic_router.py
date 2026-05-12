@@ -5,22 +5,6 @@ import pytest
 import unittest
 import os
 
-# Mock external dependencies before importing the module to be tested
-sys.modules['playwright'] = MagicMock()
-sys.modules['playwright.async_api'] = MagicMock()
-sys.modules['google'] = MagicMock()
-sys.modules['google.genai'] = MagicMock()
-sys.modules['google.genai.types'] = MagicMock()
-sys.modules['google.generativeai'] = MagicMock()
-sys.modules['src.utils.supabase_helper'] = MagicMock()
-sys.modules['supabase'] = MagicMock()
-sys.modules['dotenv'] = MagicMock()
-sys.modules['pandas'] = MagicMock()
-sys.modules['numpy'] = MagicMock()
-sys.modules['aiohttp'] = MagicMock()
-sys.modules['bs4'] = MagicMock()
-sys.modules['fake_useragent'] = MagicMock()
-
 from src.core.agentic_router import AgenticRouter
 
 class TestAgenticRouterRouteInstruction(unittest.IsolatedAsyncioTestCase):
@@ -40,7 +24,10 @@ class TestAgenticRouterRouteInstruction(unittest.IsolatedAsyncioTestCase):
         self.mock_getenv = self.patcher_getenv.start()
 
     def tearDown(self):
-        patch.stopall()
+        self.patcher_supabase.stop()
+        self.patcher_dotenv.stop()
+        self.patcher_genai_client.stop()
+        self.patcher_getenv.stop()
 
     async def test_route_instruction_no_client(self):
         # Set os.getenv("GEMINI_API_KEY") to None

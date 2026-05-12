@@ -59,20 +59,25 @@ def process_gmaps_df(df, source_label="Google Maps"):
     # 4. Clean specific columns
     if 'Website' in df.columns:
         df['Website'] = df['Website'].apply(clean_website)
-    
+
     if 'Rating' in df.columns:
-        df['Rating'] = df['Rating'].str.replace(',', '.', regex=False).astype(float, errors='ignore')
-        
+        df['Rating'] = pd.to_numeric(
+            df['Rating'].astype(str).str.replace(',', '.', regex=False),
+            errors='coerce',
+        )
+
     if 'Reviews' in df.columns:
-        df['Reviews'] = df['Reviews'].str.replace(r'[()]', '', regex=True)
-        df['Reviews'] = pd.to_numeric(df['Reviews'], errors='coerce').astype('Int64')
+        df['Reviews'] = pd.to_numeric(
+            df['Reviews'].astype(str).str.replace(r'[()]', '', regex=True),
+            errors='coerce',
+        ).astype('Int64')
 
     if 'Phone' in df.columns:
         df['Phone'] = df['Phone'].apply(clean_phone).fillna('')
 
     if 'Address' in df.columns:
         df['Address'] = df['Address'].replace(['·', ''], np.nan)
-    
+
     if 'Category' in df.columns:
         df['Category'] = df['Category'].replace(['·', ''], np.nan)
 
@@ -82,7 +87,7 @@ def process_gmaps_df(df, source_label="Google Maps"):
     # 6. Add metadata columns
     df['EXTRACTED_EMAIL'] = np.nan
     df['SOURCE_FILE'] = source_label
-    
+
     # 7. Create unique_key
     df['unique_key'] = df['Google Maps Link'].fillna('') + '_' + df['Name'].fillna('')
     df['unique_key'] = df.apply(

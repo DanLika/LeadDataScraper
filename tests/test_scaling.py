@@ -1,9 +1,10 @@
 import asyncio
+from unittest.mock import patch
 from src.core.parallel_auditor import ParallelAuditor
 import pandas as pd
 import os
 
-async def test_scaling_logic():
+async def _scaling_logic():
     print("--- Starting Scaling Engine Stress Test ---")
     
     # 1. Generate 100 dummy leads (simulating a large batch)
@@ -21,8 +22,17 @@ async def test_scaling_logic():
     print(f"Auditing {len(dummy_leads)} leads in parallel (5 at a time)...")
     start_time = asyncio.get_event_loop().time()
     
-    # We run run_batch directly instead of orchestrate_scaling to avoid needing Supabase connection for this unit test
-    results = await auditor.run_batch(dummy_leads)
+    # Mock the underlying network call
+    async def mock_audit(*args, **kwargs):
+        await asyncio.sleep(0.01) # Simulate slight network delay
+        return {"status": "Completed", "score": 100}
+
+    async def mock_email(*args, **kwargs):
+        return "test@example.com"
+
+    with patch("src.core.parallel_auditor.perform_seo_audit_async", side_effect=mock_audit), \
+         patch("src.core.parallel_auditor.LeadHunter.search_for_email_async", side_effect=mock_email):
+        results = await auditor.run_batch(dummy_leads)
     
     end_time = asyncio.get_event_loop().time()
     
@@ -39,5 +49,10 @@ async def test_scaling_logic():
     assert len(completed) > 0, "No leads were successfully audited"
     print("\n--- Stress Test Passed! ---")
 
+
+def test_scaling_logic():
+    asyncio.run(_scaling_logic())
+
+
 if __name__ == "__main__":
-    asyncio.run(test_scaling_logic())
+    asyncio.run(_scaling_logic())

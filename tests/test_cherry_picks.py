@@ -136,15 +136,13 @@ class TestFix4_CORSWildcardGuard(unittest.TestCase):
     """Verify CORS wildcard + credentials combo is prevented."""
 
     def test_wildcard_guard_code_exists(self):
-        """Backend should contain wildcard detection and credentials disable logic."""
+        """Backend should strip wildcard origins entirely (stricter than disabling credentials)."""
         backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'main.py')
         with open(backend_path, 'r') as f:
             content = f.read()
 
-        self.assertIn('"*" in allowed_origins', content,
-            "Wildcard CORS guard not found!")
-        self.assertIn('allow_credentials = False', content,
-            "Credentials disable for wildcard not found!")
+        self.assertIn('origin != "*"', content,
+            "Wildcard CORS strip not found!")
 
     def test_cors_with_normal_origins(self):
         """With normal origins, credentials should remain True."""

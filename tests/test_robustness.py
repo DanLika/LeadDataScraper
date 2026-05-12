@@ -2,12 +2,6 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock, AsyncMock, patch, sys
 
-# Mock external dependencies before imports
-sys.modules['playwright'] = MagicMock()
-sys.modules['playwright.async_api'] = MagicMock()
-sys.modules['google.generativeai'] = MagicMock()
-sys.modules['supabase'] = MagicMock()
-
 from datetime import datetime
 from src.core.task_orchestrator import TaskOrchestrator
 
