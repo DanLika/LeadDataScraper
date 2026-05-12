@@ -4,10 +4,21 @@ import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 
+// Only accept same-origin relative paths. Reject protocol-relative URLs
+// (`//evil.com`), backslash-escape variants (`/\evil.com` — browsers normalize
+// the backslash), and absolute URLs to other origins. Prevents open-redirect
+// abuse via `?next=` on the login page.
+function sanitizeNext(raw: string | null): string {
+  if (!raw) return '/'
+  if (!raw.startsWith('/')) return '/'
+  if (raw.startsWith('//') || raw.startsWith('/\\')) return '/'
+  return raw
+}
+
 function LoginForm() {
   const router = useRouter()
   const params = useSearchParams()
-  const next = params.get('next') || '/'
+  const next = sanitizeNext(params.get('next'))
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -25,7 +36,7 @@ function LoginForm() {
       setError(error.message)
       return
     }
-    router.replace(next.startsWith('/') ? next : '/')
+    router.replace(next)
     router.refresh()
   }
 
