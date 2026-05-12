@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 import socket
 from urllib.parse import urlparse
 
@@ -30,30 +31,31 @@ _BLOCKED_HOSTS = {
 }
 
 
+_NUMERIC_HOST_RE = re.compile(r"^[\d.]+$")
+
+
 def assert_safe_scheme(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise SSRFError(f"Blocked URL scheme: {parsed.scheme!r}")
     if not parsed.hostname:
         raise SSRFError("URL has no host")
-    if parsed.hostname.lower() in _BLOCKED_HOSTS:
+    host = parsed.hostname.lower().rstrip(".")
+    if host in _BLOCKED_HOSTS:
         raise SSRFError(f"Blocked hostname: {parsed.hostname}")
     try:
-        ip = ipaddress.ip_address(parsed.hostname)
+        ip = ipaddress.ip_address(host)
     except ValueError:
+        if _NUMERIC_HOST_RE.match(host):
+            raise SSRFError(
+                f"Suspicious numeric host {host!r} (non-standard IP literal — octal/leading-zero)"
+            )
         return
     _assert_public_ip(ip, parsed.hostname)
 
 
 def _assert_public_ip(ip: ipaddress._BaseAddress, host: str) -> None:
-    if (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    ):
+    if ip.is_multicast or ip.is_reserved or ip.is_unspecified or not ip.is_global:
         raise SSRFError(f"Blocked non-public IP {ip} for host {host!r}")
 
 
