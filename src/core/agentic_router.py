@@ -290,7 +290,7 @@ class AgenticRouter:
             return {"answer": summary_response.text}
         except Exception as e:
             logger.error("Database query AI call failed: %s", e, exc_info=True)
-            return {"error": f"AI query failed: {str(e)}"}
+            return {"error": "AI query failed"}
 
     async def _generate_outreach_draft(self, params: dict):
         """
@@ -355,7 +355,7 @@ class AgenticRouter:
             }
         except Exception as e:
             logger.error("Outreach draft generation failed for %s: %s", unique_key, e, exc_info=True)
-            return {"error": f"Failed to generate outreach draft: {str(e)}"}
+            return {"error": "Failed to generate outreach draft"}
 
     async def _generate_linkedin_draft(self, params: dict):
         """
@@ -406,7 +406,7 @@ class AgenticRouter:
             }
         except Exception as e:
             logger.error("LinkedIn draft generation failed for %s: %s", unique_key, e, exc_info=True)
-            return {"error": f"Failed to generate LinkedIn draft: {str(e)}"}
+            return {"error": "Failed to generate LinkedIn draft"}
 
     async def _get_strategic_insights(self):
         """
@@ -568,7 +568,7 @@ class AgenticRouter:
             }
         except Exception as e:
             logger.error("Massive pipeline execution failed: %s", e, exc_info=True)
-            return {"error": f"Failed to start massive pipeline: {str(e)}"}
+            return {"error": "Failed to start massive pipeline"}
 
     async def _generate_campaign_strategy(self, params: dict):
         """
@@ -622,4 +622,4 @@ class AgenticRouter:
             }
         except Exception as e:
             logger.error("Campaign strategy generation failed: %s", e, exc_info=True)
-            return {"error": f"Failed to generate campaign strategy: {str(e)}"}
+            return {"error": "Failed to generate campaign strategy"}

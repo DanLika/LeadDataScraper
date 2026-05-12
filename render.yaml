@@ -43,6 +43,11 @@ services:
       # Server-side only — NOT NEXT_PUBLIC_. Used by the /api/proxy route.
       - key: API_SECRET_KEY
         sync: false
+      # Render's edge sets the real client IP on X-Forwarded-For. The proxy
+      # strips client-sent XFF (anti-spoof) and re-emits the trusted header's
+      # first hop so the backend rate limiter buckets per user, not per proxy.
+      - key: TRUSTED_CLIENT_IP_HEADER
+        value: x-forwarded-for
       # Public — Supabase auth/publishable key. RLS prevents data access.
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false

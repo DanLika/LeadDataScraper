@@ -5,6 +5,10 @@ export const dynamic = 'force-dynamic';
 
 const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 const API_SECRET_KEY = process.env.API_SECRET_KEY || '';
+// Platform-injected client-IP header. Defaults to Vercel; set to
+// 'x-forwarded-for' on Render or other XFF-using hosts. Never trust a header
+// that clients can set when Next is the public entry point.
+const TRUSTED_CLIENT_IP_HEADER = (process.env.TRUSTED_CLIENT_IP_HEADER || 'x-vercel-forwarded-for').toLowerCase();
 
 const HOP_BY_HOP = new Set([
   'host',
@@ -44,12 +48,13 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   });
   headers.set('X-API-Key', API_SECRET_KEY);
 
-  // Trust only platform-injected client IP. The standard XFF/X-Real-IP were
-  // stripped above (HOP_BY_HOP) because clients can forge them when Next is
-  // exposed directly. x-vercel-forwarded-for is set by the Vercel edge and
-  // unreachable to clients; we re-emit it as XFF so the backend's rate limiter
-  // can bucket per user.
-  const trustedIp = req.headers.get('x-vercel-forwarded-for') || '';
+  // Trust only the platform-injected client-IP header (TRUSTED_CLIENT_IP_HEADER
+  // env). Standard XFF/X-Real-IP/Forwarded were stripped via HOP_BY_HOP because
+  // clients can forge them when Next is exposed directly. The trusted header
+  // (x-vercel-forwarded-for on Vercel, x-forwarded-for on Render) is read from
+  // the ORIGINAL request before stripping; we re-emit its first hop as XFF so
+  // the backend's rate limiter can bucket per user.
+  const trustedIp = req.headers.get(TRUSTED_CLIENT_IP_HEADER) || '';
   if (trustedIp) headers.set('X-Forwarded-For', trustedIp.split(',')[0].trim());
 
   const method = req.method.toUpperCase();

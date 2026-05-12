@@ -24,13 +24,16 @@ Browser  ─/api/proxy/*─►  Next.js server  ─X-API-Key─►  FastAPI  ─
 
 | Layer | Control | Why |
 |------|---------|-----|
+| Browser | CSP + `X-Frame-Options: DENY` + `Referrer-Policy: strict-origin-when-cross-origin` + HSTS + `Permissions-Policy` (camera/mic/geo off) | Clickjacking, XSS, mixed-content, info-leak defence — set in `frontend/next.config.ts` |
 | Network | Explicit `ALLOWED_ORIGINS` (no `*`) | CORS-locks the API to trusted origins |
-| API auth | `X-API-Key` header on every endpoint | Validated server-side; key never enters the browser bundle |
-| Destructive ops | `X-Admin-Token` second secret on `DELETE /leads/clear` | Defence-in-depth: a leaked API key cannot wipe the DB |
+| API auth | `X-API-Key` header on every endpoint, validated with `secrets.compare_digest` | Constant-time compare; key never enters the browser bundle |
+| Destructive ops | `X-Admin-Token` second secret on `DELETE /leads/clear`, constant-time compare | Defence-in-depth: a leaked API key cannot wipe the DB |
+| API surface | `/docs`, `/redoc`, `/openapi.json` disabled unless `ENABLE_DOCS=true` | Hide endpoint enumeration in prod |
+| Client IP | Proxy strips client-sent `X-Forwarded-For`/`X-Real-IP`/`Forwarded`; re-emits the platform-trusted header (`TRUSTED_CLIENT_IP_HEADER` env) | Anti-spoof for rate limiter buckets |
 | AI/job abuse | `slowapi` per-IP rate limits on `/ask`, `/draft-*`, `/insights`, `/execute`, `/upload`, `/hunt-*`, `/discovery/start`, `/process-all`, `/enrich/start`, `/leads/clear` | Gemini billing + Playwright spawn protection |
 | Polling abuse | Per-IP caps on `/leads`, `/stats`, `/audit-status` | Reads can still flood the backend |
 | Database | RLS + revoke on data tables | Even if the anon key leaks, no rows are readable |
-| Schema migration | Narrow `add_lead_column(text)` SECURITY DEFINER RPC | Replaces unsafe generic `exec_sql` |
+| Schema migration | Narrow `add_lead_column(text)` SECURITY DEFINER RPC + Python regex pre-check | Replaces unsafe generic `exec_sql`; defence-in-depth on column name |
 | File uploads | UUID names under `tempfile.gettempdir()`, 50 MB cap, content-type allowlist, `try/finally` cleanup | Path traversal + disk leak protection |
 | Errors | Global `Exception` handler returns JSON `{ "error": ... }` | Prevents stack-trace leakage; the proxy can always `.json()` |
 
@@ -43,13 +46,22 @@ Browser  ─/api/proxy/*─►  Next.js server  ─X-API-Key─►  FastAPI  ─
 - `API_SECRET_KEY` — same value as the frontend's server-side `API_SECRET_KEY`
 - `ADMIN_TOKEN` — separate from `API_SECRET_KEY`, never shipped to browsers
 - `ALLOWED_ORIGINS` — comma-separated list of trusted origins
+- `ENABLE_DOCS` — set to `true` only in dev to expose `/docs`, `/redoc`, `/openapi.json`. Default is closed.
 - `SMTP_*` (optional, for outreach)
 
 ### Frontend `.env.local`
 - `BACKEND_URL` — server-side only (used by `/api/proxy/[...path]`)
 - `API_SECRET_KEY` — server-side only, **must not** be prefixed `NEXT_PUBLIC_`
+- `TRUSTED_CLIENT_IP_HEADER` — platform-injected client-IP header the proxy
+  re-emits as `X-Forwarded-For`. Defaults to `x-vercel-forwarded-for`. On
+  Render or other XFF-using hosts set to `x-forwarded-for`.
 - `NEXT_PUBLIC_SUPABASE_URL` — public
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — public (RLS makes it harmless)
+
+> Never prefix `API_SECRET_KEY` or `ADMIN_TOKEN` with `NEXT_PUBLIC_`. Any
+> historical `NEXT_PUBLIC_API_KEY` line in `frontend/.env.local` must be
+> deleted and the value rotated in prod — it was once baked into browser
+> bundles.
 
 ## Rate limits (per IP)
 

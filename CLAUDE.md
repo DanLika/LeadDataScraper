@@ -37,8 +37,14 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   declare it on every endpoint).
 - Rate-limit key derives from `X-Forwarded-For` set by the Next.js proxy.
   The proxy strips client-controlled XFF / X-Real-IP / Forwarded headers and
-  re-emits XFF only from Vercel's edge-injected `x-vercel-forwarded-for` to
-  prevent spoof-based rate-limit bypass.
+  re-emits XFF from the platform-injected header named in
+  `TRUSTED_CLIENT_IP_HEADER` (default `x-vercel-forwarded-for`; set to
+  `x-forwarded-for` on Render) to prevent spoof-based rate-limit bypass.
+- Browser security headers set in `frontend/next.config.ts`: CSP
+  (`script-src 'self'` in prod; `connect-src` whitelists Supabase URL + wss),
+  HSTS (2y + preload), `X-Frame-Options: DENY`, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy` (camera/mic/geo off).
+  `productionBrowserSourceMaps: false`.
 - `/upload` streams the request body and aborts at 50 MB (`MAX_UPLOAD_BYTES`)
   with a 413 — no full-buffer DoS.
 - Outbound HTTP from `seo_audit.py` and `enrichment_engine.py` runs through
