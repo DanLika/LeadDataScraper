@@ -180,7 +180,7 @@ export default function CampaignsPage() {
           </div>
           <button
             onClick={() => setIsSidebarOpen(true)}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-muted)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             aria-label="Open menu"
           >
             <Menu size={22} />
@@ -204,7 +204,6 @@ export default function CampaignsPage() {
           </button>
         </div>
 
-        {/* Create Campaign Modal */}
         {showCreate && (
           <div className="card" style={{ marginBottom: '2rem', border: '1px solid hsla(var(--primary-hsl), 0.3)' }}>
             <h3 style={{ marginBottom: '1.5rem' }}>Create New Campaign</h3>
@@ -332,7 +331,7 @@ export default function CampaignsPage() {
                             padding: '0.15rem 0.5rem',
                             borderRadius: '10px',
                             fontSize: '0.7rem',
-                            background: msg.status === 'sent' ? 'var(--success-tint)' : 'rgba(148,163,184,0.1)',
+                            background: msg.status === 'sent' ? 'var(--success-tint)' : 'var(--surface-muted)',
                             color: msg.status === 'sent' ? 'var(--success)' : 'var(--text-muted)'
                           }}>
                             {msg.status}
@@ -365,10 +364,7 @@ export default function CampaignsPage() {
             aria-modal="true"
             aria-labelledby="preview-modal-title"
             tabIndex={-1}
-            style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500
-            }}
+            className="modal-backdrop"
             onClick={() => setPreviewMessage(null)}
             onKeyDown={(e) => { if (e.key === 'Escape') setPreviewMessage(null); }}
           >

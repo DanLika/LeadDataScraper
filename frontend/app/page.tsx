@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useState, useEffect, Fragment, useMemo } from 'react';
-import { createClient } from '@/utils/supabase/client';
 import {
   Upload, Globe, Mail, Phone, Shield,
   Settings, AlertCircle, AlertTriangle,
@@ -163,7 +162,6 @@ export default function Dashboard() {
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
   }, []);
-  const supabase = useMemo(() => createClient(), []);
 
   // ESC key handler for all modals
   useEffect(() => {
@@ -180,18 +178,17 @@ export default function Dashboard() {
   }, [campaign, outreachDraft, showSettings, showDiscoveryModal, isDiscovering]);
 
   const fetchLeads = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching leads:', error);
-    } else {
-      setLeads(data || []);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/leads`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      setLeads(data.leads || []);
+    } catch (err) {
+      console.error('Error fetching leads:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, [supabase]);
+  }, []);
 
   const fetchInsights = useCallback(async () => {
     setFetchingInsights(true);
@@ -210,20 +207,15 @@ export default function Dashboard() {
     fetchLeads();
     fetchInsights();
 
-    // Subscribe to realtime changes
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'leads' },
-        () => fetchLeads()
-      )
-      .subscribe();
+    // Poll the backend for fresh leads instead of subscribing via the browser
+    // Supabase client. Supabase Realtime requires anon access to the table,
+    // which is intentionally disabled by RLS — backend is now the only reader.
+    const interval = setInterval(() => {
+      fetchLeads();
+    }, 15000);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchLeads, fetchInsights, supabase]);
+    return () => clearInterval(interval);
+  }, [fetchLeads, fetchInsights]);
 
   // Combined status monitoring for legacy endpoints
   useEffect(() => {
@@ -282,7 +274,6 @@ export default function Dashboard() {
       setDiscoveryStep(0);
     }
     return () => clearInterval(interval!);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDiscovering]);
 
   const handleExecutePlan = async (plan: ExecutePlan) => {
@@ -659,7 +650,7 @@ export default function Dashboard() {
           </div>
           <button
             onClick={() => setIsSidebarOpen(true)}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-muted)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-white)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             aria-label="Open menu"
           >
             <Menu size={22} />
@@ -689,8 +680,8 @@ export default function Dashboard() {
             <div style={{ flex: 1, height: '8px', background: 'var(--surface-muted)', borderRadius: '4px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
               <div 
                 style={{ 
-                   height: '100%', 
-                   background: 'linear-gradient(90deg, var(--primary), var(--accent))', 
+                   height: '100%',
+                   background: 'var(--primary)',
                    width: `${
                      orchestratorJob ? 
                      (orchestratorJob.total_count > 0 ? (orchestratorJob.processed_count / orchestratorJob.total_count) * 100 : 0) :
@@ -935,7 +926,7 @@ export default function Dashboard() {
                           </td>
                         </tr>
                         {(lead.last_error || (lead.key_offerings && lead.key_offerings !== 'Unknown') || (lead.pain_points && lead.pain_points !== 'Unknown')) && (
-                          <tr style={{ background: 'rgba(255,255,255,0.01)' }}>
+                          <tr style={{ background: 'var(--surface-subtle)' }}>
                             <td colSpan={5} style={{ padding: '1rem 2rem', borderBottom: '1px solid var(--border)' }}>
                               <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
                                 {lead.last_error && (
@@ -977,7 +968,7 @@ export default function Dashboard() {
 
       {/* Outreach Draft Modal */}
       {outreachDraft && (
-        <div role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '1rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" className="modal-backdrop">
           <div className="card" style={{ width: '100%', maxWidth: 'min(600px, 95vw)', padding: 'clamp(1rem, 5vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setOutreachDraft(null)}
@@ -989,7 +980,7 @@ export default function Dashboard() {
             <h2 id="outreach-modal-title" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Mail color="var(--primary)" /> Outreach for {outreachDraft.leadName}
             </h2>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '12px', color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '2rem', border: '1px solid var(--glass-border)', fontSize: '0.95rem' }}>
+            <div style={{ background: 'var(--surface-muted)', padding: '1.5rem', borderRadius: '12px', color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '2rem', border: '1px solid var(--border-subtle)', fontSize: '0.95rem' }}>
               {outreachDraft.text}
             </div>
 
@@ -1073,7 +1064,7 @@ export default function Dashboard() {
 
       {/* Discovery Modal */}
       {showDiscoveryModal && (
-        <div role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '1rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" className="modal-backdrop">
           <div className="card" style={{ width: '100%', maxWidth: 'min(500px, 95vw)', padding: 'clamp(1.25rem, 4vw, 2rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setShowDiscoveryModal(false)}
@@ -1193,7 +1184,7 @@ export default function Dashboard() {
       )}
       {/* Settings Modal */}
       {showSettings && (
-        <div role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '2rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: '500px', padding: 'clamp(1.25rem, 4vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)' }}>
             <button
               onClick={() => setShowSettings(false)}
@@ -1210,7 +1201,7 @@ export default function Dashboard() {
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>API Configuration</h4>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Backend: <code>{API_BASE_URL}</code></p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Database: Supabase (Connected)</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Database: Supabase</p>
               </div>
               
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
@@ -1292,7 +1283,7 @@ export default function Dashboard() {
       )}
       {/* Campaign Strategy Modal */}
       {campaign && (
-        <div role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: '2rem' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(900px, 95vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--primary)', borderRadius: '24px' }}>
              <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-subtle)' }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -1335,14 +1326,14 @@ export default function Dashboard() {
                           <Copy size={14} /> Copy Draft
                         </button>
                      </div>
-                     <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '10px', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', border: '1px solid rgba(255,255,255,0.03)' }}>
+                     <div style={{ background: 'var(--surface-muted)', padding: '1rem', borderRadius: '10px', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', border: '1px solid var(--border-subtle)' }}>
                         {item.draft}
                      </div>
                   </div>
                 ))}
              </div>
 
-             <div style={{ padding: '1.5rem 2rem', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid var(--border-muted)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+             <div style={{ padding: '1.5rem 2rem', background: 'var(--surface-subtle)', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
                 <button className="btn-secondary" onClick={() => setCampaign(null)}>Close Library</button>
                 <button className="btn-primary" onClick={() => {
                    const allDrafts = campaign.map(c => `PROSPECT: ${c.company}\nDRAFT:\n${c.draft}\n\n`).join('-------------------\n');

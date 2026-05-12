@@ -48,8 +48,8 @@ export default function HealthChart({ leads }: HealthChartProps) {
           </div>
         </div>
         <div className="grid-responsive-health">
-          <div style={{ height: '240px', width: '100%' }} role="img" aria-label="Lead health breakdown chart">
-            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+          <div style={{ width: '100%' }} role="img" aria-label="Lead health breakdown chart">
+            <ResponsiveContainer width="100%" height={240} minHeight={200}>
               <PieChart>
                 <Pie
                   data={healthData}

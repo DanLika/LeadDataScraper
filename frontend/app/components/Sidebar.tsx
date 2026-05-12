@@ -118,7 +118,7 @@ export default function Sidebar({
                 className="mobile-close-btn"
                 onClick={() => setIsOpenMobile?.(false)}
                 aria-label="Close menu"
-                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: '0.5rem', color: 'var(--text-muted)', cursor: 'pointer', marginLeft: 'auto', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ background: 'var(--surface-muted)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '0.5rem', color: 'var(--text-muted)', cursor: 'pointer', marginLeft: 'auto', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <X size={20} />
               </button>

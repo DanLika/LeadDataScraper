@@ -1,18 +1,17 @@
 'use client';
 
-import { useCallback, useState, useEffect, useMemo } from 'react';
-import { 
-  BarChart3, TrendingUp, Shield, Users, Target, Zap, ArrowLeft, Loader2, Menu
+import { useCallback, useState, useEffect } from 'react';
+import {
+  TrendingUp, Shield, Users, Target, Zap, ArrowLeft, Loader2, Menu
 } from 'lucide-react';
-import { 
-  Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
+import {
+  Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend, BarChart
 } from 'recharts';
 import Link from 'next/link';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
-import { createClient } from '@/utils/supabase/client';
 
 interface Stats {
   total_leads: number;
@@ -35,17 +34,18 @@ export default function InsightsPage() {
   const [fetchingInsights, setFetchingInsights] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const supabase = useMemo(() => createClient(), []);
-
   const COLORS = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--error)', 'var(--secondary)'];
 
   const fetchLeads = useCallback(async () => {
-    const { data } = await supabase
-      .from('leads')
-      .select('*')
-      .order('created_at', { ascending: false });
-    setLeads(data || []);
-  }, [supabase]);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/leads`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      setLeads(data.leads || []);
+    } catch (err) {
+      console.error('Error fetching leads:', err);
+    }
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -115,7 +115,7 @@ export default function InsightsPage() {
           </div>
           <button
             onClick={() => setIsSidebarOpen(true)}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-muted)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             aria-label="Open menu"
           >
             <Menu size={22} />
@@ -185,7 +185,7 @@ export default function InsightsPage() {
           <div className="grid-responsive-2" style={{ marginBottom: '2rem' }}>
             <div className="card">
               <h3 className="card-title" style={{ marginBottom: '1.5rem' }}>Audit Status Breakdown</h3>
-              <div style={{ height: '300px', width: '100%' }} role="img" aria-label="Audit status distribution chart">
+              <div style={{ width: '100%', aspectRatio: '16 / 10', minHeight: '240px', maxHeight: '360px' }} role="img" aria-label="Audit status distribution chart">
                 <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                   <PieChart>
                     <Pie
@@ -197,7 +197,7 @@ export default function InsightsPage() {
                       paddingAngle={5}
                       dataKey="value"
                     >
-                      {(stats?.audit_status_distribution || []).map((entry, index) => (
+                      {(stats?.audit_status_distribution || []).map((_, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
@@ -212,7 +212,7 @@ export default function InsightsPage() {
 
             <div className="card">
               <h3 className="card-title" style={{ marginBottom: '1.5rem' }}>SEO Score Distribution</h3>
-              <div style={{ height: '300px', width: '100%' }} role="img" aria-label="SEO score distribution chart">
+              <div style={{ width: '100%', aspectRatio: '16 / 10', minHeight: '240px', maxHeight: '360px' }} role="img" aria-label="SEO score distribution chart">
                 <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                   <BarChart data={stats?.seo_score_ranges || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-muted)" vertical={false} />
@@ -264,7 +264,7 @@ export default function InsightsPage() {
                   <div>
                     <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>Key Market Patterns</h4>
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      {insights.insights.map((insight, idx) => (
+                      {(insights?.insights || []).map((insight, idx) => (
                         <li key={idx} style={{ display: 'flex', gap: '0.75rem', padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
                           <span style={{ flexShrink: 0, width: '1.5rem', height: '1.5rem', borderRadius: '50%', background: 'var(--primary-tint-20)', color: 'var(--primary-medium)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
                             {idx + 1}
@@ -278,7 +278,7 @@ export default function InsightsPage() {
                   <div>
                     <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>High-Impact Priorities</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      {insights.top_priorities.map((priority, idx) => (
+                      {(insights?.top_priorities || []).map((priority, idx) => (
                         <div key={idx} style={{ padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)', transition: 'border-color 0.2s' }}>
                           <div style={{ fontWeight: 700, color: 'var(--text-white)', marginBottom: '0.25rem' }}>{priority.name}</div>
                           <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{priority.reason}</div>

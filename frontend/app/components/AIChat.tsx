@@ -90,7 +90,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
 
         newMessages.push({ role: 'assistant', content });
         setMessages(newMessages);
-      } catch (err) {
+      } catch {
         setMessages(prev => [...prev, { role: 'assistant', content: "Failed to execute the task." }]);
       } finally {
         setIsLoading(false);
@@ -159,11 +159,10 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
       <div style={{ 
         width: '100%', 
         maxWidth: '850px', 
-        background: 'rgba(15, 15, 18, 0.85)', 
-        backdropFilter: 'blur(32px)', 
-        border: '1px solid var(--border-muted)',
-        borderRadius: '28px',
-        boxShadow: '0 40px 80px -12px rgba(0, 0, 0, 0.8), inset 0 1px 1px var(--border-muted)',
+        background: 'var(--surface-elevated)',
+        border: '1px solid var(--border)',
+        borderRadius: '20px',
+        boxShadow: '0 20px 50px -12px rgba(0, 0, 0, 0.4)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -320,7 +319,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
               style={{
                 background: 'none',
                 border: 'none',
-                color: query.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.2)',
+                color: query.trim() ? 'var(--primary)' : 'var(--text-dim)',
                 cursor: 'pointer',
                 transition: 'color 0.2s',
                 minWidth: '44px',
