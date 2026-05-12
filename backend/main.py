@@ -128,12 +128,18 @@ auditor = ParallelAuditor()
 orchestrator = TaskOrchestrator()
 
 # --- Rate limiting ---
-# Honour X-Forwarded-For from the trusted Next.js proxy. In non-proxied setups
-# the request.client.host is used instead.
+# Trust X-Forwarded-For only when the request carries a valid API key. The Next.js
+# proxy is the only legitimate holder of API_SECRET_KEY, so a matching key proves
+# the XFF was set by the proxy (which strips client-supplied XFF). Without this
+# guard, anyone hitting the backend directly could spoof XFF to spread load
+# across rate-limit buckets.
 def _rate_limit_key(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    expected = os.getenv("API_SECRET_KEY") or ""
+    api_key = request.headers.get("x-api-key") or ""
+    if expected and api_key and secrets.compare_digest(api_key, expected):
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            return fwd.split(",")[0].strip()
     return get_remote_address(request)
 
 limiter = Limiter(key_func=_rate_limit_key, headers_enabled=False)
