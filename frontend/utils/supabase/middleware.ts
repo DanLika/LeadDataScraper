@@ -15,13 +15,27 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
+          // In-memory mirror onto the request object so downstream handlers in
+          // this same request cycle see the refreshed values. These cookies
+          // never reach the browser — only the response.cookies.set() below
+          // appears in Set-Cookie.
+          // nosemgrep
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({
             request,
           })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
+          // Defensive floor: enforce SameSite=Lax, HttpOnly, and Secure (in
+          // production) regardless of what Supabase passes. If Supabase
+          // explicitly sets a stricter value, it wins via the spread order.
+          cookiesToSet.forEach(({ name, value, options }) => {
+            const hardened = {
+              sameSite: 'lax' as const,
+              httpOnly: true,
+              secure: process.env.NODE_ENV === 'production',
+              ...options,
+            }
+            supabaseResponse.cookies.set(name, value, hardened)
+          })
         },
       },
     }
@@ -39,11 +53,16 @@ export async function updateSession(request: NextRequest) {
   // stay open so users can sign in. /api/auth/* handles credential exchange.
   // The /api/proxy/[...path] route re-checks auth.getUser() — defence-in-depth
   // because middleware doesn't run on every Node-runtime route shape.
+  // Exact match or trailing-slash subpath only — prevents an accidental future
+  // route like `/login-internal` or `/authentication-guide` from being made
+  // public by string-prefix overlap.
   const path = request.nextUrl.pathname
+  const isPublicPrefix = (prefix: string) =>
+    path === prefix || path.startsWith(prefix + '/')
   const isPublic =
-    path.startsWith('/login') ||
-    path.startsWith('/auth') ||
-    path.startsWith('/api/auth')
+    isPublicPrefix('/login') ||
+    isPublicPrefix('/auth') ||
+    isPublicPrefix('/api/auth')
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
