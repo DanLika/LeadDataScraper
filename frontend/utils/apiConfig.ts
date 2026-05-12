@@ -1,15 +1,16 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
+/**
+ * Frontend talks to the backend through a Next.js server-route proxy at
+ * /api/proxy/*. The proxy attaches the backend X-API-Key on the server side,
+ * so the key is never shipped to the browser bundle.
+ *
+ * Callers keep using apiFetch(`${API_BASE_URL}/leads`) — only the base URL
+ * changed.
+ */
+export const API_BASE_URL = '/api/proxy';
 
 /**
- * Authenticated fetch wrapper that injects the X-API-Key header.
- * Drop-in replacement for `fetch()` — same signature, same return type.
+ * Drop-in fetch wrapper. Kept for compatibility; the proxy now owns auth.
  */
 export function apiFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers);
-  if (API_KEY) {
-    headers.set('X-API-Key', API_KEY);
-  }
-  return fetch(input, { ...init, headers });
+  return fetch(input, init);
 }

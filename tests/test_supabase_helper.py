@@ -1,36 +1,29 @@
 import unittest
 from unittest.mock import MagicMock, patch
-import sys
 import os
-
-# Mock external dependencies
-sys.modules['playwright'] = MagicMock()
-sys.modules['playwright.async_api'] = MagicMock()
-sys.modules['google.generativeai'] = MagicMock()
-sys.modules['google.genai'] = MagicMock()
-sys.modules['google'] = MagicMock()
-sys.modules['supabase'] = MagicMock()
-sys.modules['dotenv'] = MagicMock()
-sys.modules['pandas'] = MagicMock()
-sys.modules['numpy'] = MagicMock()
-sys.modules['aiohttp'] = MagicMock()
-sys.modules['bs4'] = MagicMock()
-sys.modules['fake_useragent'] = MagicMock()
-
-sys.path.append(os.path.abspath(os.curdir))
 
 from src.utils.supabase_helper import SupabaseHelper
 
 class TestSupabaseHelper(unittest.TestCase):
     def setUp(self):
         # Prevent SupabaseHelper from complaining about missing env vars
-        with patch.dict(os.environ, {"SUPABASE_URL": "http://fake.url", "SUPABASE_ANON_KEY": "fake_key"}):
-            with patch('src.utils.supabase_helper.create_client') as mock_create_client:
-                self.helper = SupabaseHelper()
-                self.helper.client = MagicMock()
+        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://fake.url", "SUPABASE_ANON_KEY": "fake_key"})
+        self.env_patcher.start()
+        
+        self.client_patcher = patch('src.utils.supabase_helper.create_client')
+        self.mock_create_client = self.client_patcher.start()
+        
+        self.helper = SupabaseHelper()
+        self.helper.client = MagicMock()
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        self.client_patcher.stop()
 
     def test_auto_migrate_sql_injection(self):
-        # Test that invalid columns are skipped
+        # auto_migrate now calls the narrow add_lead_column(col text) RPC once
+        # per validated column. Invalid column names must be rejected client-side
+        # before reaching the RPC.
         missing_columns = [
             "valid_column",
             "invalid_column_123",
@@ -47,21 +40,15 @@ class TestSupabaseHelper(unittest.TestCase):
         result = self.helper.auto_migrate(missing_columns)
 
         self.assertTrue(result)
-        self.helper.client.rpc.assert_called_once()
-        args, kwargs = self.helper.client.rpc.call_args
-        self.assertEqual(args[0], "exec_sql")
-
-        sql = args[1]["query"]
-        self.assertIn("valid_column", sql)
-        self.assertIn("invalid_column_123", sql)
-        self.assertNotIn("123invalid", sql)
-        self.assertNotIn("invalid column", sql)
-        self.assertNotIn("DROP TABLE leads;", sql)
-        self.assertNotIn("in'valid" , sql)
-
+        # Exactly the two well-formed columns reach the RPC.
+        self.assertEqual(self.helper.client.rpc.call_count, 2)
+        called_args = [call.args for call in self.helper.client.rpc.call_args_list]
         self.assertEqual(
-            sql,
-            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS valid_column TEXT, ADD COLUMN IF NOT EXISTS invalid_column_123 TEXT;"
+            called_args,
+            [
+                ("add_lead_column", {"col": "valid_column"}),
+                ("add_lead_column", {"col": "invalid_column_123"}),
+            ],
         )
 
     def test_auto_migrate_no_valid_columns(self):
@@ -94,17 +81,36 @@ class TestSupabaseHelper(unittest.TestCase):
         """Test check_schema when some columns are missing and Supabase throws exceptions."""
         missing_cols_to_simulate = ["seo_score", "facebook"]
 
-        def mock_select(col):
+        call_count = [0]
+
+        def mock_select(cols):
             chain_mock = MagicMock()
+            call_count[0] += 1
+
+            # First call is the bulk select — must fail with 'column does not exist'
+            if call_count[0] == 1:
+                chain_mock.limit.return_value.execute.side_effect = Exception(
+                    'column "seo_score" does not exist'
+                )
+                return chain_mock
+
+            # Subsequent calls are individual column checks
+            col = cols  # For individual checks, cols is a single column name
             if col in missing_cols_to_simulate:
-                chain_mock.limit.return_value.execute.side_effect = Exception(f'column "{col}" does not exist')
+                chain_mock.limit.return_value.execute.side_effect = Exception(
+                    f'column "{col}" does not exist'
+                )
             elif col == "tiktok":
-                chain_mock.limit.return_value.execute.side_effect = Exception("Some other random exception")
+                chain_mock.limit.return_value.execute.side_effect = Exception(
+                    "Some other random exception"
+                )
             else:
                 chain_mock.limit.return_value.execute.return_value = MagicMock(data=[])
             return chain_mock
 
         self.helper.client.table.return_value.select.side_effect = mock_select
+        # Also make the RPC fallback fail so we reach individual checks
+        self.helper.client.rpc.side_effect = Exception("RPC not available")
 
         missing = self.helper.check_schema()
 
@@ -189,10 +195,18 @@ class TestSupabaseHelper(unittest.TestCase):
 
 class TestSupabaseHelperUpsert(unittest.TestCase):
     def setUp(self):
-        with patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_ANON_KEY": "test-key"}), \
-             patch("src.utils.supabase_helper.create_client") as mock_create:
-            mock_create.return_value = MagicMock()
-            self.helper = SupabaseHelper()
+        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_ANON_KEY": "test-key"})
+        self.env_patcher.start()
+        
+        self.client_patcher = patch("src.utils.supabase_helper.create_client")
+        self.mock_create = self.client_patcher.start()
+        self.mock_create.return_value = MagicMock()
+        
+        self.helper = SupabaseHelper()
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        self.client_patcher.stop()
 
     def test_upsert_leads_no_client(self):
         """Test upsert_leads when self.client is None."""

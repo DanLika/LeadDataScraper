@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LeadDataScraper Frontend
 
-## Getting Started
+Next.js (App Router) dashboard for the LeadDataScraper pipeline.
 
-First, run the development server:
+## Architecture
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+The browser **never** holds the backend API key or queries Supabase directly.
+All data flows through a server-side proxy:
+
+```
+Browser  →  /api/proxy/[...path]  →  FastAPI backend (X-API-Key injected here)
+            ↑ Next.js server route
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- `frontend/app/api/proxy/[...path]/route.ts` — proxy that forwards every
+  method (GET/POST/PUT/DELETE/PATCH/OPTIONS) to `BACKEND_URL` and attaches
+  `X-API-Key` from the server-side `API_SECRET_KEY` env var.
+- `frontend/utils/apiConfig.ts` — `apiFetch()` wrapper. Callers use
+  `apiFetch(\`${API_BASE_URL}/leads\`)`; `API_BASE_URL` is `/api/proxy`.
+- Frontend pages (`app/page.tsx`, `app/insights/page.tsx`) read leads only via
+  `/leads`. Supabase RLS blocks anon access to the data tables.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create `frontend/.env.local`:
 
-## Learn More
+```bash
+# Server-side only — used by the proxy route. NOT NEXT_PUBLIC_*.
+BACKEND_URL=http://127.0.0.1:8000
+API_SECRET_KEY=<same value as backend .env>
 
-To learn more about Next.js, take a look at the following resources:
+# Public — Supabase publishable key. RLS prevents data access.
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable anon key>
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+> ⚠️ Do **not** add `NEXT_PUBLIC_API_KEY`. It existed historically and was
+> shipped to every browser. Anyone who loaded the site before the rotation
+> still holds it — rotate `API_SECRET_KEY` on the backend.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Run
 
-## Deploy on Vercel
+```bash
+npm install
+npm run dev   # http://localhost:3000
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Make sure the FastAPI backend is running on `BACKEND_URL` first.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Build & test
+
+```bash
+npm run build
+npx tsc --noEmit
+```

@@ -9,14 +9,24 @@ services:
     envVars:
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_ANON_KEY
+      # Backend uses the SERVICE ROLE key (RLS bypass for server-side ops).
+      # ANON key is no longer used by the backend.
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      - key: API_SECRET_KEY
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: ALLOWED_ORIGINS
         sync: false
       - key: PYTHON_ENV
         value: production
 
-  # Frontend Service (Next.js)
+  # Frontend Service (Next.js) — talks to the backend ONLY via a server-side
+  # proxy route. The backend X-API-Key is held server-side and must never use
+  # the NEXT_PUBLIC_ prefix.
   - type: web
     name: lead-scraper-frontend
     env: node
@@ -24,11 +34,16 @@ services:
     startCommand: cd frontend && npm run start
     plan: starter
     envVars:
-      - key: NEXT_PUBLIC_API_URL
+      # Server-side only: Next.js proxy forwards browser calls here.
+      - key: BACKEND_URL
         fromService:
           type: web
           name: lead-scraper-backend
           property: host
+      # Server-side only — NOT NEXT_PUBLIC_. Used by the /api/proxy route.
+      - key: API_SECRET_KEY
+        sync: false
+      # Public — Supabase auth/publishable key. RLS prevents data access.
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY

@@ -26,6 +26,7 @@ yarn-error.log*
 node_modules/
 .next/
 out/
+node-compile-cache/
 
 # Database
 *.sqlite
@@ -37,11 +38,16 @@ Thumbs.db
 
 # Project specific
 tmp_*
+leadscraper_*.csv
 data/raw/*
 !data/raw/.gitkeep
 exports/*
 !exports/.gitkeep
 logs/
+
+# Supabase CLI scratch state (project ref, org id, transient files)
+supabase/.temp/
+supabase/.branches/
 
 # Images
 *.jpg
@@ -61,3 +67,4 @@ logs/
 .coverage
 skills-lock.json
 .pytest_cache/
+pytest-of-*/

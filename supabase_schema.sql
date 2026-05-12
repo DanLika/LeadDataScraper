@@ -90,3 +90,39 @@ CREATE TABLE IF NOT EXISTS campaign_messages (
 CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
 CREATE INDEX IF NOT EXISTS idx_campaign_messages_campaign_id ON campaign_messages(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_campaign_messages_status ON campaign_messages(status);
+
+-- =============================================================================
+-- Row Level Security
+--
+-- Backend uses SUPABASE_SERVICE_ROLE_KEY which bypasses RLS. All anon/
+-- authenticated traffic is denied by default. Frontend MUST call the backend
+-- API (no direct supabase.from() reads from the browser).
+-- =============================================================================
+
+ALTER TABLE leads               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaigns           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaign_messages   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orchestration_jobs  ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON leads,              campaigns, campaign_messages, orchestration_jobs FROM anon;
+REVOKE ALL ON leads,              campaigns, campaign_messages, orchestration_jobs FROM authenticated;
+
+-- =============================================================================
+-- Narrow schema-migration RPC (replaces generic exec_sql)
+-- =============================================================================
+CREATE OR REPLACE FUNCTION add_lead_column(col text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF col IS NULL OR col !~ '^[A-Za-z_][A-Za-z0-9_]{0,62}$' THEN
+    RAISE EXCEPTION 'invalid column name';
+  END IF;
+  EXECUTE format('ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS %I TEXT', col);
+END
+$$;
+
+REVOKE EXECUTE ON FUNCTION add_lead_column(text) FROM anon, authenticated, public;
+-- service_role bypasses GRANTs implicitly, so backend can still call this.
