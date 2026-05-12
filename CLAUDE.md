@@ -16,8 +16,10 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - `src/core/agentic_router.py` — AI instruction routing (natural language → task execution)
 
 ## API Security
-- All endpoints (except `/` health check) require `X-API-Key` header — validated by `verify_api_key` dependency
+- All endpoints (except `/` health check) require `X-API-Key` header — validated by `verify_api_key` dependency (constant-time compare via `secrets.compare_digest`)
 - API key is set via `API_SECRET_KEY` env var in backend `.env`
+- Interactive docs (`/docs`, `/openapi.json`, `/redoc`) are **disabled by default**.
+  Enable in dev via `ENABLE_DOCS=true`. Never set in production.
 - **Frontend does NOT hold the API key.** The browser calls a same-origin Next.js
   proxy at `/api/proxy/[...path]` (see `frontend/app/api/proxy/[...path]/route.ts`)
   which injects `X-API-Key` from the server-side `API_SECRET_KEY` env var.
@@ -30,7 +32,20 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
     `API_SECRET_KEY` (server-side, NOT `NEXT_PUBLIC_*`),
     `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - Rate limiting: AI and destructive endpoints capped via `slowapi`. See
-  `backend/main.py` decorators.
+  `backend/main.py` decorators. `headers_enabled=False` — `X-RateLimit-*` not
+  emitted (slowapi requires `response: Response` param to inject; we don't
+  declare it on every endpoint).
+- Rate-limit key derives from `X-Forwarded-For` set by the Next.js proxy.
+  The proxy strips client-controlled XFF / X-Real-IP / Forwarded headers and
+  re-emits XFF only from Vercel's edge-injected `x-vercel-forwarded-for` to
+  prevent spoof-based rate-limit bypass.
+- `/upload` streams the request body and aborts at 50 MB (`MAX_UPLOAD_BYTES`)
+  with a 413 — no full-buffer DoS.
+- Outbound HTTP from `seo_audit.py` and `enrichment_engine.py` runs through
+  `src/utils/ssrf_guard.py` (`SSRFGuardResolver` + `assert_safe_url`) which
+  rejects private / loopback / link-local / reserved / multicast IPs and known
+  cloud metadata hostnames at DNS-resolve time. Hardens against SSRF and
+  DNS-rebinding.
 - Supabase RLS is enabled on `leads`, `campaigns`, `campaign_messages`,
   `orchestration_jobs`. Anon + authenticated roles are revoked. All reads/writes
   go through the backend, which uses `service_role` to bypass RLS server-side.
