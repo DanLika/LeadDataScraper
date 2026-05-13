@@ -77,6 +77,24 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   rejects private / loopback / link-local / reserved / multicast IPs and known
   cloud metadata hostnames at DNS-resolve time. Hardens against SSRF and
   DNS-rebinding.
+- Playwright browser contexts in `enrichment_engine.py` additionally install
+  `_install_ssrf_route_guard(context)` — a `context.route("**/*", ...)`
+  handler that re-runs `assert_safe_url` on every request the browser makes
+  (initial navigation, 30x redirects, subresources). Closes the TOCTOU window
+  between the pre-flight DNS check and `page.goto()`, and blocks redirect
+  chains that hop to an internal host.
+- Any Gemini call that mixes static prompt text with DB-derived data or
+  scraped page content must fence the data inside
+  `<UNTRUSTED_DATA>...</UNTRUSTED_DATA>` and pair it with the shared
+  `_UNTRUSTED_DATA_SYSTEM_INSTRUCTION` via
+  `genai_types.GenerateContentConfig(system_instruction=...)`. Use
+  `_fenced_json()` in `src/core/agentic_router.py`. Strip any literal
+  `</UNTRUSTED_DATA>` substring from the payload before embedding — JSON
+  doesn't escape angle brackets, so an attacker who controls a lead field or
+  page body could otherwise close the fence early. Lead rows arrive from CSV
+  uploads and Google-Maps scrapes; both are attacker-controllable. Never
+  splice lead fields directly into prompt body text (e.g. inside an
+  "Example: ..." line — use a placeholder like `[COMPANY NAME]` instead).
 - Supabase RLS is enabled on `leads`, `campaigns`, `campaign_messages`,
   `orchestration_jobs`. Anon + authenticated roles are revoked. All reads/writes
   go through the backend, which uses `service_role` to bypass RLS server-side.
