@@ -4,6 +4,7 @@ import re
 from urllib.parse import quote_plus
 from typing import List, Optional
 from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
+from src.scrapers.enrichment_engine import _install_ssrf_route_guard
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.agentic_router import AgenticRouter
 from src.utils.logging_config import get_logger
@@ -29,6 +30,13 @@ class DiscoveryEngine:
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
             )
+            # Defence-in-depth: the search URL host is hardcoded to google.com,
+            # so structural SSRF via `query` is already blocked by quote_plus
+            # + fixed host. The route guard catches the remaining theoretical
+            # exposure — a 30x redirect chain that hops to an internal IP, or
+            # a subresource fetched from a private host — and keeps the SSRF
+            # invariant consistent with enrichment_engine.
+            await _install_ssrf_route_guard(context)
             page = await context.new_page()
 
             try:
