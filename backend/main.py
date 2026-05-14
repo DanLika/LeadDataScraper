@@ -9,9 +9,9 @@ import uuid
 import pandas as pd
 import aiofiles
 from datetime import datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, ConfigDict, Field, conlist, constr
 from postgrest.exceptions import APIError
 from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -62,37 +62,61 @@ def error_response(message, status_code=500) -> JSONResponse:
     return JSONResponse(content=body, status_code=status_code)
 
 
+# All inbound JSON models pin `extra='forbid'` (mass-assignment defense) and
+# every string/list has bounded length (memory-DoS defense pre-handler).
+# Free-form enum-like fields (`channel`, `status`) use Literal to keep DB
+# values constrained at the boundary.
+
+CampaignChannel = Literal["email", "linkedin", "multi"]
+CampaignStatus = Literal["draft", "active", "paused", "completed", "archived"]
+# Allowlist of columns callers may filter on in PipelineRequest. Keeping this
+# tight stops the caller from probing arbitrary DB columns via error messages
+# and bypassing intended segment scoping.
+_PIPELINE_FILTER_KEYS = frozenset({
+    "segment", "audit_status", "high_risk_flag", "company_size", "campaign_id",
+    "country", "city", "language", "outreach_score", "seo_score",
+})
+
+
 class CampaignCreate(BaseModel):
-    name: str
-    channel: str  # email, linkedin, multi
-    segment_filter: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+    name: constr(min_length=1, max_length=200)
+    channel: CampaignChannel
+    segment_filter: Optional[constr(max_length=200)] = None
 
 class CampaignUpdate(BaseModel):
-    name: Optional[str] = None
-    status: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+    name: Optional[constr(min_length=1, max_length=200)] = None
+    status: Optional[CampaignStatus] = None
 
 class LeadProcessRequest(BaseModel):
-    unique_key: str
+    model_config = ConfigDict(extra="forbid")
+    unique_key: constr(min_length=1, max_length=128)
 
 class AskInstruction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     # Cap the prompt that flows into Gemini to bound billing per request and
     # keep raw prompt-injection blobs from being forwarded.
     text: constr(min_length=1, max_length=4000)
 
 class AskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     instruction: AskInstruction
 
 class DiscoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     query: constr(min_length=1, max_length=500)
-    location: Optional[str] = Field(default="", max_length=200)
+    location: Optional[constr(max_length=200)] = ""
 
 class PipelineRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     filters: Optional[dict] = None
-    lead_ids: Optional[List[str]] = None
-    tasks: Optional[List[str]] = None
+    lead_ids: Optional[conlist(constr(min_length=1, max_length=128), max_length=10_000)] = None
+    tasks: Optional[conlist(constr(min_length=1, max_length=64), max_length=64)] = None
 
 class ExecutePlanRequest(BaseModel):
-    task: str
+    model_config = ConfigDict(extra="forbid")
+    task: constr(min_length=1, max_length=128)
     params: Optional[dict] = None
 
 load_dotenv()
@@ -313,7 +337,8 @@ def process_csv_background(temp_path: str):
         Path(temp_path).unlink(missing_ok=True)
 
 @app.post("/process-lead", dependencies=[Depends(verify_api_key)])
-async def process_single_lead(payload: LeadProcessRequest):
+@limiter.limit("20/minute")
+async def process_single_lead(request: Request, payload: LeadProcessRequest):
     """Trigger a single lead SEO audit and enrichment via orchestrator."""
     job_id = await orchestrator.run_massive_pipeline(lead_ids=[payload.unique_key])
     return {"status": "started", "unique_key": payload.unique_key, "job_id": job_id}
@@ -348,7 +373,8 @@ async def get_audit_status(request: Request):
     return {"active": False, "processed": 0, "total": 0}
 
 @app.post("/audit/stop", dependencies=[Depends(verify_api_key)])
-async def stop_audit():
+@limiter.limit("10/minute")
+async def stop_audit(request: Request):
     """Signal the orchestrator to stop all running jobs."""
     db.client.table("orchestration_jobs").update({
         "status": "stopped",
@@ -525,22 +551,26 @@ async def clear_leads(request: Request):
     return {"status": "cleared", "message": "All leads and jobs have been deleted."}
 
 @app.post("/orchestrator/start", dependencies=[Depends(verify_api_key)])
-async def start_massive_pipeline(payload: PipelineRequest):
+@limiter.limit("3/minute")
+async def start_massive_pipeline(request: Request, payload: PipelineRequest):
     job_id = await orchestrator.run_massive_pipeline(filters=payload.filters, lead_ids=payload.lead_ids, tasks=payload.tasks)
     return {"status": "job_started", "job_id": job_id}
 
 @app.get("/orchestrator/status/{job_id}", dependencies=[Depends(verify_api_key)])
-async def get_job_status(job_id: str):
+@limiter.limit("60/minute")
+async def get_job_status(request: Request, job_id: str):
     status = await orchestrator.get_job_status(job_id)
     return status
 
 @app.post("/orchestrator/stop/{job_id}", dependencies=[Depends(verify_api_key)])
-async def stop_job(job_id: str):
+@limiter.limit("10/minute")
+async def stop_job(request: Request, job_id: str):
     result = await orchestrator.stop_job(job_id)
     return result
 
 @app.get("/export", dependencies=[Depends(verify_api_key)])
-async def trigger_export():
+@limiter.limit("6/hour")
+async def trigger_export(request: Request):
     try:
         export_leads()
         return {"message": "Exports generated successfully in the 'exports' directory."}
@@ -549,7 +579,8 @@ async def trigger_export():
         return error_response("Export failed")
 
 @app.get("/export/download", dependencies=[Depends(verify_api_key)])
-async def download_full_export():
+@limiter.limit("6/hour")
+async def download_full_export(request: Request):
     try:
         # 1. Always regenerate for fresh data
         export_leads()
@@ -576,7 +607,8 @@ async def download_full_export():
         return error_response("Export download failed")
 
 @app.get("/export/outreach", dependencies=[Depends(verify_api_key)])
-async def download_outreach_export():
+@limiter.limit("6/hour")
+async def download_outreach_export(request: Request):
     try:
         export_leads()
         export_dir = "exports"
@@ -606,7 +638,8 @@ def _is_table_missing_error(e: Exception) -> bool:
     return "PGRST205" in str(e)
 
 @app.post("/campaigns", dependencies=[Depends(verify_api_key)])
-async def create_campaign(campaign: CampaignCreate):
+@limiter.limit("20/minute")
+async def create_campaign(request: Request, campaign: CampaignCreate):
     """Create a new outreach campaign."""
     try:
         import uuid
@@ -633,7 +666,8 @@ async def create_campaign(campaign: CampaignCreate):
         return error_response("Failed to create campaign")
 
 @app.get("/campaigns", dependencies=[Depends(verify_api_key)])
-async def list_campaigns():
+@limiter.limit("60/minute")
+async def list_campaigns(request: Request):
     """List all campaigns."""
     try:
         result = db.client.table("campaigns").select("*").order("created_at", desc=True).execute()
@@ -645,7 +679,8 @@ async def list_campaigns():
         return error_response("Failed to list campaigns")
 
 @app.get("/campaigns/{campaign_id}", dependencies=[Depends(verify_api_key)])
-async def get_campaign(campaign_id: str):
+@limiter.limit("60/minute")
+async def get_campaign(request: Request, campaign_id: str):
     """Get campaign details with message statistics."""
     try:
         campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).single().execute()
@@ -674,7 +709,8 @@ async def get_campaign(campaign_id: str):
         return error_response("Failed to get campaign")
 
 @app.post("/campaigns/{campaign_id}/generate", dependencies=[Depends(verify_api_key)])
-async def generate_campaign_messages(campaign_id: str, background_tasks: BackgroundTasks):
+@limiter.limit("3/minute")
+async def generate_campaign_messages(request: Request, campaign_id: str, background_tasks: BackgroundTasks):
     """Generate personalized outreach messages for all leads in the campaign's segment."""
     try:
         campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).single().execute()
@@ -757,7 +793,8 @@ async def generate_campaign_messages(campaign_id: str, background_tasks: Backgro
         return error_response("Failed to generate campaign messages")
 
 @app.post("/campaigns/{campaign_id}/start", dependencies=[Depends(verify_api_key)])
-async def start_campaign(campaign_id: str):
+@limiter.limit("10/minute")
+async def start_campaign(request: Request, campaign_id: str):
     """Mark campaign as active (actual sending would be handled by email_sender integration)."""
     try:
         db.client.table("campaigns").update({
@@ -769,7 +806,8 @@ async def start_campaign(campaign_id: str):
         return error_response("Failed to start campaign")
 
 @app.post("/campaigns/{campaign_id}/pause", dependencies=[Depends(verify_api_key)])
-async def pause_campaign(campaign_id: str):
+@limiter.limit("10/minute")
+async def pause_campaign(request: Request, campaign_id: str):
     """Pause a running campaign."""
     try:
         db.client.table("campaigns").update({
@@ -781,7 +819,8 @@ async def pause_campaign(campaign_id: str):
         return error_response("Failed to pause campaign")
 
 @app.get("/campaigns/{campaign_id}/export", dependencies=[Depends(verify_api_key)])
-async def export_campaign_messages(campaign_id: str):
+@limiter.limit("12/hour")
+async def export_campaign_messages(request: Request, campaign_id: str):
     """Export campaign messages as CSV for import into external tools."""
     try:
         messages = db.client.table("campaign_messages").select(

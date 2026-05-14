@@ -12,6 +12,29 @@ from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Allowlist of columns callers may filter leads by. Mirrors the API-layer
+# allowlist in backend/main.py — keep in sync. Anything outside this set is
+# silently dropped (with a warning) so an attacker cannot probe arbitrary
+# DB columns via PostgREST error messages or bypass segment scoping.
+_LEAD_FILTER_ALLOWLIST = frozenset({
+    "segment", "audit_status", "enrichment_status", "high_risk_flag",
+    "company_size", "campaign_id", "country", "city", "language",
+    "outreach_score", "seo_score",
+})
+
+
+def _sanitize_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not filters:
+        return {}
+    safe = {}
+    for k, v in filters.items():
+        if k in _LEAD_FILTER_ALLOWLIST:
+            safe[k] = v
+        else:
+            logger.warning("Dropping disallowed lead filter key: %r", k)
+    return safe
+
+
 class TaskOrchestrator:
     """
     Orchestrates large-scale lead processing jobs, including auditing and enrichment.
@@ -135,9 +158,8 @@ class TaskOrchestrator:
         query = self.db.client.table("leads").select("unique_key", count="exact")
         query = query.or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED").lt("retry_count", 3)
 
-        if filters:
-            for k, v in filters.items():
-                query = query.eq(k, v)
+        for k, v in _sanitize_filters(filters).items():
+            query = query.eq(k, v)
 
         response = query.execute()
         return response.count if hasattr(response, 'count') else 0

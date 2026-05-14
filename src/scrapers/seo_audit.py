@@ -168,7 +168,7 @@ def _detect_portals_and_socials(soup: BeautifulSoup, results: dict):
 
 def _extract_emails_and_text(soup: BeautifulSoup, html: str, results: dict):
     """Extract email addresses and page text from HTML."""
-    email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b'
     results["emails"] = list(set(re.findall(email_regex, html, re.IGNORECASE)))
     results["page_text"] = soup.get_text(separator=' ', strip=True)[:3000]
 

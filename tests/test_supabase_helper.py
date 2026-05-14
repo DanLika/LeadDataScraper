@@ -7,7 +7,7 @@ from src.utils.supabase_helper import SupabaseHelper
 class TestSupabaseHelper(unittest.TestCase):
     def setUp(self):
         # Prevent SupabaseHelper from complaining about missing env vars
-        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://fake.url", "SUPABASE_ANON_KEY": "fake_key"})
+        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://fake.url", "SUPABASE_SERVICE_ROLE_KEY": "fake_key"})
         self.env_patcher.start()
         
         self.client_patcher = patch('src.utils.supabase_helper.create_client')
@@ -195,7 +195,7 @@ class TestSupabaseHelper(unittest.TestCase):
 
 class TestSupabaseHelperUpsert(unittest.TestCase):
     def setUp(self):
-        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_ANON_KEY": "test-key"})
+        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_SERVICE_ROLE_KEY": "test-key"})
         self.env_patcher.start()
         
         self.client_patcher = patch("src.utils.supabase_helper.create_client")

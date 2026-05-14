@@ -4,14 +4,20 @@ import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 
-// Only accept same-origin relative paths. Reject protocol-relative URLs
-// (`//evil.com`), backslash-escape variants (`/\evil.com` — browsers normalize
-// the backslash), and absolute URLs to other origins. Prevents open-redirect
-// abuse via `?next=` on the login page.
+// Only accept same-origin relative paths. Allowlist-shaped: must match a
+// strict character set so WHATWG URL parser cannot smuggle the redirect to
+// another origin via control chars (\t / \n / \r get stripped by the parser
+// and would otherwise let `/\t//evil.com` resolve to https://evil.com/),
+// embedded backslashes (normalised to `/` for special-scheme URLs), or
+// protocol-relative `//evil.com`. Prevents open-redirect → phishing-assist
+// on the auth flow.
 function sanitizeNext(raw: string | null): string {
   if (!raw) return '/'
-  if (!raw.startsWith('/')) return '/'
-  if (raw.startsWith('//') || raw.startsWith('/\\')) return '/'
+  if (raw.length > 512) return '/'
+  // Only printable ASCII path-safe chars. Explicitly excludes \t \n \r and
+  // every other control byte, as well as `\` which WHATWG normalises to `/`.
+  if (!/^\/[A-Za-z0-9._~\-/?#=&%+@:!$'()*,;]*$/.test(raw)) return '/'
+  if (raw.startsWith('//')) return '/'
   return raw
 }
 

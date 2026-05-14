@@ -107,6 +107,19 @@ ALTER TABLE orchestration_jobs  ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON leads,              campaigns, campaign_messages, orchestration_jobs FROM anon;
 REVOKE ALL ON leads,              campaigns, campaign_messages, orchestration_jobs FROM authenticated;
 
+-- Defense-in-depth: even if a future ad-hoc GRANT in Supabase Studio re-adds
+-- access to anon/authenticated, these explicit deny-all policies still block
+-- every read/write. service_role bypasses RLS so the backend is unaffected.
+DROP POLICY IF EXISTS leads_deny_all              ON leads;
+DROP POLICY IF EXISTS campaigns_deny_all          ON campaigns;
+DROP POLICY IF EXISTS campaign_messages_deny_all  ON campaign_messages;
+DROP POLICY IF EXISTS orchestration_jobs_deny_all ON orchestration_jobs;
+
+CREATE POLICY leads_deny_all              ON leads              FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY campaigns_deny_all          ON campaigns          FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY campaign_messages_deny_all  ON campaign_messages  FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY orchestration_jobs_deny_all ON orchestration_jobs FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+
 -- =============================================================================
 -- Narrow schema-migration RPC (replaces generic exec_sql)
 -- =============================================================================
