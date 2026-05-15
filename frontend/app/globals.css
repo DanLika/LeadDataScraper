@@ -911,15 +911,15 @@ select:focus-visible {
 }
 
 .badge-pending {
-  background: hsla(270, 95%, 75%, 0.1);
-  color: #c084fc;
-  border: 1px solid hsla(270, 95%, 75%, 0.2);
+  background: hsla(270, 95%, 75%, 0.12);
+  color: #7e22ce;
+  border: 1px solid hsla(270, 95%, 75%, 0.25);
 }
 
 .badge-completed {
-  background: hsla(142, 70%, 45%, 0.1);
-  color: #4ade80;
-  border: 1px solid hsla(142, 70%, 45%, 0.2);
+  background: hsla(142, 70%, 45%, 0.12);
+  color: var(--success-strong);
+  border: 1px solid hsla(142, 70%, 45%, 0.25);
 }
 
 .search-input:focus,

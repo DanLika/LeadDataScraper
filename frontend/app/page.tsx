@@ -943,7 +943,7 @@ export default function Dashboard() {
                                 )}
                                 {lead.pain_points && lead.pain_points !== 'Unknown' && (
                                   <div style={{ flex: '1 1 200px' }}>
-                                    <div style={{ fontSize: '0.65rem', color: 'var(--warning)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>PAIN POINTS</div>
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--warning-strong)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>PAIN POINTS</div>
                                     <CollapsibleText text={lead.pain_points} style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }} />
                                   </div>
                                 )}
