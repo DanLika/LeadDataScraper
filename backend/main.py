@@ -437,6 +437,9 @@ async def get_audit_status(request: Request):
     if auditor.status.get("active"):
         return auditor.status
 
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
+
     # Fallback to checking for any running orchestrator job
     response = db.client.table("orchestration_jobs").select("*").eq("status", "running").order("created_at", desc=True).limit(1).execute()
     if response.data:
@@ -453,6 +456,8 @@ async def get_audit_status(request: Request):
 @limiter.limit("10/minute")
 async def stop_audit(request: Request):
     """Signal the orchestrator to stop all running jobs."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     db.client.table("orchestration_jobs").update({
         "status": "stopped",
         "current_phase": "Stopped by user"
