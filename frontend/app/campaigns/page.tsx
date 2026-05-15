@@ -125,7 +125,7 @@ export default function CampaignsPage() {
         await fetchCampaignDetails(campaignId);
       }
     } catch (err) {
-      console.error(`Failed to ${action} campaign:`, err);
+      console.error('Failed to %s campaign:', action, err);
     }
   };
 
@@ -191,9 +191,13 @@ export default function CampaignsPage() {
         <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-              <Link href="/" style={{ color: 'var(--text-muted)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <ArrowLeft size={20} />
-                <Shield size={20} />
+              <Link
+                href="/"
+                aria-label="Back to dashboard"
+                style={{ color: 'var(--text-muted)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              >
+                <ArrowLeft size={20} aria-hidden="true" />
+                <Shield size={20} aria-hidden="true" />
               </Link>
               <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800 }}>Outreach Campaigns</h1>
             </div>
@@ -206,7 +210,7 @@ export default function CampaignsPage() {
 
         {showCreate && (
           <div className="card" style={{ marginBottom: '2rem', border: '1px solid hsla(var(--primary-hsl), 0.3)' }}>
-            <h3 style={{ marginBottom: '1.5rem' }}>Create New Campaign</h3>
+            <h2 style={{ marginBottom: '1.5rem' }}>Create New Campaign</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
                 <label htmlFor="campaign-name" style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Campaign Name</label>
@@ -420,7 +424,7 @@ export default function CampaignsPage() {
             ) : campaigns.length === 0 ? (
               <div className="card" style={{ textAlign: 'center', padding: '4rem' }}>
                 <Mail size={48} style={{ color: 'var(--text-dim)', marginBottom: '1rem' }} />
-                <h3 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Campaigns Yet</h3>
+                <h2 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Campaigns Yet</h2>
                 <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Create your first outreach campaign to start reaching leads.</p>
                 <button className="btn-primary" onClick={() => setShowCreate(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
                   <Plus size={18} /> Create Campaign

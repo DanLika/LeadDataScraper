@@ -80,9 +80,9 @@ export default function InsightsPage() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--background)' }}>
-        <Loader2 className="animate-spin" size={48} style={{ color: 'var(--primary)' }} />
-      </div>
+      <main aria-busy="true" aria-label="Loading Strategic Insights" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--background)' }}>
+        <Loader2 className="animate-spin" size={48} style={{ color: 'var(--primary)' }} aria-hidden="true" />
+      </main>
     );
   }
 
@@ -143,7 +143,7 @@ export default function InsightsPage() {
               </div>
               <div>
                 <p className="stat-label">Total Leads</p>
-                <h3 className="stat-value">{stats?.total_leads || 0}</h3>
+                <div className="stat-value">{stats?.total_leads || 0}</div>
               </div>
             </div>
             <div className="card stat-card">
@@ -152,9 +152,9 @@ export default function InsightsPage() {
               </div>
               <div>
                 <p className="stat-label">Audited Leads</p>
-                <h3 className="stat-value">
+                <div className="stat-value">
                   {stats?.audit_status_distribution?.find(s => s.name === 'completed')?.value || 0}
-                </h3>
+                </div>
               </div>
             </div>
             <div className="card stat-card">
@@ -163,9 +163,9 @@ export default function InsightsPage() {
               </div>
               <div>
                 <p className="stat-label">Top Prospects</p>
-                <h3 className="stat-value">
+                <div className="stat-value">
                   {leads.filter(l => (l.outreach_score || 0) > 70).length}
-                </h3>
+                </div>
               </div>
             </div>
             <div className="card stat-card">
@@ -174,9 +174,9 @@ export default function InsightsPage() {
               </div>
               <div>
                 <p className="stat-label">High Risk</p>
-                <h3 className="stat-value">
+                <div className="stat-value">
                   {leads.filter(l => l.high_risk_flag).length}
-                </h3>
+                </div>
               </div>
             </div>
           </section>
@@ -184,7 +184,7 @@ export default function InsightsPage() {
           {/* Charts Row 1 */}
           <div className="grid-responsive-2" style={{ marginBottom: '2rem' }}>
             <div className="card">
-              <h3 className="card-title" style={{ marginBottom: '1.5rem' }}>Audit Status Breakdown</h3>
+              <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>Audit Status Breakdown</h2>
               <div style={{ width: '100%' }} role="img" aria-label="Audit status distribution chart">
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
@@ -207,7 +207,7 @@ export default function InsightsPage() {
             </div>
 
             <div className="card">
-              <h3 className="card-title" style={{ marginBottom: '1.5rem' }}>SEO Score Distribution</h3>
+              <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>SEO Score Distribution</h2>
               <div style={{ width: '100%' }} role="img" aria-label="SEO score distribution chart">
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={stats?.seo_score_ranges || []}>
@@ -240,7 +240,7 @@ export default function InsightsPage() {
               <div className="stat-icon" style={{ background: 'var(--primary-tint-10)', color: 'var(--primary)', width: '32px', height: '32px' }}>
                 <TrendingUp size={18} />
               </div>
-              <h3 className="card-title" style={{ marginBottom: 0 }}>AI Strategic Analysis</h3>
+              <h2 className="card-title" style={{ marginBottom: 0 }}>AI Strategic Analysis</h2>
             </div>
             
             {fetchingInsights ? (
@@ -251,14 +251,14 @@ export default function InsightsPage() {
             ) : insights ? (
               <div className="insights-full-view">
                 <div className="summary-banner" style={{ padding: '1.5rem', background: 'var(--primary-tint-5)', borderRadius: '12px', border: '1px solid var(--primary-tint-10)', marginBottom: '2rem' }}>
-                  <p style={{ fontSize: '1.125rem', color: 'var(--primary-light)', lineHeight: 1.6, margin: 0 }}>
+                  <p style={{ fontSize: '1.125rem', color: 'var(--primary-strong)', lineHeight: 1.6, margin: 0 }}>
                     {insights.summary}
                   </p>
                 </div>
 
                 <div className="grid-responsive-2">
                   <div>
-                    <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>Key Market Patterns</h4>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>Key Market Patterns</h3>
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       {(insights?.insights || []).map((insight, idx) => (
                         <li key={idx} style={{ display: 'flex', gap: '0.75rem', padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
@@ -272,7 +272,7 @@ export default function InsightsPage() {
                   </div>
 
                   <div>
-                    <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>High-Impact Priorities</h4>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>High-Impact Priorities</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       {(insights?.top_priorities || []).map((priority, idx) => (
                         <div key={idx} style={{ padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)', transition: 'border-color 0.2s' }}>
