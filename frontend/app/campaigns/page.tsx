@@ -153,6 +153,7 @@ export default function CampaignsPage() {
 
   return (
     <div className="dashboard-container">
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       <Sidebar
         view="all"
         setView={() => {}}
@@ -170,7 +171,7 @@ export default function CampaignsPage() {
         onCollapsedChange={setIsSidebarCollapsed}
       />
 
-      <main className="main-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+      <main id="main-content" tabIndex={-1} className="main-content" style={{ padding: 0, display: 'flex', flexDirection: 'column', outline: 'none' }}>
         <div className="mobile-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div className="logo-icon" style={{ width: '32px', height: '32px', borderRadius: '8px' }}>
