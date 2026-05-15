@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useState, useEffect, Fragment, useMemo } from 'react';
+import { useCallback, useState, useEffect, Fragment, useMemo, useRef } from 'react';
+import { useFocusTrap } from '@/utils/useFocusTrap';
 import {
   Upload, Globe, Mail, Phone, Shield,
   Settings, AlertCircle, AlertTriangle,
@@ -137,6 +138,8 @@ export default function Dashboard() {
   const [auditStatus, setAuditStatus] = useState<AuditStatusInfo | null>(null);
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const settingsModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(settingsModalRef, showSettings);
   const [discoveryQuery, setDiscoveryQuery] = useState('');
   const [discoveryLocation, setDiscoveryLocation] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -1190,7 +1193,7 @@ export default function Dashboard() {
       )}
       {/* Settings Modal */}
       {showSettings && (
-        <div role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
+        <div ref={settingsModalRef} role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: '500px', padding: 'clamp(1.25rem, 4vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)' }}>
             <button
               onClick={() => setShowSettings(false)}
