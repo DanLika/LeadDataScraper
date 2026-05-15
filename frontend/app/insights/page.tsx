@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend, BarChart
+  ResponsiveContainer, PieChart, Pie, Legend, BarChart
 } from 'recharts';
 import Link from 'next/link';
 import Sidebar from '../components/Sidebar';
@@ -189,18 +189,14 @@ export default function InsightsPage() {
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
                     <Pie
-                      data={stats?.audit_status_distribution || []}
+                      data={(stats?.audit_status_distribution || []).map((d, i) => ({ ...d, fill: COLORS[i % COLORS.length] }))}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
                       outerRadius={100}
                       paddingAngle={5}
                       dataKey="value"
-                    >
-                      {(stats?.audit_status_distribution || []).map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
+                    />
                     <RechartsTooltip
                       contentStyle={{ background: 'var(--surface-tooltip)', border: '1px solid var(--border-tooltip)', borderRadius: '8px' }}
                     />
