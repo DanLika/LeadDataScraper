@@ -1197,13 +1197,13 @@ export default function Dashboard() {
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
-                <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>API Configuration</h4>
+                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>API Configuration</h3>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Backend: <code>{API_BASE_URL}</code></p>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Database: Supabase</p>
               </div>
-              
+
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
-                <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Browser Persistence</h4>
+                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Browser Persistence</h3>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-primary)' }}>Keep browser alive between audits</span>
                   <button
@@ -1211,10 +1211,10 @@ export default function Dashboard() {
                     aria-checked={browserPersistence}
                     aria-label="Toggle browser persistence"
                     style={{
-                      width: '40px',
-                      height: '20px',
+                      width: '44px',
+                      height: '24px',
                       background: browserPersistence ? 'var(--primary)' : 'var(--border-muted)',
-                      borderRadius: '10px',
+                      borderRadius: '12px',
                       position: 'relative',
                       cursor: 'pointer',
                       transition: 'background 0.2s',
@@ -1223,14 +1223,14 @@ export default function Dashboard() {
                     }}
                     onClick={() => setBrowserPersistence(!browserPersistence)}
                   >
-                    <div style={{ 
-                      width: '16px', 
-                      height: '16px', 
-                      background: 'white', 
-                      borderRadius: '50%', 
-                      position: 'absolute', 
-                      left: browserPersistence ? '22px' : '2px', 
-                      top: '2px',
+                    <div style={{
+                      width: '18px',
+                      height: '18px',
+                      background: 'white',
+                      borderRadius: '50%',
+                      position: 'absolute',
+                      left: browserPersistence ? '23px' : '3px',
+                      top: '3px',
                       transition: 'left 0.2s'
                     }} />
                   </button>
@@ -1238,7 +1238,7 @@ export default function Dashboard() {
               </div>
 
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
-                <h4 style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>Data Export Management</h4>
+                <h3 style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>Data Export Management</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem' }}>
                   <button 
                     className="btn-secondary" 
