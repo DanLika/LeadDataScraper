@@ -148,6 +148,19 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   raises `APIError(PGRST116)` on 0 rows, which the broad `except` swallows
   into a generic 500 — and the explicit 404 branch becomes dead code. Used
   on the `/campaigns/{id}` and `/campaigns/{id}/generate` paths.
+- Endpoint pattern for handlers that delegate to `AgenticRouter`: check
+  `db.client` up front and return 503 if missing, then after
+  `router.execute_task(plan)` returns, inspect the result — if it's a dict
+  with an `error` key, propagate via `error_response(result["error"], 503)`
+  instead of returning HTTP 200 with an `{error: ...}` body. The router's
+  `error` strings are operator-authored static text, never echoed
+  attacker-controlled content. `/insights` is the reference implementation
+  (`backend/main.py:498-513`).
+- `/api/auth/signout` is wired to the **Sign Out** nav item in
+  `frontend/app/components/Sidebar.tsx`. The button POSTs same-origin so
+  the browser sends an `Origin` header that passes the fail-closed gate;
+  `try { … } finally { router.replace('/login'); router.refresh() }` keeps
+  the UI consistent even on transient network errors.
 - `hashlib.md5` use in `discovery_engine.py` (Google-Maps lead `unique_key`
   fallback when no place-ID URL is available) is annotated with
   `usedforsecurity=False` — documents non-crypto intent and silences
