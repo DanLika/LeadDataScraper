@@ -157,8 +157,9 @@ export default function Sidebar({
             </button>
             <button
               className={`nav-item ${!isInsightsPage && view === 'audited' && !showDiscoveryModal && !showSettings ? 'active' : ''}`}
-              onClick={() => { setView('audited'); setShowDiscoveryModal(false); setShowSettings(false); setIsOpenMobile?.(false); }}
+              onClick={() => { setView(view === 'audited' ? 'all' : 'audited'); setShowDiscoveryModal(false); setShowSettings(false); setIsOpenMobile?.(false); }}
               title="Audited"
+              aria-pressed={!isInsightsPage && view === 'audited'}
             >
               <CheckCircle size={18} />
               {showLabels && <span>Audited</span>}
@@ -166,8 +167,9 @@ export default function Sidebar({
             <button
               className={`nav-item ${!isInsightsPage && view === 'high-risk' && !showDiscoveryModal && !showSettings ? 'active' : ''}`}
               style={{ color: view === 'high-risk' ? 'var(--error)' : 'inherit' }}
-              onClick={() => { setView('high-risk'); setShowDiscoveryModal(false); setShowSettings(false); setIsOpenMobile?.(false); }}
+              onClick={() => { setView(view === 'high-risk' ? 'all' : 'high-risk'); setShowDiscoveryModal(false); setShowSettings(false); setIsOpenMobile?.(false); }}
               title="High Risk"
+              aria-pressed={!isInsightsPage && view === 'high-risk'}
             >
               <AlertTriangle size={18} />
               {showLabels && <span>High Risk</span>}
