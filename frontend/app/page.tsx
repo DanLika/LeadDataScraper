@@ -639,7 +639,7 @@ export default function Dashboard() {
       />
 
       {/* Main Content */}
-      <main id="main-content" className="main-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+      <main id="main-content" tabIndex={-1} className="main-content" style={{ padding: 0, display: 'flex', flexDirection: 'column', outline: 'none' }}>
         {/* Mobile Header Toggle */}
         <div className="mobile-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
