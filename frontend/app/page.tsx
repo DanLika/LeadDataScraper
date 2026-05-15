@@ -586,8 +586,16 @@ export default function Dashboard() {
 
   const ensureProtocol = (url: string) => {
     if (!url) return '';
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    return `https://${url}`;
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+    const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try {
+      const u = new URL(candidate);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      return u.toString();
+    } catch {
+      return '';
+    }
   };
 
   const filteredLeads = useMemo(() => leads.filter((lead: Lead) => {
