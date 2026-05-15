@@ -36,7 +36,7 @@ export default function StatsCards({ leads }: StatsCardsProps) {
         <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>{leads.filter((l) => l.audit_status === 'Pending').length}</div>
       </div>
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--error)', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--error-strong)', marginBottom: '1rem' }}>
            <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>HIGH RISK</span>
            <AlertTriangle size={18} />
         </div>
@@ -45,7 +45,7 @@ export default function StatsCards({ leads }: StatsCardsProps) {
         </div>
       </div>
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-light)', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-strong)', marginBottom: '1rem' }}>
            <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>HEALTHY</span>
            <CheckCircle size={18} />
         </div>

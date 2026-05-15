@@ -18,10 +18,14 @@
   /* Status */
   --success: #10b981;
   --success-light: #34d399;
+  /* Darker shades for small text on light surfaces (WCAG AA). */
+  --success-strong: #047857;
   --warning: #f59e0b;
   --warning-light: #fbbf24;
+  --warning-strong: #b45309;
   --error: #ef4444;
   --error-light: #fca5a5;
+  --error-strong: #b91c1c;
   --linkedin: #0a66c2;
 
   /* === DARK THEME (default) === */
@@ -205,7 +209,7 @@ body {
 .sidebar-toggle {
   position: absolute;
   right: 8px;
-  top: 2.5rem;
+  top: 7rem;
   width: 44px;
   height: 44px;
   background: var(--primary);
@@ -285,7 +289,7 @@ body {
 
 .nav-item.active {
   background: var(--primary-tint-10);
-  color: var(--primary);
+  color: var(--primary-strong);
   border-left: 4px solid var(--primary);
   border-radius: 4px 12px 12px 4px;
 }

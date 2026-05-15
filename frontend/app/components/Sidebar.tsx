@@ -235,12 +235,13 @@ export default function Sidebar({
               <div className="sidebar-section">
                 <div className="insights-header">
                   <h4 className="section-title">AI Insights</h4>
-                  <button 
-                    onClick={fetchInsights} 
+                  <button
+                    onClick={fetchInsights}
                     className={`refresh-btn ${fetchingInsights ? 'animate-spin' : ''}`}
                     disabled={fetchingInsights}
+                    aria-label="Refresh AI insights"
                   >
-                    <RefreshCw size={14} />
+                    <RefreshCw size={14} aria-hidden="true" />
                   </button>
                 </div>
                 
