@@ -49,9 +49,12 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   hand-crafted plan. Handler dicts are produced via
   `model_dump(exclude_none=True)` so unset fields don't shadow handler
   defaults like `params.get("filters", "high-risk")`.
-- `/api/auth/signout` mirrors the `/api/proxy` Origin allowlist gate —
-  rejects cross-origin POSTs even though `SameSite=Lax` already blocks
-  cookie-bearing cross-site fetch. Defense-in-depth against logout-CSRF.
+- `/api/proxy` and `/api/auth/signout` both apply a fail-closed Origin
+  allowlist gate to state-changing POSTs (`if (!origin || !ALLOWED_ORIGINS
+  .includes(origin)) → 403`). WHATWG Fetch always sends Origin on
+  cross-origin POST, so rejecting both mismatched and missing closes the
+  edge-case-client gap. `SameSite=Lax` already blocks cookie-bearing
+  cross-site fetch; this is belt-and-braces.
 - Optional single-tenancy assertion: set `OPERATOR_EMAIL` in the backend
   env and `_assert_single_tenant_if_enforced()` (in `backend/main.py`
   lifespan) verifies Supabase Auth has exactly that one user at boot. The
@@ -101,9 +104,11 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   with a 413 — no full-buffer DoS.
 - Outbound HTTP from `seo_audit.py` and `enrichment_engine.py` runs through
   `src/utils/ssrf_guard.py` (`SSRFGuardResolver` + `assert_safe_url`) which
-  rejects private / loopback / link-local / reserved / multicast IPs and known
-  cloud metadata hostnames at DNS-resolve time. Hardens against SSRF and
-  DNS-rebinding.
+  rejects private / loopback / link-local / reserved / multicast IPs and
+  known cloud + Kubernetes metadata hostnames at DNS-resolve time. The
+  `_BLOCKED_HOSTS` set includes GCP/EC2 metadata DNS names plus
+  `kubernetes.default.svc` / `.cluster.local` for cluster-deployment safety.
+  Hardens against SSRF and DNS-rebinding.
 - Playwright browser contexts in `enrichment_engine.py` additionally install
   `_install_ssrf_route_guard(context)` — a `context.route("**/*", ...)`
   handler that re-runs `assert_safe_url` on every request the browser makes
@@ -133,6 +138,16 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - Global FastAPI exception handler converts any uncaught exception to JSON
   (`{"error": "Internal server error"}`, 500) so the Next.js proxy can always
   `.json()` the body without SyntaxError.
+- Fingerprint reduction: `Dockerfile` starts uvicorn with
+  `--no-server-header` so `Server: uvicorn` never leaves the box. The
+  Next.js proxy additionally strips any upstream `Server` header on
+  forward — belt-and-braces if uvicorn is ever launched without the flag.
+- Security invariants for `/execute` are locked in by
+  `tests/test_execute_plan_model.py` (17 tests + 17 subtests). Covers
+  Literal allowlist, `extra='forbid'`, bounded-length `constr` per key,
+  and the `model_dump(exclude_none=True)` requirement that preserves
+  handler defaults like `params.get("filters", "high-risk")`. Run via
+  `pytest tests/`.
 - CI security gates in `.github/workflows/security.yml`: `pip-audit --strict`
   on `requirements.txt`, `npm audit --omit=dev --audit-level=high` on the
   frontend, and Semgrep OWASP/Python/TypeScript/React rulesets. Runs on

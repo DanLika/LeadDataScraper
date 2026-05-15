@@ -56,13 +56,12 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   }
 
   // 2) Origin gate for state-changing methods — defence-in-depth CSRF block.
-  // Same-origin XHR sends Origin; cross-origin attempts with a different
-  // Origin are rejected even if the attacker tricks a logged-in user into
-  // visiting their site (browser still sends our session cookie because we
-  // use SameSite=Lax, but the Origin header reveals the cross-site call).
+  // Modern browsers always send Origin on cross-origin POST/PUT/DELETE; reject
+  // both mismatched and missing Origin so we fail closed on edge-case clients.
+  // Cookies are SameSite=Lax already; this is belt-and-braces.
   if (!SAFE_METHODS.has(req.method.toUpperCase())) {
     const origin = req.headers.get('origin');
-    if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
       return NextResponse.json({ error: 'origin not allowed' }, { status: 403 });
     }
   }
@@ -112,7 +111,11 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
 
   const respHeaders = new Headers();
   upstream.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) respHeaders.set(key, value);
+    const k = key.toLowerCase();
+    // Drop Server header on the way out — defends against fingerprint leak
+    // if uvicorn is ever started without --no-server-header.
+    if (HOP_BY_HOP.has(k) || k === 'server') return;
+    respHeaders.set(key, value);
   });
 
   return new NextResponse(upstream.body, {

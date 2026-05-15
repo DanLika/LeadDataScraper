@@ -21,6 +21,11 @@ RUN playwright install chromium
 # We copy everything, including src/, backend/, and the root files
 COPY . .
 
+# Drop root. The Microsoft Playwright image ships with `pwuser` (uid 1000) pre-configured
+# for browser automation; chown the app tree so log writes etc. succeed.
+RUN chown -R pwuser:pwuser /app
+USER pwuser
+
 # Expose the default FastAPI port
 EXPOSE 8000
 
@@ -28,5 +33,6 @@ EXPOSE 8000
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# Start the FastAPI application via uvicorn
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the FastAPI application via uvicorn.
+# --no-server-header suppresses "Server: uvicorn" — avoids stack fingerprint leakage.
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]

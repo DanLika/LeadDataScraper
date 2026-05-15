@@ -28,6 +28,8 @@ _BLOCKED_HOSTS = {
     "metadata",
     "instance-data",
     "instance-data.ec2.internal",
+    "kubernetes.default.svc",
+    "kubernetes.default.svc.cluster.local",
 }
 
 
