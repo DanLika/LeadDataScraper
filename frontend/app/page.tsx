@@ -619,7 +619,7 @@ export default function Dashboard() {
           ))}
         </div>
       )}
-      <a href="#main-content" className="sr-only" style={{ position: 'absolute', left: '-9999px', top: 'auto', width: '1px', height: '1px', overflow: 'hidden' }} onFocus={(e) => { e.currentTarget.style.position = 'static'; e.currentTarget.style.width = 'auto'; e.currentTarget.style.height = 'auto'; }}>Skip to main content</a>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       {/* Sidebar - Lead Insights */}
       <Sidebar
         view={view}
