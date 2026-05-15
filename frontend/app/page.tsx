@@ -139,7 +139,9 @@ export default function Dashboard() {
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const settingsModalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(settingsModalRef, showSettings);
+  const discoveryModalRef = useRef<HTMLDivElement>(null);
+  const outreachModalRef = useRef<HTMLDivElement>(null);
+  const campaignModalRef = useRef<HTMLDivElement>(null);
   const [discoveryQuery, setDiscoveryQuery] = useState('');
   const [discoveryLocation, setDiscoveryLocation] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -151,6 +153,10 @@ export default function Dashboard() {
   const [view, setView] = useState<'all' | 'audited' | 'high-risk'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [campaign, setCampaign] = useState<CampaignItem[] | null>(null);
+  useFocusTrap(settingsModalRef, showSettings);
+  useFocusTrap(discoveryModalRef, showDiscoveryModal);
+  useFocusTrap(outreachModalRef, !!outreachDraft);
+  useFocusTrap(campaignModalRef, !!campaign);
   const [filterSegment, setFilterSegment] = useState<string>('all');
   const [filterMinScore, setFilterMinScore] = useState<number>(0);
   const [filterAuditStatus, setFilterAuditStatus] = useState<string>('all');
@@ -977,7 +983,7 @@ export default function Dashboard() {
 
       {/* Outreach Draft Modal */}
       {outreachDraft && (
-        <div role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" className="modal-backdrop">
+        <div ref={outreachModalRef} role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" className="modal-backdrop">
           <div className="card" style={{ width: '100%', maxWidth: 'min(600px, 95vw)', padding: 'clamp(1rem, 5vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setOutreachDraft(null)}
@@ -1073,7 +1079,7 @@ export default function Dashboard() {
 
       {/* Discovery Modal */}
       {showDiscoveryModal && (
-        <div role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" className="modal-backdrop">
+        <div ref={discoveryModalRef} role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" className="modal-backdrop">
           <div className="card" style={{ width: '100%', maxWidth: 'min(500px, 95vw)', padding: 'clamp(1.25rem, 4vw, 2rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setShowDiscoveryModal(false)}
@@ -1292,7 +1298,7 @@ export default function Dashboard() {
       )}
       {/* Campaign Strategy Modal */}
       {campaign && (
-        <div role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
+        <div ref={campaignModalRef} role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(900px, 95vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--primary)', borderRadius: '24px' }}>
              <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-subtle)' }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
