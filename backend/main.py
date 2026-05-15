@@ -763,7 +763,11 @@ async def list_campaigns(request: Request):
 async def get_campaign(request: Request, campaign_id: str):
     """Get campaign details with message statistics."""
     try:
-        campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).single().execute()
+        # maybe_single returns data=None on 0 rows instead of raising APIError;
+        # lets us return a proper 404 instead of falling through to the generic 500.
+        campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
+        if not campaign or not campaign.data:
+            return error_response("Campaign not found", status_code=404)
 
         # Performance optimization: Count stats at the database level instead of fetching all rows into memory
         stats = {"pending": 0, "sent": 0, "delivered": 0, "replied": 0, "bounced": 0}
@@ -793,8 +797,10 @@ async def get_campaign(request: Request, campaign_id: str):
 async def generate_campaign_messages(request: Request, campaign_id: str, background_tasks: BackgroundTasks):
     """Generate personalized outreach messages for all leads in the campaign's segment."""
     try:
-        campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).single().execute()
-        if not campaign.data:
+        # maybe_single() — same reasoning as get_campaign: don't let 0-row
+        # APIError get swallowed by the broad except below.
+        campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
+        if not campaign or not campaign.data:
             return error_response("Campaign not found", status_code=404)
 
         camp = campaign.data

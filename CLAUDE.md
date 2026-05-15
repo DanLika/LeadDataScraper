@@ -68,6 +68,11 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - **Frontend does NOT hold the API key.** The browser calls a same-origin Next.js
   proxy at `/api/proxy/[...path]` (see `frontend/app/api/proxy/[...path]/route.ts`)
   which injects `X-API-Key` from the server-side `API_SECRET_KEY` env var.
+- The proxy stamps `Cache-Control: no-store` on every response (errors and
+  successes alike) so authed payloads never sit in browser bfcache or
+  intermediate caches after logout. Client-side `apiFetch` already passes
+  `cache: 'no-store'` on the request — the response-side stamp is the
+  matching defense.
 - Destructive endpoint `DELETE /leads/clear` additionally requires
   `X-Admin-Token` matching `ADMIN_TOKEN` env (defense-in-depth even if API key leaks).
 - Required env vars (see `.env.example`):
@@ -138,6 +143,17 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - Global FastAPI exception handler converts any uncaught exception to JSON
   (`{"error": "Internal server error"}`, 500) so the Next.js proxy can always
   `.json()` the body without SyntaxError.
+- Lookups for a single row use `.maybe_single()` (not `.single()`) so a
+  missing row returns `data=None` and the handler can answer 404. `.single()`
+  raises `APIError(PGRST116)` on 0 rows, which the broad `except` swallows
+  into a generic 500 — and the explicit 404 branch becomes dead code. Used
+  on the `/campaigns/{id}` and `/campaigns/{id}/generate` paths.
+- `hashlib.md5` use in `discovery_engine.py` (Google-Maps lead `unique_key`
+  fallback when no place-ID URL is available) is annotated with
+  `usedforsecurity=False` — documents non-crypto intent and silences
+  Bandit/Semgrep MD5 lints. Truncation to 16 hex chars is fine because
+  collisions only route two distinct businesses to the same row, caught by
+  the human review queue.
 - Fingerprint reduction: `Dockerfile` starts uvicorn with
   `--no-server-header` so `Server: uvicorn` never leaves the box. The
   Next.js proxy additionally strips any upstream `Server` header on

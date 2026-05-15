@@ -117,7 +117,14 @@ class DiscoveryEngine:
         elif maps_url:
             unique_key = maps_url.split("/place/")[1].split("/")[0]
         else:
-            unique_key = hashlib.md5(name.encode()).hexdigest()[:16]
+            # MD5 here is a deduplication identifier, not a cryptographic
+            # signature: we hash the business name to produce a stable 64-bit
+            # tag when Google Maps gives us no place-ID URL. usedforsecurity=
+            # False documents that intent and silences Bandit / Semgrep MD5
+            # lints. Truncating to 16 hex chars is enough since collisions
+            # would just route two distinct businesses to the same row, which
+            # the human review queue catches.
+            unique_key = hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()[:16]
 
         # c. Extract Rating
         rating_elem = await container.query_selector("span[aria-label*='stars'], .MW4T7d")

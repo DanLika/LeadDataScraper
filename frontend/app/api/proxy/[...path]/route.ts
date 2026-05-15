@@ -37,11 +37,14 @@ const HOP_BY_HOP = new Set([
   'forwarded',
 ]);
 
+// Common no-store headers for all early returns so error responses can't be cached.
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
+
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   if (!API_SECRET_KEY) {
     return NextResponse.json(
       { error: 'API_SECRET_KEY not configured on server' },
-      { status: 500 },
+      { status: 500, headers: NO_STORE_HEADERS },
     );
   }
 
@@ -52,7 +55,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   // 2) Origin gate for state-changing methods — defence-in-depth CSRF block.
@@ -62,7 +65,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   if (!SAFE_METHODS.has(req.method.toUpperCase())) {
     const origin = req.headers.get('origin');
     if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
-      return NextResponse.json({ error: 'origin not allowed' }, { status: 403 });
+      return NextResponse.json({ error: 'origin not allowed' }, { status: 403, headers: NO_STORE_HEADERS });
     }
   }
 
@@ -105,7 +108,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   } catch {
     return NextResponse.json(
       { error: 'Upstream backend unreachable' },
-      { status: 502 },
+      { status: 502, headers: NO_STORE_HEADERS },
     );
   }
 
@@ -117,6 +120,8 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     if (HOP_BY_HOP.has(k) || k === 'server') return;
     respHeaders.set(key, value);
   });
+  // API responses must not be cached anywhere (browser, intermediate proxies).
+  respHeaders.set('Cache-Control', 'no-store');
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
