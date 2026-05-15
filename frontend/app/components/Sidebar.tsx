@@ -108,7 +108,12 @@ export default function Sidebar({
 
         <div className="sidebar-scroll-content">
           <div className="sidebar-logo">
-            <Link href="/" className="logo-link" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: 'inherit' }}>
+            <Link
+              href="/"
+              className="logo-link"
+              aria-label="LeadScout home"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: 'inherit', minWidth: '44px', minHeight: '44px' }}
+            >
               <div className="logo-icon">
                 <Shield size={24} color="white" />
               </div>

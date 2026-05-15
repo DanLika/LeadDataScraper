@@ -712,7 +712,7 @@ export default function Dashboard() {
         <div style={{ padding: '1rem 2rem 8rem 2rem' }} className="main-content-wrapper">
         <header className="page-header">
           <div style={{ minWidth: '300px' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>Operational Overview</span>
+            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary-strong)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>Operational Overview</span>
             <h1 style={{ marginBottom: '0.5rem' }}>Pipeline Intelligence</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '1rem', fontWeight: 400 }}>Orchestrating AI-driven auditing for high-conversion prospecting.</p>
           </div>
@@ -737,11 +737,10 @@ export default function Dashboard() {
               )}
               AI Orchestrate
             </button>
-            <button 
-              className="btn-secondary" 
+            <button
+              className="btn-secondary"
               onClick={handleDeepHuntAll}
               disabled={loading}
-              style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
             >
               <Crosshair size={18} /> Hunt All
             </button>
@@ -759,11 +758,10 @@ export default function Dashboard() {
             >
               <Download size={18} /> Export Full
             </button>
-            <button 
-              className="btn-primary" 
+            <button
+              className="btn-secondary"
               onClick={handleDownloadOutreachCsv}
               disabled={loading || leads.length === 0}
-              style={{ background: 'var(--accent)', border: 'none' }}
             >
               <FileDown size={18} /> CRM Export
             </button>

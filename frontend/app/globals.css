@@ -5,6 +5,8 @@
   --primary-glow: hsla(var(--primary-hsl), 0.25);
   --primary-light: hsl(234, 90%, 78%);
   --primary-medium: hsl(234, 85%, 70%);
+  /* Darker indigo for small text on light surfaces (WCAG AA contrast). */
+  --primary-strong: hsl(234, 60%, 48%);
 
   /* Chart-only accents (do NOT use for UI chrome) */
   --secondary-hsl: 234, 89%, 64%;
@@ -90,8 +92,8 @@
     --text-heading: #0f172a;
     --text-primary: #1e293b;
     --text-secondary: #334155;
-    --text-muted: #64748b;
-    --text-dim: #94a3b8;
+    --text-muted: #475569;
+    --text-dim: #64748b;
 
     --surface-base: hsl(220, 20%, 96%);
     --surface-subtle: hsl(0, 0%, 100%);

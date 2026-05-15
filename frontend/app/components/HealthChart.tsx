@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Pie, ResponsiveContainer, Tooltip } from 'recharts';
 import { Shield } from 'lucide-react';
 
 interface Lead {
@@ -43,7 +43,7 @@ export default function HealthChart({ leads }: HealthChartProps) {
       <div className="card card-no-hover" style={{ padding: '1.5rem 2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Lead Health Analysis</h3>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Lead Health Analysis</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Visual breakdown of your lead database status.</p>
           </div>
         </div>
@@ -52,18 +52,14 @@ export default function HealthChart({ leads }: HealthChartProps) {
             <ResponsiveContainer width="100%" height={240} minHeight={200}>
               <PieChart>
                 <Pie
-                  data={healthData}
+                  data={healthData.map(d => ({ ...d, fill: d.color }))}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
                   outerRadius={80}
                   paddingAngle={5}
                   dataKey="value"
-                >
-                  {healthData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
+                />
                 <Tooltip
                   contentStyle={{ background: 'var(--surface-tooltip)', border: '1px solid var(--border-tooltip)', borderRadius: '8px', color: 'var(--text-heading)' }}
                   itemStyle={{ color: 'var(--text-heading)' }}
@@ -84,7 +80,7 @@ export default function HealthChart({ leads }: HealthChartProps) {
                 ))}
              </div>
              <div style={{ padding: '1.25rem', background: 'var(--primary-tint-10)', borderRadius: '12px', border: '1px solid var(--primary-tint-10)' }}>
-               <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--primary-light)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+               <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--primary-strong)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
                  <Shield size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
                  <span><strong>Analytics Insight:</strong> {
                    leads.length > 0 ?
