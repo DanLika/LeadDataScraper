@@ -10,7 +10,13 @@ export const API_BASE_URL = '/api/proxy';
 
 /**
  * Drop-in fetch wrapper. Kept for compatibility; the proxy now owns auth.
+ *
+ * Forces `cache: 'no-store'` so authed responses don't sit in the browser's
+ * bfcache or any intermediate. The proxy stamps the matching
+ * `Cache-Control: no-store` on responses; this pairs the defense on the
+ * request side. Callers may still override via init.cache if they need
+ * a specific cache mode.
  */
 export function apiFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  return fetch(input, init);
+  return fetch(input, { cache: 'no-store', ...init });
 }
