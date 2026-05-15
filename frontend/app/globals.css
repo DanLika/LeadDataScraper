@@ -39,8 +39,11 @@
   --primary-glow: hsla(var(--primary-hsl), 0.25);
   --primary-light: hsl(234, 90%, 78%);
   --primary-medium: hsl(234, 85%, 70%);
-  /* Darker indigo for small text on light surfaces (WCAG AA contrast). */
-  --primary-strong: hsl(234, 60%, 48%);
+  /* "Strong" = the high-contrast accent for small text on the current
+     theme's background. Light variant for dark surfaces (:root is dark
+     by default per CLAUDE.md). Overridden to a dark variant inside the
+     light-theme media query / data-theme block. */
+  --primary-strong: hsl(234, 90%, 80%);
 
   /* Chart-only accents (do NOT use for UI chrome) */
   --secondary-hsl: 234, 89%, 64%;
@@ -52,14 +55,15 @@
   /* Status */
   --success: #10b981;
   --success-light: #34d399;
-  /* Darker shades for small text on light surfaces (WCAG AA). */
-  --success-strong: #047857;
+  /* "Strong" = the high-contrast status colour for small text. Default
+     (:root = dark) uses lighter shades; light theme overrides to darker. */
+  --success-strong: #6ee7b7;
   --warning: #f59e0b;
   --warning-light: #fbbf24;
-  --warning-strong: #b45309;
+  --warning-strong: #fcd34d;
   --error: #ef4444;
   --error-light: #fca5a5;
-  --error-strong: #b91c1c;
+  --error-strong: #fca5a5;
   --linkedin: #0a66c2;
 
   /* === DARK THEME (default) === */
@@ -152,6 +156,12 @@
     --glass-bg: hsl(0, 0%, 100%);
     --glass-border: hsl(220, 14%, 90%);
     --glass-hover: hsl(220, 16%, 95%);
+
+    /* Strong-accent overrides for light theme: dark shades on light bg. */
+    --primary-strong: hsl(234, 60%, 48%);
+    --success-strong: #047857;
+    --warning-strong: #b45309;
+    --error-strong: #b91c1c;
   }
 }
 
@@ -181,6 +191,12 @@
   --glass-bg: hsl(0, 0%, 100%);
   --glass-border: hsl(220, 14%, 90%);
   --glass-hover: hsl(220, 16%, 95%);
+
+  /* Strong-accent overrides for explicit light theme. */
+  --primary-strong: hsl(234, 60%, 48%);
+  --success-strong: #047857;
+  --warning-strong: #b45309;
+  --error-strong: #b91c1c;
 }
 
 * {
