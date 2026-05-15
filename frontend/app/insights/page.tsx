@@ -185,8 +185,8 @@ export default function InsightsPage() {
           <div className="grid-responsive-2" style={{ marginBottom: '2rem' }}>
             <div className="card">
               <h3 className="card-title" style={{ marginBottom: '1.5rem' }}>Audit Status Breakdown</h3>
-              <div style={{ width: '100%', aspectRatio: '16 / 10', minHeight: '240px', maxHeight: '360px' }} role="img" aria-label="Audit status distribution chart">
-                <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+              <div style={{ width: '100%' }} role="img" aria-label="Audit status distribution chart">
+                <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
                     <Pie
                       data={stats?.audit_status_distribution || []}
@@ -212,8 +212,8 @@ export default function InsightsPage() {
 
             <div className="card">
               <h3 className="card-title" style={{ marginBottom: '1.5rem' }}>SEO Score Distribution</h3>
-              <div style={{ width: '100%', aspectRatio: '16 / 10', minHeight: '240px', maxHeight: '360px' }} role="img" aria-label="SEO score distribution chart">
-                <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+              <div style={{ width: '100%' }} role="img" aria-label="SEO score distribution chart">
+                <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={stats?.seo_score_ranges || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-muted)" vertical={false} />
                     <XAxis 
