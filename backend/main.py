@@ -907,6 +907,8 @@ async def generate_campaign_messages(request: Request, campaign_id: str, backgro
 @limiter.limit("10/minute")
 async def start_campaign(request: Request, campaign_id: str):
     """Mark campaign as active (actual sending would be handled by email_sender integration)."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         db.client.table("campaigns").update({
             "status": "active"
@@ -920,6 +922,8 @@ async def start_campaign(request: Request, campaign_id: str):
 @limiter.limit("10/minute")
 async def pause_campaign(request: Request, campaign_id: str):
     """Pause a running campaign."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         db.client.table("campaigns").update({
             "status": "paused"
@@ -933,6 +937,8 @@ async def pause_campaign(request: Request, campaign_id: str):
 @limiter.limit("12/hour")
 async def export_campaign_messages(request: Request, campaign_id: str):
     """Export campaign messages as CSV for import into external tools."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         messages = db.client.table("campaign_messages").select(
             "lead_unique_key, channel, subject, body, status"
