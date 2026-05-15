@@ -14,12 +14,14 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
   .map((o) => o.trim())
   .filter(Boolean)
 
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const
+
 export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin')
   if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
-    return NextResponse.json({ error: 'origin not allowed' }, { status: 403 })
+    return NextResponse.json({ error: 'origin not allowed' }, { status: 403, headers: NO_STORE_HEADERS })
   }
   const supabase = await createClient()
   await supabase.auth.signOut()
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS })
 }
