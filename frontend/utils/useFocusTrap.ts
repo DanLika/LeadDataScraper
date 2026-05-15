@@ -20,6 +20,11 @@ export function useFocusTrap(
     if (!active || !ref.current) return;
     const root = ref.current;
 
+    // Remember whoever had focus when the modal opened so we can hand it
+    // back on close. WCAG 2.4.3 — keyboard users should not be dropped
+    // back to <body> after dismissing a dialog.
+    const opener = document.activeElement as HTMLElement | null;
+
     const getFocusables = (): HTMLElement[] => {
       const nodes = root.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -27,7 +32,6 @@ export function useFocusTrap(
       return Array.from(nodes).filter((el) => el.offsetParent !== null);
     };
 
-    // Move initial focus inside the modal if focus is somewhere else.
     const first = getFocusables()[0];
     if (first && !root.contains(document.activeElement)) {
       first.focus();
@@ -52,6 +56,12 @@ export function useFocusTrap(
     };
 
     root.addEventListener('keydown', onKey);
-    return () => root.removeEventListener('keydown', onKey);
+    return () => {
+      root.removeEventListener('keydown', onKey);
+      // Restore focus to the opener if it's still in the document and focusable.
+      if (opener && document.contains(opener) && typeof opener.focus === 'function') {
+        opener.focus();
+      }
+    };
   }, [active, ref]);
 }
