@@ -498,9 +498,15 @@ async def ask_ai(request: Request, payload: AskRequest, background_tasks: Backgr
 @app.get("/insights", dependencies=[Depends(verify_api_key)])
 @limiter.limit("10/minute")
 async def get_insights(request: Request):
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         plan = {"task": "GET_INSIGHTS"}
         result = await router.execute_task(plan)
+        # If the router surfaced an error payload, propagate the right status
+        # instead of returning HTTP 200 with an error body.
+        if isinstance(result, dict) and result.get("error"):
+            return error_response(result["error"], status_code=503)
         return result
     except Exception as e:
         logger.error("Error getting insights: %s", e, exc_info=True)
@@ -633,18 +639,24 @@ async def clear_leads(request: Request):
 @app.post("/orchestrator/start", dependencies=[Depends(verify_api_key)])
 @limiter.limit("3/minute")
 async def start_massive_pipeline(request: Request, payload: PipelineRequest):
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     job_id = await orchestrator.run_massive_pipeline(filters=payload.filters, lead_ids=payload.lead_ids, tasks=payload.tasks)
     return {"status": "job_started", "job_id": job_id}
 
 @app.get("/orchestrator/status/{job_id}", dependencies=[Depends(verify_api_key)])
 @limiter.limit("60/minute")
 async def get_job_status(request: Request, job_id: str):
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     status = await orchestrator.get_job_status(job_id)
     return status
 
 @app.post("/orchestrator/stop/{job_id}", dependencies=[Depends(verify_api_key)])
 @limiter.limit("10/minute")
 async def stop_job(request: Request, job_id: str):
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     result = await orchestrator.stop_job(job_id)
     return result
 
@@ -721,6 +733,8 @@ def _is_table_missing_error(e: Exception) -> bool:
 @limiter.limit("20/minute")
 async def create_campaign(request: Request, campaign: CampaignCreate):
     """Create a new outreach campaign."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         import uuid
         campaign_data = {
@@ -749,6 +763,8 @@ async def create_campaign(request: Request, campaign: CampaignCreate):
 @limiter.limit("60/minute")
 async def list_campaigns(request: Request):
     """List all campaigns."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         result = db.client.table("campaigns").select("*").order("created_at", desc=True).execute()
         return {"campaigns": result.data or []}
@@ -762,6 +778,8 @@ async def list_campaigns(request: Request):
 @limiter.limit("60/minute")
 async def get_campaign(request: Request, campaign_id: str):
     """Get campaign details with message statistics."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         # maybe_single returns data=None on 0 rows instead of raising APIError;
         # lets us return a proper 404 instead of falling through to the generic 500.
@@ -796,6 +814,8 @@ async def get_campaign(request: Request, campaign_id: str):
 @limiter.limit("3/minute")
 async def generate_campaign_messages(request: Request, campaign_id: str, background_tasks: BackgroundTasks):
     """Generate personalized outreach messages for all leads in the campaign's segment."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
     try:
         # maybe_single() — same reasoning as get_campaign: don't let 0-row
         # APIError get swallowed by the broad except below.

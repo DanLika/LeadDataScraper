@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react';
 import {
   BarChart3, Search, CheckCircle, AlertTriangle, Settings,
   Zap, RefreshCw, Loader2, Shield, ChevronLeft, ChevronRight,
-  TrendingUp, X
+  TrendingUp, X, LogOut
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 interface SidebarLead {
   company_name?: string;
@@ -57,6 +57,7 @@ export default function Sidebar({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isManuallyToggled, setIsManuallyToggled] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
 
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -178,6 +179,22 @@ export default function Sidebar({
             >
               <Settings size={18} />
               {showLabels && <span>Settings</span>}
+            </button>
+            <button
+              className="nav-item"
+              onClick={async () => {
+                try {
+                  await fetch('/api/auth/signout', { method: 'POST' });
+                } finally {
+                  router.replace('/login');
+                  router.refresh();
+                }
+              }}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut size={18} />
+              {showLabels && <span>Sign Out</span>}
             </button>
           </nav>
 
