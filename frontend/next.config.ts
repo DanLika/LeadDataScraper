@@ -16,7 +16,11 @@ const cspDirectives = [
   process.env.NODE_ENV === "production"
     ? "script-src 'self'"
     : "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
+  // Restrict images to same-origin + inline (data:/blob:) + the Supabase
+  // project host (used for avatars / storage). Blanket `https:` would let a
+  // future feature that renders attacker-controlled URLs exfil the viewer's
+  // IP + Referer via tracking-pixel requests.
+  `img-src 'self' data: blob: ${SUPABASE_URL}`.trim(),
   "font-src 'self' data:",
   // /api/proxy is same-origin; Supabase auth/realtime is the only cross-origin call.
   `connect-src 'self' ${SUPABASE_URL} ${SUPABASE_URL.replace(/^https:/, "wss:")}`.trim(),

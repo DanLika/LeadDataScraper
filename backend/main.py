@@ -114,17 +114,93 @@ class PipelineRequest(BaseModel):
     lead_ids: Optional[conlist(constr(min_length=1, max_length=128), max_length=10_000)] = None
     tasks: Optional[conlist(constr(min_length=1, max_length=64), max_length=64)] = None
 
+# /execute is the AI router's "execute the proposed plan" surface. Lock the
+# task name to the AgenticRouter handler allowlist and bound each accepted
+# param. Without this an authed caller could craft any task/params dict and
+# bypass the natural-language → tool gating that the rest of the flow relies
+# on. Keys mirror what `AgenticRouter.execute_task` handlers actually read.
+ExecutableTask = Literal[
+    "DATABASE_QUERY",
+    "STATUS_CHECK",
+    "SEO_AUDIT",
+    "OUTREACH_DRAFT",
+    "GET_INSIGHTS",
+    "DATA_MERGE",
+    "DEEP_HUNT",
+    "RUN_MASSIVE_PIPELINE",
+    "LINKEDIN_DRAFT",
+    "DISCOVERY_SEARCH",
+    "DEEP_ENRICHMENT",
+    "CAMPAIGN_STRATEGY",
+]
+
+class ExecutePlanParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    unique_key: Optional[constr(min_length=1, max_length=128)] = None
+    query: Optional[constr(min_length=1, max_length=500)] = None
+    location: Optional[constr(max_length=200)] = None
+    # Natural-language sub-question fenced as UNTRUSTED_DATA by the handler.
+    query_text: Optional[constr(max_length=4000)] = None
+    # Free-form bucket label ("high-risk" etc.). Handler treats anything other
+    # than "high-risk" as "default" — bounded string is enough.
+    filters: Optional[constr(max_length=64)] = None
+    type: Optional[constr(max_length=64)] = None
+
 class ExecutePlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    task: constr(min_length=1, max_length=128)
-    params: Optional[dict] = None
+    task: ExecutableTask
+    params: Optional[ExecutePlanParams] = None
 
 load_dotenv()
+
+def _assert_single_tenant_if_enforced() -> None:
+    """Optional single-tenancy invariant.
+
+    The app's per-resource endpoints (`/process-lead`, `/draft-outreach`,
+    `/orchestrator/status/{job_id}`, `/campaigns/{id}/...`) intentionally
+    have no `owner_user_id` filter — the design assumes a single operator
+    provisioned manually in the Supabase Auth dashboard. If a second user
+    is ever added, every authed user gains full cross-user access.
+
+    Setting `OPERATOR_EMAIL` enables a startup check that fails loudly if
+    that invariant ever breaks (extra user added, or expected user not
+    provisioned). Unset → check is skipped, behavior unchanged.
+    """
+    expected = os.getenv("OPERATOR_EMAIL", "").strip().lower()
+    if not expected:
+        return
+    if not db.client:
+        logger.warning("OPERATOR_EMAIL set but Supabase client missing — skipping tenancy check.")
+        return
+    try:
+        users_resp = db.client.auth.admin.list_users()
+        # supabase-py returns a list directly; tolerate paginated objects too.
+        users = users_resp if isinstance(users_resp, list) else getattr(users_resp, "users", []) or []
+        emails = [
+            (getattr(u, "email", None) or "").strip().lower()
+            for u in users
+        ]
+        emails = [e for e in emails if e]
+        if emails != [expected]:
+            raise RuntimeError(
+                f"Single-tenant invariant violated: expected exactly [{expected}], "
+                f"found {emails}. Either remove extra users or migrate to "
+                "owner-scoped endpoints before continuing."
+            )
+        logger.info("Single-tenancy assertion passed (operator=%s).", expected)
+    except RuntimeError:
+        raise
+    except Exception as e:
+        # Don't hard-fail the boot for a transient Supabase Auth API hiccup —
+        # log loudly so the invariant is still observable.
+        logger.warning("Single-tenancy check could not run: %s", e)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Lead Data Scraper Backend Starting...")
+    _assert_single_tenant_if_enforced()
     try:
         missing = db.check_schema()
         if missing:
@@ -213,8 +289,9 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    """Health check endpoint to verify API status."""
-    return {"message": "LeadDataScraper API is running", "status": "online"}
+    """Unauthenticated liveness probe. Intentionally returns no product /
+    version metadata — anything richer is a free fingerprint for attackers."""
+    return {"status": "ok"}
 
 @app.get("/leads", dependencies=[Depends(verify_api_key)])
 @limiter.limit("30/minute")
@@ -503,7 +580,10 @@ async def draft_linkedin(request: Request, payload: LeadProcessRequest):
 @limiter.limit("10/minute")
 async def execute_plan(request: Request, plan: ExecutePlanRequest, background_tasks: BackgroundTasks):
     """Execute a multi-step plan previously proposed by the AI."""
-    plan_dict = plan.model_dump()
+    # exclude_none so unset Pydantic fields don't shadow handler defaults
+    # (e.g. _generate_campaign_strategy uses params.get("filters", "high-risk")
+    # which would otherwise resolve to None instead of the intended default).
+    plan_dict = plan.model_dump(exclude_none=True)
     if plan.task == "SEO_AUDIT":
         job_id = await orchestrator.run_massive_pipeline(tasks=["audit"])
         return {"result": {"message": "Scaling SEO Audit started", "job_id": job_id}}

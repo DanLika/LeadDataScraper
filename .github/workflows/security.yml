@@ -1,0 +1,57 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Daily run catches newly-disclosed CVEs in already-pinned deps.
+    - cron: '0 7 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    name: pip-audit (Python deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip pip-audit
+      - name: Audit requirements.txt
+        # `--strict` exits non-zero on any vulnerability with a fix available.
+        # `--ignore-vuln` can be added per-CVE if a fix isn't yet upstream.
+        run: pip-audit --strict --requirement requirements.txt
+
+  npm-audit:
+    name: npm audit (frontend deps)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Audit prod deps
+        # Prod-only: dev tooling CVEs don't ship to users.
+        # `--audit-level=high` keeps the gate at exploitable severities.
+        run: npm audit --omit=dev --audit-level=high
+
+  semgrep:
+    name: semgrep (SAST)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/owasp-top-ten p/python p/typescript p/react

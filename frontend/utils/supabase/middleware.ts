@@ -24,15 +24,23 @@ export async function updateSession(request: NextRequest) {
           supabaseResponse = NextResponse.next({
             request,
           })
-          // Defensive floor: enforce SameSite=Lax, HttpOnly, and Secure (in
-          // production) regardless of what Supabase passes. If Supabase
-          // explicitly sets a stricter value, it wins via the spread order.
+          // True floor: spread options first, then hard-set protected keys
+          // so Supabase can tighten (Strict / longer maxAge) but never loosen.
+          // SameSite: keep 'strict' if Supabase asked for it, otherwise pin
+          //   to 'lax' (rejects 'none' even if a future SDK sets it).
+          // HttpOnly: always true — JS access to the session cookie is never
+          //   needed by this app.
+          // Secure: pinned in production regardless of what Supabase passes;
+          //   in dev we leave it off so http://localhost works.
+          const isProd = process.env.NODE_ENV === 'production'
           cookiesToSet.forEach(({ name, value, options }) => {
+            const requestedStrict =
+              (options?.sameSite as string | undefined)?.toLowerCase() === 'strict'
             const hardened = {
-              sameSite: 'lax' as const,
-              httpOnly: true,
-              secure: process.env.NODE_ENV === 'production',
               ...options,
+              sameSite: (requestedStrict ? 'strict' : 'lax') as 'lax' | 'strict',
+              httpOnly: true,
+              secure: isProd ? true : Boolean(options?.secure),
             }
             supabaseResponse.cookies.set(name, value, hardened)
           })

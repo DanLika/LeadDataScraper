@@ -32,12 +32,34 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   (must start with `/`, must NOT start with `//` or `/\`). Closes open-redirect
   → phishing-assist on the auth flow.
 - Supabase session cookies set via `setAll()` in
-  `frontend/utils/supabase/middleware.ts` are floored to `SameSite=Lax`,
-  `HttpOnly=true`, `Secure=true` (prod) — Supabase's own options win via spread
-  order, but the floor protects against a future SDK change that loosens
-  defaults.
-- All endpoints (except `/` health check) require `X-API-Key` header — validated by `verify_api_key` dependency (constant-time compare via `secrets.compare_digest`)
+  `frontend/utils/supabase/middleware.ts` are true-floored to
+  `SameSite=Lax`, `HttpOnly=true`, `Secure=true` (prod). Spread order is
+  `{...options, sameSite, httpOnly, secure}` — Supabase can tighten
+  (`SameSite=Strict` is preserved) but cannot loosen (`None` is overwritten
+  to `Lax`, `httpOnly=false` is overwritten to `true`).
+- All endpoints (except `/` liveness probe) require `X-API-Key` header —
+  validated by `verify_api_key` dependency (constant-time compare via
+  `secrets.compare_digest`). `/` returns `{"status":"ok"}` with no product
+  or version metadata to avoid free fingerprinting.
 - API key is set via `API_SECRET_KEY` env var in backend `.env`
+- `/execute` accepts only a `Literal` allowlist of task names
+  (`ExecutableTask`) and a typed `ExecutePlanParams` model with bounded
+  `constr` fields + `extra='forbid'`. Untyped `params: dict` was removed so
+  authed callers cannot bypass the natural-language → tool gating with a
+  hand-crafted plan. Handler dicts are produced via
+  `model_dump(exclude_none=True)` so unset fields don't shadow handler
+  defaults like `params.get("filters", "high-risk")`.
+- `/api/auth/signout` mirrors the `/api/proxy` Origin allowlist gate —
+  rejects cross-origin POSTs even though `SameSite=Lax` already blocks
+  cookie-bearing cross-site fetch. Defense-in-depth against logout-CSRF.
+- Optional single-tenancy assertion: set `OPERATOR_EMAIL` in the backend
+  env and `_assert_single_tenant_if_enforced()` (in `backend/main.py`
+  lifespan) verifies Supabase Auth has exactly that one user at boot. The
+  per-resource endpoints (`/process-lead`, `/draft-outreach`,
+  `/orchestrator/status/{job_id}`, `/campaigns/{id}/...`) intentionally
+  don't filter by `owner_user_id` — design assumes one operator. Setting
+  `OPERATOR_EMAIL` makes that invariant trip loudly at startup if a second
+  user is ever provisioned. Unset → check skipped.
 - Interactive docs (`/docs`, `/openapi.json`, `/redoc`) are **disabled by default**.
   Enable in dev via `ENABLE_DOCS=true`. Never set in production.
 - **Frontend does NOT hold the API key.** The browser calls a same-origin Next.js
@@ -48,9 +70,12 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - Required env vars (see `.env.example`):
   - Backend `.env`: `API_SECRET_KEY`, `ADMIN_TOKEN`, `SUPABASE_URL`,
     `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `ALLOWED_ORIGINS`
+  - Backend (optional): `OPERATOR_EMAIL` — when set, enforces the
+    single-tenancy assertion described above.
   - Frontend `.env.local`: `BACKEND_URL` (server-side, points at FastAPI),
     `API_SECRET_KEY` (server-side, NOT `NEXT_PUBLIC_*`),
-    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+    `ALLOWED_ORIGINS` (used by `/api/proxy` + `/api/auth/signout` Origin
+    gates), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - Rate limiting: AI and destructive endpoints capped via `slowapi`. See
   `backend/main.py` decorators. `headers_enabled=False` — `X-RateLimit-*` not
   emitted (slowapi requires `response: Response` param to inject; we don't
@@ -66,7 +91,9 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   directly, attackers cannot spoof XFF to spread load across rate-limit
   buckets.
 - Browser security headers set in `frontend/next.config.ts`: CSP
-  (`script-src 'self'` in prod; `connect-src` whitelists Supabase URL + wss),
+  (`script-src 'self'` in prod; `connect-src` whitelists Supabase URL + wss;
+  `img-src 'self' data: blob: <SUPABASE_URL>` — no blanket `https:` so
+  attacker-controlled URLs can't be rendered as tracking pixels),
   HSTS (2y + preload), `X-Frame-Options: DENY`, `X-Content-Type-Options`,
   `Referrer-Policy`, `Permissions-Policy` (camera/mic/geo off).
   `productionBrowserSourceMaps: false`.
@@ -106,6 +133,11 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - Global FastAPI exception handler converts any uncaught exception to JSON
   (`{"error": "Internal server error"}`, 500) so the Next.js proxy can always
   `.json()` the body without SyntaxError.
+- CI security gates in `.github/workflows/security.yml`: `pip-audit --strict`
+  on `requirements.txt`, `npm audit --omit=dev --audit-level=high` on the
+  frontend, and Semgrep OWASP/Python/TypeScript/React rulesets. Runs on
+  push, PR, and daily cron (catches newly-disclosed CVEs in already-pinned
+  deps without a code change).
 
 ## Frontend Architecture
 - `frontend/app/page.tsx` — Main dashboard (lead inventory, modals, orchestration)
