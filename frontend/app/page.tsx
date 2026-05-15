@@ -837,7 +837,7 @@ export default function Dashboard() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                 <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-white)' }}>{lead.company_name || lead.name || 'Unknown Entity'}</span>
                                 {lead.high_risk_flag && (
-                                  <span className="badge" style={{ background: 'var(--error-tint)', color: 'var(--error)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                                  <span className="badge" style={{ background: 'var(--error-tint)', color: 'var(--error-strong)', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
                                     <AlertCircle size={12} /> RISK
                                   </span>
                                 )}
@@ -858,7 +858,7 @@ export default function Dashboard() {
                                 {lead.audit_status || 'Unprocessed'}
                               </span>
                               {lead.audit_results?.score != null && (
-                                <div style={{ fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap', color: lead.audit_results.score < 50 ? 'var(--error)' : 'var(--primary)' }}>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap', color: lead.audit_results.score < 50 ? 'var(--error-strong)' : 'var(--primary-strong)' }}>
                                   SEO: {lead.audit_results.score}/100
                                 </div>
                               )}
@@ -878,7 +878,7 @@ export default function Dashboard() {
                               {lead.linkedin && <a href={ensureProtocol(lead.linkedin)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} LinkedIn page`} className="social-link"><Linkedin size={16} /></a>}
                               {lead.tiktok && <a href={ensureProtocol(lead.tiktok)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} TikTok page`} className="social-link"><Music size={16} /></a>}
                               {lead.pinterest && <a href={ensureProtocol(lead.pinterest)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} Pinterest page`} className="social-link"><Pin size={16} /></a>}
-                              {!lead.facebook && !lead.instagram && !lead.linkedin && !lead.tiktok && !lead.pinterest && <span style={{ fontSize: '0.75rem', opacity: 0.3 }}>N/A</span>}
+                              {!lead.facebook && !lead.instagram && !lead.linkedin && !lead.tiktok && !lead.pinterest && <span aria-label="No social links" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>N/A</span>}
                             </div>
                           </td>
                           <td style={{ padding: '1rem 0.75rem', textAlign: 'right', verticalAlign: 'middle' }}>
@@ -929,10 +929,10 @@ export default function Dashboard() {
                               <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
                                 {lead.last_error && (
                                   <div style={{ flex: '1 1 300px', borderLeft: '3px solid var(--error)', paddingLeft: '1rem' }}>
-                                    <div style={{ fontSize: '0.65rem', color: 'var(--error)', textTransform: 'uppercase', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--error-strong)', textTransform: 'uppercase', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                                       <AlertCircle size={10} /> PROCESSING ERROR
                                     </div>
-                                    <p style={{ fontSize: '0.8rem', color: 'var(--error-light)', margin: 0 }}>{lead.last_error}</p>
+                                    <p style={{ fontSize: '0.8rem', color: 'var(--error-strong)', margin: 0 }}>{lead.last_error}</p>
                                   </div>
                                 )}
                                 {lead.key_offerings && lead.key_offerings !== 'Unknown' && (
