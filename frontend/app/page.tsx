@@ -117,7 +117,7 @@ function CollapsibleText({ text, maxLength = 250, style }: { text: string; maxLe
       {isLong && (
         <button
           onClick={() => setExpanded(!expanded)}
-          style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '0.7rem', cursor: 'pointer', padding: '0.25rem 0', fontWeight: 600 }}
+          style={{ background: 'none', border: 'none', color: 'var(--primary-strong)', fontSize: '0.7rem', cursor: 'pointer', padding: '0.25rem 0', fontWeight: 600 }}
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
@@ -861,7 +861,7 @@ export default function Dashboard() {
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                                 {lead.website && (
-                                  <a href={ensureProtocol(lead.website)} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--primary)', textDecoration: 'none', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <a href={ensureProtocol(lead.website)} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--primary-strong)', textDecoration: 'none', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     <Globe size={14} style={{ flexShrink: 0 }} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.website.replace(/^https?:\/\//, '').replace(/\?.*$/, '')}</span>
                                   </a>
                                 )}

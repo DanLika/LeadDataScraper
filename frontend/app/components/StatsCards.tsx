@@ -29,7 +29,7 @@ export default function StatsCards({ leads }: StatsCardsProps) {
         <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>{leads.length}</div>
       </div>
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--secondary)', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--primary-strong)', marginBottom: '1rem' }}>
            <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>PENDING</span>
            <Shield size={18} />
         </div>
