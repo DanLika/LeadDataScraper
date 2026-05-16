@@ -249,8 +249,8 @@ export default function CampaignsPage() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button className="btn-primary" onClick={handleCreate} disabled={creating || !newName.trim()} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                <button className="btn-primary" onClick={handleCreate} disabled={creating || !newName.trim()} aria-busy={creating} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {creating ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
                   Create Campaign
                 </button>
                 <button className="btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
@@ -279,8 +279,8 @@ export default function CampaignsPage() {
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <button className="btn-primary" onClick={() => handleGenerate(selectedCampaign.id)} disabled={generating} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {generating ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                <button className="btn-primary" onClick={() => handleGenerate(selectedCampaign.id)} disabled={generating} aria-busy={generating} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {generating ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Send size={16} aria-hidden="true" />}
                   Generate Messages
                 </button>
                 {selectedCampaign.status === 'active' ? (

@@ -734,23 +734,25 @@ export default function Dashboard() {
             <p style={{ color: 'var(--text-muted)', fontSize: '1rem', fontWeight: 400 }}>Orchestrating AI-driven auditing for high-conversion prospecting.</p>
           </div>
           <div className="header-actions">
-            <button 
-              className="btn-secondary" 
+            <button
+              className="btn-secondary"
               onClick={processAll}
               disabled={loading}
+              aria-busy={loading}
             >
               <Play size={18} /> Audit All
             </button>
-            <button 
-              className="btn-primary" 
+            <button
+              className="btn-primary"
               onClick={startMassivePipeline}
               disabled={loading || !!(orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting'))}
+              aria-busy={loading || !!(orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting'))}
               style={{ background: 'var(--primary)', border: 'none' }}
             >
               {orchestratorJob && (orchestratorJob.status === 'running' || orchestratorJob.status === 'starting') ? (
-                <Loader2 size={18} className="animate-spin" />
+                <Loader2 size={18} className="animate-spin" aria-hidden="true" />
               ) : (
-                <Zap size={18} />
+                <Zap size={18} aria-hidden="true" />
               )}
               AI Orchestrate
             </button>
@@ -758,20 +760,22 @@ export default function Dashboard() {
               className="btn-secondary"
               onClick={handleDeepHuntAll}
               disabled={loading}
+              aria-busy={loading}
             >
               <Crosshair size={18} /> Hunt All
             </button>
-            <input 
-              type="file" 
-              id="csv-upload" 
-              accept=".csv" 
-              style={{ display: 'none' }} 
+            <input
+              type="file"
+              id="csv-upload"
+              accept=".csv"
+              style={{ display: 'none' }}
               onChange={handleFileUpload}
             />
-            <button 
-              className="btn-secondary" 
+            <button
+              className="btn-secondary"
               onClick={handleDownloadCsv}
               disabled={loading || leads.length === 0}
+              aria-busy={loading}
             >
               <Download size={18} /> Export Full
             </button>
@@ -779,13 +783,15 @@ export default function Dashboard() {
               className="btn-secondary"
               onClick={handleDownloadOutreachCsv}
               disabled={loading || leads.length === 0}
+              aria-busy={loading}
             >
               <FileDown size={18} /> CRM Export
             </button>
-            <button 
-              className="btn-primary" 
+            <button
+              className="btn-primary"
               onClick={() => document.getElementById('csv-upload')?.click()}
               disabled={loading}
+              aria-busy={loading}
             >
               <Upload size={18} /> Import CSV
             </button>
@@ -900,42 +906,46 @@ export default function Dashboard() {
                           </td>
                           <td style={{ padding: '1rem 0.75rem', textAlign: 'right', verticalAlign: 'middle' }}>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
-                              <button 
-                                className="btn-secondary" 
+                              <button
+                                className="btn-secondary"
                                 style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '44px', minHeight: '44px' }}
                                 onClick={() => handleEnrichLead(lead.unique_key)}
                                 disabled={processingLeads[lead.unique_key]}
+                                aria-busy={processingLeads[lead.unique_key]}
                                 title="Harvest Contact Details"
                                 aria-label="Harvest contact details"
                               >
-                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
+                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Users size={14} aria-hidden="true" />}
                               </button>
-                              <button 
-                                className="btn-secondary" 
+                              <button
+                                className="btn-secondary"
                                 style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '44px', minHeight: '44px', color: 'var(--accent)', borderColor: 'rgba(245, 158, 11, 0.2)' }}
                                 onClick={() => handleDeepHunt(lead.unique_key)}
                                 disabled={processingLeads[lead.unique_key]}
+                                aria-busy={processingLeads[lead.unique_key]}
                                 title="Deep Digital Hunt"
                                 aria-label="Deep digital hunt"
                               >
-                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
+                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Crosshair size={14} aria-hidden="true" />}
                               </button>
-                              <button 
-                                className="btn-primary" 
+                              <button
+                                className="btn-primary"
                                 style={{ padding: '0.4rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem' }}
                                 onClick={() => handleDraftOutreach(lead)}
                                 disabled={isDrafting || lead.audit_status !== 'Completed'}
+                                aria-busy={isDrafting && activeLead?.unique_key === lead.unique_key}
                                 title="Draft Personalised Outreach"
                               >
-                                {isDrafting && activeLead?.unique_key === lead.unique_key ? <Loader2 size={14} className="animate-spin" /> : 'Draft'}
+                                {isDrafting && activeLead?.unique_key === lead.unique_key ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : 'Draft'}
                               </button>
-                              <button 
-                                className="btn-primary" 
+                              <button
+                                className="btn-primary"
                                 style={{ padding: '0.4rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem', background: 'var(--secondary)' }}
                                 onClick={() => processLead(lead.unique_key)}
                                 disabled={processingLeads[lead.unique_key]}
+                                aria-busy={processingLeads[lead.unique_key]}
                               >
-                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" /> : lead.audit_status === 'Completed' ? 'Re-Audit' : 'Audit'}
+                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : lead.audit_status === 'Completed' ? 'Re-Audit' : 'Audit'}
                               </button>
                             </div>
                           </td>
