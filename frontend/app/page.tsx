@@ -1129,20 +1129,21 @@ export default function Dashboard() {
             </div>
 
             <div style={{ display: 'flex', gap: '1rem' }}>
-              <button 
-                className="btn-primary" 
-                style={{ flex: 1, gap: '0.75rem', position: 'relative' }} 
+              <button
+                className="btn-primary"
+                style={{ flex: 1, gap: '0.75rem', position: 'relative' }}
                 onClick={handleStartDiscovery}
-                disabled={isDiscovering || !discoveryQuery}
+                disabled={isDiscovering || !discoveryQuery.trim()}
+                aria-busy={isDiscovering}
               >
                 {isDiscovering ? (
                   <>
-                    <Loader2 className="animate-spin" size={18} />
+                    <Loader2 className="animate-spin" size={18} aria-hidden="true" />
                     <span>Mining {discoveryQuery}...</span>
                   </>
                 ) : (
                   <>
-                    <Play size={18} />
+                    <Play size={18} aria-hidden="true" />
                     <span>Start Deep Search</span>
                   </>
                 )}
