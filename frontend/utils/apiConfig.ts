@@ -17,6 +17,17 @@ export const API_BASE_URL = '/api/proxy';
  * request side. Callers may still override via init.cache if they need
  * a specific cache mode.
  */
-export function apiFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  return fetch(input, { cache: 'no-store', ...init });
+export async function apiFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, { cache: 'no-store', ...init });
+  // Middleware redirects unauthenticated proxy traffic to /login (HTML).
+  // Without this guard, callers do `await resp.json()` on the login HTML
+  // and crash with `Unexpected token '<' is not valid JSON`. Surface as
+  // an auth boundary instead — caller can route to /login.
+  if (response.redirected && response.url.includes('/login')) {
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
+    throw new Error('Session expired');
+  }
+  return response;
 }
