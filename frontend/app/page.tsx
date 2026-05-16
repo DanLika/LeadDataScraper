@@ -1295,7 +1295,7 @@ export default function Dashboard() {
               </div>
 
               <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid var(--error-tint)' }}>
-                <h4 style={{ fontSize: '0.9rem', color: 'var(--error)', marginBottom: '0.5rem' }}>Danger Zone</h4>
+                <h3 style={{ fontSize: '0.9rem', color: 'var(--error-strong)', marginBottom: '0.5rem' }}>Danger Zone</h3>
                 <button className="btn-secondary" style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }} onClick={handleClearLeads}>
                   Clear All Leads
                 </button>
@@ -1337,7 +1337,7 @@ export default function Dashboard() {
                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                         <div>
                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
-                              <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-white)' }}>{item.company}</h4>
+                              <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-white)' }}>{item.company}</h3>
                               <span style={{ fontSize: '0.7rem', background: 'var(--primary-tint-10)', color: 'var(--primary-light)', padding: '0.1rem 0.5rem', borderRadius: '4px' }}>Lead {idx + 1}</span>
                            </div>
                            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Greeting: <strong style={{ color: 'var(--text-primary)' }}>Hi {item.first_name || 'there'}</strong></p>
