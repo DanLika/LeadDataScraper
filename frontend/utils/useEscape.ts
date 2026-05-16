@@ -16,7 +16,12 @@ import { useEffect, useRef } from 'react';
  */
 export function useEscape(onEscape: () => void, active: boolean) {
   const cbRef = useRef(onEscape);
-  cbRef.current = onEscape;
+  // Sync ref in commit phase — avoids re-registering the listener when the
+  // caller passes a new inline arrow each render. eslint-react-hooks/refs
+  // forbids writing to ref.current during render, so this lives in an effect.
+  useEffect(() => {
+    cbRef.current = onEscape;
+  });
 
   useEffect(() => {
     if (!active) return;
