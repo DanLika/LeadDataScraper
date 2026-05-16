@@ -250,12 +250,16 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <button
                         className="btn-primary"
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
                         onClick={() => msg.plan && handleExecute(msg.plan, idx)}
                         disabled={isLoading}
                         aria-busy={isLoading}
                       >
-                        <Play size={12} aria-hidden="true" /> Confirm & Execute
+                        {isLoading
+                          ? <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                          : <Play size={12} aria-hidden="true" />
+                        }
+                        {isLoading ? 'Executing…' : 'Confirm & Execute'}
                       </button>
                       <button
                         className="btn-secondary"
