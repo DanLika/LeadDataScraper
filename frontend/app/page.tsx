@@ -173,7 +173,7 @@ export default function Dashboard() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
   }, []);
 
-  // ESC key handler for all modals
+  // ESC key handler for all modals + mobile drawer
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -181,11 +181,12 @@ export default function Dashboard() {
         else if (outreachDraft) setOutreachDraft(null);
         else if (showSettings) setShowSettings(false);
         else if (showDiscoveryModal && !isDiscovering) setShowDiscoveryModal(false);
+        else if (isSidebarOpen) setIsSidebarOpen(false);
       }
     };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
-  }, [campaign, outreachDraft, showSettings, showDiscoveryModal, isDiscovering]);
+  }, [campaign, outreachDraft, showSettings, showDiscoveryModal, isDiscovering, isSidebarOpen]);
 
   const fetchLeads = useCallback(async () => {
     try {

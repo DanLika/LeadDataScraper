@@ -34,6 +34,11 @@ export default function InsightsPage() {
   const [fetchingInsights, setFetchingInsights] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && isSidebarOpen) setIsSidebarOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isSidebarOpen]);
   const COLORS = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--error)', 'var(--secondary)'];
 
   const fetchLeads = useCallback(async () => {

@@ -51,6 +51,11 @@ export default function CampaignsPage() {
   const [newSegment, setNewSegment] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && isSidebarOpen) setIsSidebarOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isSidebarOpen]);
 
   const fetchCampaigns = useCallback(async () => {
     try {
