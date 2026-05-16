@@ -145,7 +145,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
   }
 
   return (
-    <div style={{
+    <div role="region" aria-label="AI assistant" style={{
       position: 'fixed',
       bottom: isMobile ? '1rem' : '2rem',
       left: isMobile ? '1rem' : (isTablet ? '100px' : (sidebarCollapsed ? '100px' : '300px')),
@@ -300,11 +300,13 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
             }} onClick={() => !isLoading && messages.length > 0 && setMessages([])}>
              {isLoading ? <Loader2 className="animate-spin" size={20} color="white" /> : <Shield size={20} color="white" />}
           </button>
-          <input 
-            type="text" 
+          <input
+            type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask AI to audit, find emails, or filter leads..." 
+            placeholder="Ask AI to audit, find emails, or filter leads..."
+            aria-label="Ask the AI assistant"
+            aria-busy={isLoading}
             style={{ flex: 1, background: 'none', border: 'none', color: 'var(--text-white)', outline: 'none', fontSize: '1.1rem' }}
             disabled={isLoading}
           />
@@ -312,9 +314,10 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
             <kbd style={{ background: 'var(--border-muted)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               ENTER
             </kbd>
-            <button 
+            <button
               type="submit"
               disabled={!query.trim() || isLoading}
+              aria-busy={isLoading}
               aria-label="Send message"
               style={{
                 background: 'none',
@@ -329,7 +332,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
                 justifyContent: 'center'
               }}
             >
-              <Send size={20} />
+              <Send size={20} aria-hidden="true" />
             </button>
           </div>
         </form>
