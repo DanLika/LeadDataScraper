@@ -12,6 +12,7 @@ import Link from 'next/link';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
+import { useEscape } from '@/utils/useEscape';
 
 interface Stats {
   total_leads: number;
@@ -34,11 +35,13 @@ export default function InsightsPage() {
   const [fetchingInsights, setFetchingInsights] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && isSidebarOpen) setIsSidebarOpen(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [isSidebarOpen]);
+  useEscape(() => {
+    setIsSidebarOpen(false);
+    // Return focus to the burger so the keyboard user keeps their place.
+    requestAnimationFrame(() => {
+      (document.querySelector('button[aria-label="Open menu"]') as HTMLElement | null)?.focus();
+    });
+  }, isSidebarOpen);
   const COLORS = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--error)', 'var(--secondary)'];
 
   const fetchLeads = useCallback(async () => {

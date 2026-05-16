@@ -181,7 +181,12 @@ export default function Dashboard() {
         else if (outreachDraft) setOutreachDraft(null);
         else if (showSettings) setShowSettings(false);
         else if (showDiscoveryModal && !isDiscovering) setShowDiscoveryModal(false);
-        else if (isSidebarOpen) setIsSidebarOpen(false);
+        else if (isSidebarOpen) {
+          setIsSidebarOpen(false);
+          requestAnimationFrame(() => {
+            (document.querySelector('button[aria-label="Open menu"]') as HTMLElement | null)?.focus();
+          });
+        }
       }
     };
     document.addEventListener('keydown', handleEsc);

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
+import { useEscape } from '@/utils/useEscape';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
 import { Linkedin } from '../components/BrandIcons';
@@ -54,11 +55,12 @@ export default function CampaignsPage() {
   const [newSegment, setNewSegment] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && isSidebarOpen) setIsSidebarOpen(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [isSidebarOpen]);
+  useEscape(() => {
+    setIsSidebarOpen(false);
+    requestAnimationFrame(() => {
+      (document.querySelector('button[aria-label="Open menu"]') as HTMLElement | null)?.focus();
+    });
+  }, isSidebarOpen);
 
   const fetchCampaigns = useCallback(async () => {
     try {
