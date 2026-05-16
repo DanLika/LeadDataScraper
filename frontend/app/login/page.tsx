@@ -1,50 +1,51 @@
 'use client'
 
-import { Suspense, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
+import { Suspense, useActionState } from 'react'
+import { useFormStatus } from 'react-dom'
+import { useSearchParams } from 'next/navigation'
+import { signInAction, type LoginActionState } from './actions'
 
-// Only accept same-origin relative paths. Allowlist-shaped: must match a
-// strict character set so WHATWG URL parser cannot smuggle the redirect to
-// another origin via control chars (\t / \n / \r get stripped by the parser
-// and would otherwise let `/\t//evil.com` resolve to https://evil.com/),
-// embedded backslashes (normalised to `/` for special-scheme URLs), or
-// protocol-relative `//evil.com`. Prevents open-redirect → phishing-assist
-// on the auth flow.
-function sanitizeNext(raw: string | null): string {
-  if (!raw) return '/'
-  if (raw.length > 512) return '/'
-  // Only printable ASCII path-safe chars. Explicitly excludes \t \n \r and
-  // every other control byte, as well as `\` which WHATWG normalises to `/`.
-  if (!/^\/[A-Za-z0-9._~\-/?#=&%+@:!$'()*,;]*$/.test(raw)) return '/'
-  if (raw.startsWith('//')) return '/'
-  return raw
+/**
+ * The page is now a thin <form action={signInAction}> wrapper. signInWithPassword
+ * runs server-side in actions.ts so the Supabase session cookie is set with
+ * HttpOnly via the server.ts floor — JS can no longer read the access token
+ * via document.cookie. Path-sanitisation lives in actions.ts too.
+ *
+ * useFormStatus drives the busy state of the submit button so we keep the
+ * aria-busy semantics from the previous client-component version.
+ */
+
+function SubmitButton() {
+  const { pending } = useFormStatus()
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-busy={pending}
+      style={{
+        minHeight: 44,
+        padding: '10px 14px',
+        borderRadius: 8,
+        border: 'none',
+        background: 'hsl(234, 89%, 64%)',
+        color: '#fff',
+        fontWeight: 600,
+        cursor: pending ? 'progress' : 'pointer',
+        opacity: pending ? 0.7 : 1,
+      }}
+    >
+      {pending ? 'Signing in…' : 'Sign in'}
+    </button>
+  )
 }
 
 function LoginForm() {
-  const router = useRouter()
   const params = useSearchParams()
-  const next = sanitizeNext(params.get('next'))
-
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  async function onSubmit(e: { preventDefault: () => void }) {
-    e.preventDefault()
-    setError(null)
-    setBusy(true)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    setBusy(false)
-    if (error) {
-      setError(error.message)
-      return
-    }
-    router.replace(next)
-    router.refresh()
-  }
+  const nextRaw = params.get('next') ?? '/'
+  const [state, formAction] = useActionState<LoginActionState, FormData>(
+    signInAction,
+    undefined,
+  )
 
   return (
     <main
@@ -58,7 +59,7 @@ function LoginForm() {
       }}
     >
       <form
-        onSubmit={onSubmit}
+        action={formAction}
         aria-labelledby="login-title"
         style={{
           width: 'min(380px, 100%)',
@@ -73,14 +74,14 @@ function LoginForm() {
         <h1 id="login-title" style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>
           Sign in
         </h1>
+        <input type="hidden" name="next" value={nextRaw} />
         <label style={{ display: 'grid', gap: 6, fontSize: 14 }}>
           <span>Email</span>
           <input
             type="email"
+            name="email"
             autoComplete="email"
             required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
             style={{
               padding: '10px 12px',
               minHeight: 44,
@@ -95,10 +96,9 @@ function LoginForm() {
           <span>Password</span>
           <input
             type="password"
+            name="password"
             autoComplete="current-password"
             required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
             style={{
               padding: '10px 12px',
               minHeight: 44,
@@ -109,29 +109,12 @@ function LoginForm() {
             }}
           />
         </label>
-        {error && (
+        {state?.error && (
           <p role="alert" style={{ margin: 0, color: 'var(--error, #ef4444)', fontSize: 13 }}>
-            {error}
+            {state.error}
           </p>
         )}
-        <button
-          type="submit"
-          disabled={busy}
-          aria-busy={busy}
-          style={{
-            minHeight: 44,
-            padding: '10px 14px',
-            borderRadius: 8,
-            border: 'none',
-            background: 'hsl(234, 89%, 64%)',
-            color: '#fff',
-            fontWeight: 600,
-            cursor: busy ? 'progress' : 'pointer',
-            opacity: busy ? 0.7 : 1,
-          }}
-        >
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
+        <SubmitButton />
         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted, #888896)' }}>
           Accounts are provisioned in Supabase. Ask the operator if you need access.
         </p>
