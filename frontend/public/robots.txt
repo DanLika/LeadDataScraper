@@ -1,0 +1,3 @@
+# LeadScout is an internal admin tool — never index any path.
+User-agent: *
+Disallow: /
