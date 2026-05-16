@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useFocusTrap } from '@/utils/useFocusTrap';
 import {
   Mail, Play, Pause, Download, Plus, ArrowLeft,
   Loader2, Send, Users, CheckCircle,
@@ -44,6 +45,8 @@ export default function CampaignsPage() {
   const [generating, setGenerating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [previewMessage, setPreviewMessage] = useState<CampaignMessage | null>(null);
+  const previewModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(previewModalRef, !!previewMessage);
 
   // Form state
   const [newName, setNewName] = useState('');
@@ -371,17 +374,18 @@ export default function CampaignsPage() {
         {/* Message Preview Modal */}
         {previewMessage && (
           <div
+            ref={previewModalRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="preview-modal-title"
             tabIndex={-1}
             className="modal-backdrop"
-            onClick={() => setPreviewMessage(null)}
+            onClick={(e) => { if (e.target === e.currentTarget) setPreviewMessage(null); }}
             onKeyDown={(e) => { if (e.key === 'Escape') setPreviewMessage(null); }}
           >
             <div className="card" style={{ maxWidth: '600px', width: '90%', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 id="preview-modal-title" style={{ margin: 0 }}>Message Preview</h3>
+                <h2 id="preview-modal-title" style={{ margin: 0 }}>Message Preview</h2>
                 <button onClick={() => setPreviewMessage(null)} aria-label="Close preview" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <X size={20} />
                 </button>
