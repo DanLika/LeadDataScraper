@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Mail, Linkedin, Play, Pause, Download, Plus, ArrowLeft,
+  Mail, Play, Pause, Download, Plus, ArrowLeft,
   Loader2, Send, Users, CheckCircle,
   Eye, X, Shield, Menu
 } from 'lucide-react';
@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
+import { Linkedin } from '../components/BrandIcons';
 
 interface Campaign {
   id: string;

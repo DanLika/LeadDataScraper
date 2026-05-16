@@ -8,9 +8,10 @@ import {
   Download, FileDown, Crosshair,
   Users, Loader2, Play, RefreshCw, X, Zap,
   Copy, Check, Menu,
-  Facebook, Instagram, Linkedin, Music, Pin
+  Music, Pin
 } from 'lucide-react';
 import AIChat from './components/AIChat';
+import { Facebook, Instagram, Linkedin } from './components/BrandIcons';
 import Sidebar from './components/Sidebar';
 import HealthChart from './components/HealthChart';
 import StatsCards from './components/StatsCards';
