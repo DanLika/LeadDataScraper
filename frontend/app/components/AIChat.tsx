@@ -283,7 +283,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
         )}
 
         {/* Input Bar */}
-        <form onSubmit={handleSubmit} style={{ 
+        <form onSubmit={handleSubmit} aria-busy={isLoading} aria-label="Ask the AI assistant" style={{
           padding: '1rem 2rem',
           display: 'flex',
           alignItems: 'center',
@@ -313,7 +313,6 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Ask AI to audit, find emails, or filter leads..."
             aria-label="Ask the AI assistant"
-            aria-busy={isLoading}
             style={{ flex: 1, background: 'none', border: 'none', color: 'var(--text-white)', outline: 'none', fontSize: '1.1rem' }}
             disabled={isLoading}
           />
