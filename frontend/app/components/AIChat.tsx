@@ -248,21 +248,24 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
                     <div style={{ fontSize: '0.75rem', color: 'var(--primary-light)', fontWeight: 600, textTransform: 'uppercase' }}>Proposed Plan</div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Task: <strong>{msg.plan.task}</strong></div>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button 
-                        className="btn-primary" 
+                      <button
+                        className="btn-primary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
                         onClick={() => msg.plan && handleExecute(msg.plan, idx)}
+                        disabled={isLoading}
+                        aria-busy={isLoading}
                       >
-                        <Play size={12} /> Confirm & Execute
+                        <Play size={12} aria-hidden="true" /> Confirm & Execute
                       </button>
-                      <button 
-                        className="btn-secondary" 
+                      <button
+                        className="btn-secondary"
                         style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
                         onClick={() => {
                           setMessages(messages.map((msg, i) =>
                             i === idx ? { ...msg, plan: undefined } : msg
                           ));
                         }}
+                        disabled={isLoading}
                       >
                         Dismiss
                       </button>
