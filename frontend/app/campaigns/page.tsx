@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
-import { useEscape } from '@/utils/useEscape';
+import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
 import { Linkedin } from '../components/BrandIcons';
@@ -57,9 +57,7 @@ export default function CampaignsPage() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   useEscape(() => {
     setIsSidebarOpen(false);
-    requestAnimationFrame(() => {
-      (document.querySelector('button[aria-label="Open menu"]') as HTMLElement | null)?.focus();
-    });
+    restoreFocus(BURGER_SELECTOR);
   }, isSidebarOpen);
 
   const fetchCampaigns = useCallback(async () => {

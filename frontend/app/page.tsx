@@ -2,6 +2,7 @@
 
 import { useCallback, useState, useEffect, Fragment, useMemo, useRef } from 'react';
 import { useFocusTrap } from '@/utils/useFocusTrap';
+import { restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
 import {
   Upload, Globe, Mail, Phone, Shield,
   Settings, AlertCircle, AlertTriangle,
@@ -183,9 +184,7 @@ export default function Dashboard() {
         else if (showDiscoveryModal && !isDiscovering) setShowDiscoveryModal(false);
         else if (isSidebarOpen) {
           setIsSidebarOpen(false);
-          requestAnimationFrame(() => {
-            (document.querySelector('button[aria-label="Open menu"]') as HTMLElement | null)?.focus();
-          });
+          restoreFocus(BURGER_SELECTOR);
         }
       }
     };

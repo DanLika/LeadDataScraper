@@ -283,7 +283,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
         )}
 
         {/* Input Bar */}
-        <form onSubmit={handleSubmit} aria-busy={isLoading} aria-label="Ask the AI assistant" style={{
+        <form onSubmit={handleSubmit} aria-busy={isLoading} style={{
           padding: '1rem 2rem',
           display: 'flex',
           alignItems: 'center',

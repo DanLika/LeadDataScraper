@@ -12,7 +12,7 @@ import Link from 'next/link';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
-import { useEscape } from '@/utils/useEscape';
+import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
 
 interface Stats {
   total_leads: number;
@@ -37,10 +37,7 @@ export default function InsightsPage() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   useEscape(() => {
     setIsSidebarOpen(false);
-    // Return focus to the burger so the keyboard user keeps their place.
-    requestAnimationFrame(() => {
-      (document.querySelector('button[aria-label="Open menu"]') as HTMLElement | null)?.focus();
-    });
+    restoreFocus(BURGER_SELECTOR);
   }, isSidebarOpen);
   const COLORS = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--error)', 'var(--secondary)'];
 
