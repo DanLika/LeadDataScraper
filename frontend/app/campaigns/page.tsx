@@ -383,7 +383,7 @@ export default function CampaignsPage() {
             onClick={(e) => { if (e.target === e.currentTarget) setPreviewMessage(null); }}
             onKeyDown={(e) => { if (e.key === 'Escape') setPreviewMessage(null); }}
           >
-            <div className="card" style={{ maxWidth: '600px', width: '90%', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div className="card" style={{ maxWidth: '600px', width: '90%', maxHeight: '80vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h2 id="preview-modal-title" style={{ margin: 0 }}>Message Preview</h2>
                 <button onClick={() => setPreviewMessage(null)} aria-label="Close preview" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
