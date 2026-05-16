@@ -1,0 +1,5 @@
+# RFC 9116 security disclosure policy for LeadScout.
+# Report vulnerabilities to the contact below before public disclosure.
+Contact: mailto:duskolicanin1234@gmail.com
+Expires: 2027-05-16T00:00:00Z
+Preferred-Languages: en, bs
