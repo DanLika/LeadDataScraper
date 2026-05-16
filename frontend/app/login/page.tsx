@@ -117,6 +117,7 @@ function LoginForm() {
         <button
           type="submit"
           disabled={busy}
+          aria-busy={busy}
           style={{
             minHeight: 44,
             padding: '10px 14px',
