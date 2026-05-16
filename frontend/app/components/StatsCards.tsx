@@ -41,7 +41,7 @@ export default function StatsCards({ leads }: StatsCardsProps) {
            <AlertTriangle size={18} />
         </div>
         <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>
-          {leads.filter((l) => (!!l.audit_results && l.audit_results.score < 50) || l.high_risk_flag).length}
+          {leads.filter((l) => (l.audit_results?.score ?? 100) < 50 || l.high_risk_flag || l.audit_results?.high_risk_flag).length}
         </div>
       </div>
       <div className="card">
