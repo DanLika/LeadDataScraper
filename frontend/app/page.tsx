@@ -983,7 +983,7 @@ export default function Dashboard() {
 
       {/* Outreach Draft Modal */}
       {outreachDraft && (
-        <div ref={outreachModalRef} role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" className="modal-backdrop">
+        <div ref={outreachModalRef} role="dialog" aria-modal="true" aria-labelledby="outreach-modal-title" className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setOutreachDraft(null); }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(600px, 95vw)', padding: 'clamp(1rem, 5vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setOutreachDraft(null)}
@@ -1079,7 +1079,7 @@ export default function Dashboard() {
 
       {/* Discovery Modal */}
       {showDiscoveryModal && (
-        <div ref={discoveryModalRef} role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" className="modal-backdrop">
+        <div ref={discoveryModalRef} role="dialog" aria-modal="true" aria-labelledby="discovery-modal-title" className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget && !isDiscovering) setShowDiscoveryModal(false); }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(500px, 95vw)', padding: 'clamp(1.25rem, 4vw, 2rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setShowDiscoveryModal(false)}
@@ -1199,7 +1199,7 @@ export default function Dashboard() {
       )}
       {/* Settings Modal */}
       {showSettings && (
-        <div ref={settingsModalRef} role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
+        <div ref={settingsModalRef} role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" className="modal-backdrop" style={{ padding: '2rem' }} onClick={(e) => { if (e.target === e.currentTarget) setShowSettings(false); }}>
           <div className="card" style={{ width: '100%', maxWidth: '500px', padding: 'clamp(1.25rem, 4vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)' }}>
             <button
               onClick={() => setShowSettings(false)}
@@ -1298,7 +1298,7 @@ export default function Dashboard() {
       )}
       {/* Campaign Strategy Modal */}
       {campaign && (
-        <div ref={campaignModalRef} role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" className="modal-backdrop" style={{ padding: '2rem' }}>
+        <div ref={campaignModalRef} role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" className="modal-backdrop" style={{ padding: '2rem' }} onClick={(e) => { if (e.target === e.currentTarget) setCampaign(null); }}>
           <div className="card" style={{ width: '100%', maxWidth: 'min(900px, 95vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--primary)', borderRadius: '24px' }}>
              <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-subtle)' }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
