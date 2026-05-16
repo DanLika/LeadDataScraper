@@ -1033,7 +1033,7 @@ export default function Dashboard() {
               <div style={{ marginTop: '0', padding: '1.5rem', background: 'var(--linkedin-tint)', borderRadius: '12px', border: '1px solid rgba(10, 102, 194, 0.2)', marginBottom: '2rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--linkedin)' }}>
                   <Linkedin size={18} />
-                  <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>LinkedIn Connection Request</h4>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>LinkedIn Connection Request</h3>
                 </div>
                 <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0 }}>
                   {linkedinDraft}
