@@ -239,6 +239,7 @@ export default function Sidebar({
                     onClick={fetchInsights}
                     className={`refresh-btn ${fetchingInsights ? 'animate-spin' : ''}`}
                     disabled={fetchingInsights}
+                    aria-busy={fetchingInsights}
                     aria-label="Refresh AI insights"
                   >
                     <RefreshCw size={14} aria-hidden="true" />
