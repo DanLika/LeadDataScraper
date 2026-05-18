@@ -53,10 +53,17 @@ def export_leads():
     leads = response.data if hasattr(response, 'data') else []
 
     if not leads:
-        print("⚠️ No leads found in database.")
-        return
-
-    df = pd.DataFrame(leads)
+        print("⚠️ No leads in database — writing empty header-only export.")
+        # Still create a timestamped empty CSV so /export/download doesn't
+        # leak stale rows from a previous, larger export. Header schema
+        # mirrors leads table columns.
+        empty_cols = [
+            "unique_key", "name", "company_name", "website", "email",
+            "audit_status", "audit_results", "created_at",
+        ]
+        df = pd.DataFrame(columns=empty_cols)
+    else:
+        df = pd.DataFrame(leads)
     
     # Create exports directory if it doesn't exist
     export_dir = "exports"

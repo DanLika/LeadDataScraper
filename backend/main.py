@@ -153,6 +153,33 @@ class ExecutePlanRequest(BaseModel):
 
 load_dotenv()
 
+
+def _format_insights_response(result: dict) -> Optional[str]:
+    """Render a GET_INSIGHTS result dict into a plain-text chat reply.
+
+    GET_INSIGHTS returns `{summary, insights[], top_priorities[]}` — none of
+    which match the `answer`/`message` fields the chat UI auto-extracts. This
+    helper flattens it into a single paragraph so the assistant doesn't fall
+    back to the generic "couldn't generate" message.
+    """
+    insights = result.get("insights") or []
+    priorities = result.get("top_priorities") or []
+    if not insights and not priorities:
+        return None
+    parts = []
+    if result.get("summary"):
+        parts.append(str(result["summary"]))
+    for i, ins in enumerate(insights, 1):
+        parts.append(f"{i}. {ins}")
+    if priorities:
+        parts.append("Top priorities:")
+        for p in priorities[:5]:
+            name = p.get("name", "Unknown") if isinstance(p, dict) else str(p)
+            reason = p.get("reason", "") if isinstance(p, dict) else ""
+            parts.append(f"- {name}" + (f": {reason}" if reason else ""))
+    return "\n\n".join(parts) if parts else None
+
+
 def _assert_single_tenant_if_enforced() -> None:
     """Optional single-tenancy invariant.
 
@@ -489,12 +516,29 @@ async def ask_ai(request: Request, payload: AskRequest, background_tasks: Backgr
         # 1. Route the instruction to a task
         plan = await router.route_instruction(prompt)
 
-        # 2. For informational or simple tasks, execute immediately
-        if plan.get("task") in ["DATABASE_QUERY", "STATUS_CHECK"]:
+        # 2. For informational or read-only tasks, execute immediately and
+        # surface the result as plain text. GET_INSIGHTS is included because
+        # analytical questions ("which industry has the worst SEO?") should
+        # return an answer, not a "Confirm task" plan card.
+        if plan.get("task") in ["DATABASE_QUERY", "STATUS_CHECK", "GET_INSIGHTS"]:
             result = await router.execute_task(plan)
-            return {"response": result.get("answer") or result.get("message") or "Query executed."}
+            text = (
+                result.get("answer")
+                or result.get("message")
+                or _format_insights_response(result)
+                or result.get("summary")
+                or "I couldn't generate an answer — try rephrasing your question."
+            )
+            return {"response": text}
 
-        # 3. For process-heavy tasks, return the plan for UI confirmation OR just start it
+        # 3. Small-talk / unmapped prompts: the router returns task=UNKNOWN with
+        # the model's free-text reply in `raw`. Return that as plain text so the
+        # UI doesn't show a meaningless "Confirm task: UNKNOWN" plan card.
+        if plan.get("task") == "UNKNOWN":
+            text = plan.get("raw") or "I'm not sure what you'd like me to do. Try asking about your leads, scores, or audits."
+            return {"response": text}
+
+        # 4. Process-heavy tasks: return the plan for UI confirmation.
         return {"plan": plan, "response": "I've analyzed your request. Should I proceed with the task: " + plan.get("task", "Unknown") + "?"}
     except Exception as e:
         logger.error("Error in /ask: %s", e, exc_info=True)
