@@ -48,6 +48,16 @@ services:
       # first hop so the backend rate limiter buckets per user, not per proxy.
       - key: TRUSTED_CLIENT_IP_HEADER
         value: x-forwarded-for
+      # Origin allowlist — read by /api/proxy and /api/auth/signout to gate
+      # state-changing POST/PUT/DELETE. Must include the prod frontend URL
+      # (comma-separated for multiple). Unset → defaults to localhost only
+      # and every prod write fails closed with 403.
+      - key: ALLOWED_ORIGINS
+        sync: false
+      # Server-side only — must match backend ADMIN_TOKEN. Proxy injects on
+      # /leads/clear path. Unset → "Clear All Leads" UI 403s.
+      - key: ADMIN_TOKEN
+        sync: false
       # Public — Supabase auth/publishable key. RLS prevents data access.
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false

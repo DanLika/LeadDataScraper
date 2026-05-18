@@ -12,12 +12,10 @@ logger = get_logger(__name__)
 def normalize_df_with_ai(df: pd.DataFrame, api_key: str = None) -> pd.DataFrame:
     """
     Convenience wrapper: use GeminiMapper to map messy CSV columns to standard names.
-    If api_key is provided, it is set in the environment for GeminiMapper to pick up.
+    Pass api_key to override env-based config. Never mutates os.environ — multi-worker
+    safe and avoids leaking the override into other request handlers.
     """
-    if api_key:
-        os.environ["GEMINI_API_KEY"] = api_key
-
-    mapper = GeminiMapper()
+    mapper = GeminiMapper(api_key=api_key) if api_key else GeminiMapper()
     mapping = mapper.get_column_mapping(df.columns.tolist())
 
     if mapping:
@@ -30,8 +28,8 @@ def normalize_df_with_ai(df: pd.DataFrame, api_key: str = None) -> pd.DataFrame:
 
 
 class GeminiMapper:
-    def __init__(self):
-        self.api_key = os.environ.get("GEMINI_API_KEY")
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
         else:

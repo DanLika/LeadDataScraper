@@ -95,6 +95,12 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
     it on destructive paths),
     `ALLOWED_ORIGINS` (used by `/api/proxy` + `/api/auth/signout` Origin
     gates), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  - **Render deploy parity**: the frontend service in `render.yaml` MUST
+    declare `ALLOWED_ORIGINS` and `ADMIN_TOKEN` as envVars. Without them
+    the Origin gate defaults to `localhost:3000` (every prod state-change
+    fail-closed 403s) and the "Clear All Leads" button can't reach the
+    backend. Both are `sync: false` — set the actual values in the Render
+    dashboard, never commit them.
 - Rate limiting: AI and destructive endpoints capped via `slowapi`. See
   `backend/main.py` decorators. `headers_enabled=False` — `X-RateLimit-*` not
   emitted (slowapi requires `response: Response` param to inject; we don't
@@ -149,6 +155,13 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   uploads and Google-Maps scrapes; both are attacker-controllable. Never
   splice lead fields directly into prompt body text (e.g. inside an
   "Example: ..." line — use a placeholder like `[COMPANY NAME]` instead).
+- AI-client constructors (`GeminiMapper`, `AgenticRouter`, `LeadHunter`)
+  read `GEMINI_API_KEY` from env in `__init__`. `GeminiMapper.__init__`
+  also accepts an optional `api_key` arg for callers that need to override.
+  **Never mutate `os.environ["GEMINI_API_KEY"]` at request time** — the
+  app runs under multi-worker uvicorn, and an env write in one worker
+  races other in-flight requests and leaks the override into unrelated
+  handlers. Pass the key into the constructor instead.
 - Supabase RLS is enabled on `leads`, `campaigns`, `campaign_messages`,
   `orchestration_jobs`. Anon + authenticated roles are revoked. All reads/writes
   go through the backend, which uses `service_role` to bypass RLS server-side.
