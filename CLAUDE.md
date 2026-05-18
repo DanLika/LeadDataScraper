@@ -75,13 +75,24 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   matching defense.
 - Destructive endpoint `DELETE /leads/clear` additionally requires
   `X-Admin-Token` matching `ADMIN_TOKEN` env (defense-in-depth even if API key leaks).
+  The Next.js proxy injects `X-Admin-Token` from its own server-side env **only
+  for the `leads/clear` path** (`frontend/app/api/proxy/[...path]/route.ts`).
+  Clients cannot set this header themselves; the in-browser auth gate (Supabase
+  session) is the only thing that lets a user reach the proxy at all. Setting
+  `ADMIN_TOKEN` in both backend `.env` AND frontend `.env.local` (must match)
+  is required — without it the UI's "Clear All Leads" button hits 403.
 - Required env vars (see `.env.example`):
   - Backend `.env`: `API_SECRET_KEY`, `ADMIN_TOKEN`, `SUPABASE_URL`,
     `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `ALLOWED_ORIGINS`
   - Backend (optional): `OPERATOR_EMAIL` — when set, enforces the
     single-tenancy assertion described above.
+  - Backend (optional): `OPERATOR_NAME` — appended to outreach drafts
+    as the signature ("Best,\nJane Smith"). Unset → drafts sign with
+    "Best,\nYour Name" placeholder, prompting the operator to set it.
   - Frontend `.env.local`: `BACKEND_URL` (server-side, points at FastAPI),
     `API_SECRET_KEY` (server-side, NOT `NEXT_PUBLIC_*`),
+    `ADMIN_TOKEN` (server-side, must match backend's value — proxy injects
+    it on destructive paths),
     `ALLOWED_ORIGINS` (used by `/api/proxy` + `/api/auth/signout` Origin
     gates), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - Rate limiting: AI and destructive endpoints capped via `slowapi`. See
@@ -105,6 +116,12 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   HSTS (2y + preload), `X-Frame-Options: DENY`, `X-Content-Type-Options`,
   `Referrer-Policy`, `Permissions-Policy` (camera/mic/geo off).
   `productionBrowserSourceMaps: false`.
+- HTML page routes (`/`, `/login`, `/insights`, `/campaigns`) additionally
+  get `Cache-Control: private, no-store, max-age=0` + `Vary: Cookie` via the
+  `pageNoCacheHeaders` block in `next.config.ts`. This opts the authed pages
+  out of bfcache so hitting Back after sign-out doesn't render the cached
+  authed shell. `_next/static/*` chunks are excluded (immutable content-hashed
+  assets — must stay cacheable for perf).
 - `/upload` streams the request body and aborts at 50 MB (`MAX_UPLOAD_BYTES`)
   with a 413 — no full-buffer DoS.
 - Outbound HTTP from `seo_audit.py` and `enrichment_engine.py` runs through
@@ -182,6 +199,79 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   frontend, and Semgrep OWASP/Python/TypeScript/React rulesets. Runs on
   push, PR, and daily cron (catches newly-disclosed CVEs in already-pinned
   deps without a code change).
+
+## AI Router invariants (`src/core/agentic_router.py`)
+- `route_instruction()` attaches a `lead_index` (unique_key + name +
+  company_name, up to 200 rows) to the Gemini contents so the model can
+  resolve "Audit Alpha Tech" → `seo_audit(unique_key=...)`. Without this
+  context the model bails with "data insufficient" for every per-lead
+  action prompt.
+- `_execute_database_query()` selects `unique_key, name, company_name,
+  audit_status, seo_score, lead_source, email, phone, website,
+  high_risk_flag, segment` — query-answer prompts can compute "high risk"
+  and other categorisations from this set without re-querying the DB.
+- The query prompt embeds **definitions** ("high risk" = `high_risk_flag`
+  true OR `seo_score < 50` OR `audit_status == 'Failed'`; "healthy" =
+  Completed + score ≥ 70 + not high-risk; etc.) so the AI's answers match
+  the UI's own filter semantics.
+- `/ask` auto-executes `DATABASE_QUERY`, `STATUS_CHECK`, and `GET_INSIGHTS`
+  (read-only tasks) and surfaces `result.answer / message /
+  formatted-insights / summary` as the chat reply. `task == "UNKNOWN"`
+  (small-talk / unmapped) surfaces `plan.raw` (Gemini's free-text reply)
+  instead of showing a confusing "Confirm task: UNKNOWN" plan card.
+- `/execute` rejects extra fields (`extra='forbid'`). The plan returned by
+  `/ask` includes a `reasoning` field; the frontend strips it before POST
+  (`handleExecutePlan` builds `{task, params}` only) — without the strip
+  every Confirm & Execute click 422s.
+- `_get_status_summary()` aggregates audit_status counts into a one-line
+  natural-language summary (`"401 leads total — 370 Completed, 30 Failed,
+  1 Pending."`) and returns it as both `answer` and `summary`, so /ask
+  surfaces it without falling back to `"Query executed."`.
+- `_generate_outreach_draft()` returns
+  `{draft, subject, lead_name, lead_email, operator_name}`. The prompt
+  asks Gemini for a "Subject:" first line; the handler parses it out
+  (`re.match("^Subject:..."`) before returning. Operator name comes from
+  `OPERATOR_NAME` env, defaulting to "Your Name". The frontend modal
+  renders subject + body separately and offers an Open-in-Gmail deep-link
+  with both prefilled.
+
+## Cross-page navigation contract (`frontend/app/page.tsx` useEffect on mount)
+- Sidebar/Insights/Campaigns all share the same `<Sidebar>` component, but
+  the dashboard owns the state for modals (`showSettings`,
+  `showDiscoveryModal`) and view filter (`view`, `searchTerm`). When the
+  user clicks Settings/Deep Discovery/Audited/High Risk/a prospect from
+  Insights or Campaigns, those pages can't toggle that state directly.
+  Instead they navigate to `/` with query params and the dashboard
+  consumes-then-strips them:
+  - `/?openSettings=1` → opens Settings modal
+  - `/?openDiscovery=1` → opens Discovery modal
+  - `/?view=audited|high-risk` → toggles the view-filter
+  - `/?search=<term>` → pre-fills the search input
+- After consuming, `router.replace('/', { scroll: false })` clears the
+  query so a refresh doesn't re-trigger. Setters passed to Sidebar on
+  non-dashboard pages must respect the `(open)` argument: `(open) => {
+  if (open) router.push('/?openSettings=1') }` — otherwise Sidebar's
+  `setShowDiscoveryModal(false)` (called when the user clicks Settings)
+  navigates to `/?openDiscovery=1` and the wrong modal opens.
+
+## Frontend handler robustness pattern
+Every state-changing handler that hits `/api/proxy/*` MUST:
+1. Check `res.ok`; on failure surface
+   `data.detail || data.error || \`<Action> failed (HTTP ${status})\`` via
+   `showToast(..., 'error')` rather than continuing to update local state.
+2. Wrap fetch in try/catch and on network failure show
+   `'<Action> failed — backend unreachable.'` toast.
+3. Show `aria-busy` + `disabled` on the trigger button during the in-flight
+   request and reset in `finally`. Without this, rapid clicks fire
+   duplicate jobs and Gemini calls (cost real money).
+4. For destructive operations (`processAll`, `startMassivePipeline`,
+   `handleDeepHuntAll`, `handleClearLeads`), gate with `confirm()` that
+   names the count + a one-line cost warning.
+
+Pydantic 422 responses come as
+`{detail: [{type, loc, msg, input, ctx}]}` — `AIChat.handleSubmit` joins
+`detail[].msg` so the user sees "String should have at most 4000
+characters" instead of a generic placeholder.
 
 ## Frontend Architecture
 - `frontend/app/page.tsx` — Main dashboard (lead inventory, modals, orchestration)
