@@ -8,6 +8,7 @@ import {
   Eye, X, Shield, Menu
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
 import Sidebar from '../components/Sidebar';
@@ -36,6 +37,7 @@ interface CampaignMessage {
 }
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [messages, setMessages] = useState<CampaignMessage[]>([]);
@@ -44,6 +46,7 @@ export default function CampaignsPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [previewMessage, setPreviewMessage] = useState<CampaignMessage | null>(null);
   const previewModalRef = useRef<HTMLDivElement>(null);
@@ -117,10 +120,18 @@ export default function CampaignsPage() {
   const handleGenerate = async (campaignId: string) => {
     setGenerating(true);
     try {
-      await apiFetch(`${API_BASE_URL}/campaigns/${campaignId}/generate`, { method: 'POST' });
-      await fetchCampaignDetails(campaignId);
+      const res = await apiFetch(`${API_BASE_URL}/campaigns/${campaignId}/generate`, { method: 'POST' });
+      const data = await res.json().catch(() => null);
+      await Promise.all([fetchCampaignDetails(campaignId), fetchCampaigns()]);
+      const count = data?.lead_count ?? data?.generated ?? 0;
+      setStatusMessage(count > 0
+        ? `Generated ${count} message${count === 1 ? '' : 's'} ✓`
+        : 'Generation complete — no eligible leads matched the filter.');
+      setTimeout(() => setStatusMessage(null), 4000);
     } catch (err) {
       console.error('Failed to generate messages:', err);
+      setStatusMessage('Failed to generate messages — see console.');
+      setTimeout(() => setStatusMessage(null), 4000);
     } finally {
       setGenerating(false);
     }
@@ -128,18 +139,56 @@ export default function CampaignsPage() {
 
   const handleStartPause = async (campaignId: string, action: 'start' | 'pause') => {
     try {
-      await apiFetch(`${API_BASE_URL}/campaigns/${campaignId}/${action}`, { method: 'POST' });
+      const resp = await apiFetch(`${API_BASE_URL}/campaigns/${campaignId}/${action}`, { method: 'POST' });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        setStatusMessage(data.error || data.detail || `${action} failed (HTTP ${resp.status})`);
+        setTimeout(() => setStatusMessage(null), 4000);
+        return;
+      }
       await fetchCampaigns();
       if (selectedCampaign?.id === campaignId) {
         await fetchCampaignDetails(campaignId);
       }
+      setStatusMessage(action === 'start' ? 'Campaign started ✓' : 'Campaign paused');
+      setTimeout(() => setStatusMessage(null), 3000);
     } catch (err) {
       console.error('Failed to %s campaign:', action, err);
+      setStatusMessage(`${action} failed — backend unreachable.`);
+      setTimeout(() => setStatusMessage(null), 4000);
     }
   };
 
   const handleExport = async (campaignId: string) => {
-    window.open(`${API_BASE_URL}/campaigns/${campaignId}/export`, '_blank');
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/campaigns/${campaignId}/export`, { cache: 'no-store' });
+      const ctype = res.headers.get('content-type') || '';
+      if (!res.ok || !ctype.includes('csv')) {
+        let detail = 'Export failed.';
+        if (ctype.includes('json')) {
+          const body = await res.json().catch(() => null);
+          detail = body?.error || body?.detail || detail;
+        }
+        setStatusMessage(detail);
+        setTimeout(() => setStatusMessage(null), 4000);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `campaign-${campaignId.slice(0,8)}-${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setStatusMessage('Export downloaded.');
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (err) {
+      console.error('Export failed:', err);
+      setStatusMessage('Export failed — try again.');
+      setTimeout(() => setStatusMessage(null), 4000);
+    }
   };
 
   const statusColor = (status: string) => {
@@ -165,11 +214,11 @@ export default function CampaignsPage() {
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <Sidebar
         view="all"
-        setView={() => {}}
+        setView={(v) => { if (v !== 'all') router.push(`/?view=${v}`); }}
         showDiscoveryModal={false}
-        setShowDiscoveryModal={() => {}}
+        setShowDiscoveryModal={(open) => { if (open) router.push('/?openDiscovery=1'); }}
         showSettings={false}
-        setShowSettings={() => {}}
+        setShowSettings={(open) => { if (open) router.push('/?openSettings=1'); }}
         leads={[]}
         fetchingInsights={false}
         insights={null}
@@ -306,6 +355,12 @@ export default function CampaignsPage() {
                 </button>
               </div>
             </div>
+
+            {statusMessage && (
+              <div role="status" aria-live="polite" style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '8px', background: 'var(--primary-tint-10)', border: '1px solid var(--primary)', color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                {statusMessage}
+              </div>
+            )}
 
             {/* Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>

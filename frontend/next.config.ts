@@ -33,6 +33,14 @@ const baseHeaders = [
   { key: "Content-Security-Policy", value: cspDirectives.join("; ") },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
+
+// HTML pages must not bfcache after sign-out. `_next/static` chunks remain
+// cacheable (immutable content-hashed assets); the no-store + Vary: Cookie
+// pair only applies to dynamic routes.
+const pageNoCacheHeaders = [
+  { key: "Cache-Control", value: "private, no-store, max-age=0" },
+  { key: "Vary", value: "Cookie" },
+];
 // HSTS is gated to production. In dev (localhost/HTTP) the directive is
 // either ignored or, if served briefly over HTTPS, pins the hostname for two
 // years — annoying when local tooling certificates change.
@@ -46,7 +54,14 @@ if (process.env.NODE_ENV === "production") {
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
-    return [{ source: "/(.*)", headers: baseHeaders }];
+    return [
+      { source: "/(.*)", headers: baseHeaders },
+      // Apply no-store only to HTML routes; exclude static assets.
+      { source: "/", headers: pageNoCacheHeaders },
+      { source: "/insights", headers: pageNoCacheHeaders },
+      { source: "/campaigns", headers: pageNoCacheHeaders },
+      { source: "/login", headers: pageNoCacheHeaders },
+    ];
   },
   productionBrowserSourceMaps: false,
 };

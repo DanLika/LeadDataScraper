@@ -50,7 +50,13 @@ export default function StatsCards({ leads }: StatsCardsProps) {
            <CheckCircle size={18} />
         </div>
         <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>
-          {leads.filter((l) => l.audit_status === 'Completed').length}
+          {leads.filter((l) =>
+            l.audit_status === 'Completed'
+            && !!l.audit_results
+            && (l.audit_results.score ?? 0) >= 50
+            && !l.high_risk_flag
+            && !l.audit_results?.high_risk_flag
+          ).length}
         </div>
       </div>
     </section>

@@ -1375,6 +1375,38 @@ select:focus-visible {
 .social-link { color: var(--text-dim); transition: color 0.2s ease; }
 .social-link:hover { color: var(--text-primary); }
 
+/* Intel-column hook indicator buttons — show clickable affordance */
+.intel-hook-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0.5rem;
+  min-width: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.intel-hook-btn:hover {
+  background: var(--primary-tint-10);
+  border-color: var(--primary-tint-20);
+}
+.intel-hook-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.intel-hook-btn:active {
+  transform: scale(0.95);
+}
+.intel-hook-btn.intel-hook-email {
+  color: var(--secondary);
+}
+.intel-hook-btn.intel-hook-email:hover {
+  background: var(--warning-tint);
+}
+
 /* ========== Reduced motion ========== */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -80,6 +80,16 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   });
   headers.set('X-API-Key', API_SECRET_KEY);
 
+  // Destructive paths require X-Admin-Token (CLAUDE.md security model).
+  // Inject from server-side env only — never read from client. Clients
+  // cannot set this header on their own; the gate is auth (session) + the
+  // operator having configured ADMIN_TOKEN in the Next env.
+  const isDestructivePath = (path || []).join('/') === 'leads/clear';
+  if (isDestructivePath) {
+    const adminToken = process.env.ADMIN_TOKEN || '';
+    if (adminToken) headers.set('X-Admin-Token', adminToken);
+  }
+
   // Trust only the platform-injected client-IP header (TRUSTED_CLIENT_IP_HEADER
   // env). Standard XFF/X-Real-IP/Forwarded were stripped via HOP_BY_HOP because
   // clients can forge them when Next is exposed directly. The trusted header

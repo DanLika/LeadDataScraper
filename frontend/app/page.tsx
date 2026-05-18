@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState, useEffect, Fragment, useMemo, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useFocusTrap } from '@/utils/useFocusTrap';
 import { restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
 import {
@@ -130,9 +131,11 @@ function CollapsibleText({ text, maxLength = 250, style }: { text: string; maxLe
 
 // No longer need AuditStatus interface separately as it's merged into backend fallback
 export default function Dashboard() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
-  const [outreachDraft, setOutreachDraft] = useState<{ text: string, leadName: string } | null>(null);
+  const [outreachDraft, setOutreachDraft] = useState<{ text: string, leadName: string, subject?: string, leadEmail?: string } | null>(null);
   const [linkedinDraft, setLinkedinDraft] = useState<string>('');
   const [isDrafting, setIsDrafting] = useState(false);
   const [insights, setInsights] = useState<Insights | null>(null);
@@ -140,6 +143,26 @@ export default function Dashboard() {
   const [auditStatus, setAuditStatus] = useState<AuditStatusInfo | null>(null);
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+
+  // Auto-open Settings / Discovery / set view when arriving from /insights or
+  // /campaigns via ?openSettings=1 / ?openDiscovery=1 / ?view=audited|high-risk.
+  // After consuming, strip the query so refresh doesn't re-trigger. Sidebar
+  // lives on every page but its state only exists on Dashboard — this bridges.
+  useEffect(() => {
+    const openSettings = searchParams?.get('openSettings') === '1';
+    const openDiscovery = searchParams?.get('openDiscovery') === '1';
+    const viewParam = searchParams?.get('view');
+    const searchParam = searchParams?.get('search');
+    if (openSettings || openDiscovery || viewParam || searchParam) {
+      if (openSettings) setShowSettings(true);
+      if (openDiscovery) setShowDiscoveryModal(true);
+      if (viewParam === 'audited' || viewParam === 'high-risk') setView(viewParam);
+      if (searchParam) setSearchTerm(searchParam);
+      router.replace('/', { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const settingsModalRef = useRef<HTMLDivElement>(null);
   const discoveryModalRef = useRef<HTMLDivElement>(null);
   const outreachModalRef = useRef<HTMLDivElement>(null);
@@ -147,11 +170,11 @@ export default function Dashboard() {
   const [discoveryQuery, setDiscoveryQuery] = useState('');
   const [discoveryLocation, setDiscoveryLocation] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
+  const [isGeneratingCsv, setIsGeneratingCsv] = useState(false);
   const [orchestratorJob, setOrchestratorJob] = useState<OrchestratorJob | null>(null);
   const [, setProcessingAi] = useState(false);
   const [processingLeads, setProcessingLeads] = useState<Record<string, boolean>>({});
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
-  const [browserPersistence, setBrowserPersistence] = useState(true);
   const [view, setView] = useState<'all' | 'audited' | 'high-risk'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [campaign, setCampaign] = useState<CampaignItem[] | null>(null);
@@ -163,13 +186,18 @@ export default function Dashboard() {
   const [filterMinScore, setFilterMinScore] = useState<number>(0);
   const [filterAuditStatus, setFilterAuditStatus] = useState<string>('all');
   const [copiedHookType, setCopiedHookType] = useState<'email' | 'linkedin' | null>(null);
+  const [copiedAction, setCopiedAction] = useState<'body' | 'subject' | 'invite' | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [discoveryStep, setDiscoveryStep] = useState(0);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'success' | 'error' | 'info' }>>([]);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = Date.now();
+    // Date.now() collides when two toasts fire in the same millisecond
+    // (e.g. rapid 5x click). React then warns about duplicate keys and may
+    // drop one toast. Append a counter so each toast id is unique even in
+    // the same ms.
+    const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
   }, []);
@@ -295,12 +323,23 @@ export default function Dashboard() {
     if (!plan) return;
     setProcessingAi(true);
     try {
+      // /execute uses extra='forbid' on its Pydantic model — only task + params
+      // are accepted. The `reasoning` field added by the AI router on /ask
+      // would otherwise trigger HTTP 422. Strip it before forwarding.
+      const cleanPlan = { task: plan.task, params: plan.params };
       const response = await apiFetch(`${API_BASE_URL}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(plan),
+        body: JSON.stringify(cleanPlan),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const msg = Array.isArray(data?.detail)
+          ? data.detail.map((d: { msg?: string }) => d?.msg).filter(Boolean).join('; ')
+          : (data?.detail || data?.error || `Execute failed (HTTP ${response.status})`);
+        showToast(msg, 'error');
+        throw new Error(msg);
+      }
       
       // Update local state if needed based on the task
       if (data.result?.job_id) {
@@ -325,10 +364,20 @@ export default function Dashboard() {
       // Automatically trigger modals for drafts
       if (data.result?.draft) {
         if (plan.task === 'OUTREACH_DRAFT') {
-          setOutreachDraft({ text: data.result.draft, leadName: data.result.lead_name || 'Prospect' });
+          setOutreachDraft({
+            text: data.result.draft,
+            leadName: data.result.lead_name || 'Prospect',
+            subject: data.result.subject || '',
+            leadEmail: data.result.lead_email || '',
+          });
         } else if (plan.task === 'LINKEDIN_DRAFT') {
           setLinkedinDraft(data.result.draft);
-          setOutreachDraft({ text: data.result.draft, leadName: data.result.recipient || 'Prospect' });
+          setOutreachDraft({
+            text: data.result.draft,
+            leadName: data.result.recipient || 'Prospect',
+            subject: '',
+            leadEmail: '',
+          });
         } else if (plan.task === 'GET_INSIGHTS') {
           setInsights(data.result);
         } else if (plan.task === 'CAMPAIGN_STRATEGY') {
@@ -369,12 +418,24 @@ export default function Dashboard() {
         method: 'POST',
         body: formData,
       });
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        console.error('Upload failed with status:', response.status);
+        showToast(data.detail || data.error || `Upload failed (HTTP ${response.status})`, 'error');
+        return;
       }
-      await response.json();
+      // Backend processes upload asynchronously and returns
+      // `{message: "Leads are being imported in the background."}` — surface that
+      // exact text so user knows rows won't appear immediately.
+      const msg = data.message
+        || (data.inserted != null
+            ? `${data.inserted} lead${data.inserted === 1 ? '' : 's'} imported.`
+            : 'CSV uploaded — processing in the background.');
+      showToast(msg, 'success');
+      // Schedule a follow-up refresh in 5s to let background task land
+      setTimeout(() => { fetchLeads(); }, 5000);
     } catch (err) {
       console.error('Upload failed:', err);
+      showToast('Upload failed — backend unreachable.', 'error');
     } finally {
       setLoading(false);
       e.target.value = '';
@@ -389,18 +450,31 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: uniqueKey }),
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        showToast(data.detail || data.error || `Re-audit failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
       if (data.job_id) {
         setOrchestratorJob({ id: data.job_id, status: 'starting', processed_count: 0, total_count: 1, type: 'audit' });
+        showToast('Re-audit queued.', 'success');
+      } else {
+        showToast('Re-audit accepted (no job ID).', 'info');
       }
     } catch (err) {
       console.error('Process lead failed:', err);
+      showToast('Re-audit failed — backend unreachable.', 'error');
     } finally {
       setProcessingLeads(prev => ({ ...prev, [uniqueKey]: false }));
     }
   };
 
   const processAll = async () => {
+    if (leads.length === 0) {
+      showToast('No leads to audit. Import a CSV first.', 'info');
+      return;
+    }
+    if (!confirm(`Run SEO audit on ${leads.length} leads? This may take several minutes and hit Google rate limits.`)) return;
     setLoading(true);
     try {
       const resp = await apiFetch(`${API_BASE_URL}/orchestrator/start`, {
@@ -408,12 +482,20 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters: {}, tasks: ['audit'] }),
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        showToast(data.detail || data.error || `Audit start failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
       if (data.job_id) {
         setOrchestratorJob({ id: data.job_id, status: 'starting', processed_count: 0, total_count: 0, type: 'audit' });
+        showToast(`Audit started — job ${String(data.job_id).slice(0, 8)}…`, 'success');
+      } else {
+        showToast('Audit accepted but no job ID returned.', 'info');
       }
     } catch (err) {
       console.error('Process all failed:', err);
+      showToast('Audit failed — backend unreachable.', 'error');
     } finally {
       setLoading(false);
     }
@@ -431,7 +513,12 @@ export default function Dashboard() {
         body: JSON.stringify({ unique_key: lead.unique_key })
       });
       const data = await res.json();
-      if (data.draft) setOutreachDraft({ text: data.draft, leadName: lead.company_name || lead.name || 'Prospect' });
+      if (data.draft) setOutreachDraft({
+        text: data.draft,
+        leadName: lead.company_name || lead.name || 'Prospect',
+        subject: data.subject || '',
+        leadEmail: data.lead_email || lead.email || '',
+      });
       
       // Also generate LinkedIn draft
       const liRes = await apiFetch(`${API_BASE_URL}/draft-linkedin`, {
@@ -457,18 +544,31 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: uniqueKey }),
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        showToast(data.detail || data.error || `Hunt failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
       if (data.job_id) {
         setOrchestratorJob({ id: data.job_id, status: 'starting', processed_count: 0, total_count: 1, type: 'hunt' });
+        showToast('Deep hunt queued.', 'success');
+      } else {
+        showToast('Hunt accepted (no job ID).', 'info');
       }
     } catch (err) {
       console.error('Deep hunt failed:', err);
+      showToast('Hunt failed — backend unreachable.', 'error');
     } finally {
       setProcessingLeads(prev => ({ ...prev, [uniqueKey]: false }));
     }
   };
 
   const handleDeepHuntAll = async () => {
+    if (leads.length === 0) {
+      showToast('No leads to hunt. Import a CSV first.', 'info');
+      return;
+    }
+    if (!confirm(`Launch Deep Digital Hunt on ${leads.length} leads? Playwright will scrape each website (slow + bandwidth-heavy).`)) return;
     setLoading(true);
     try {
       const resp = await apiFetch(`${API_BASE_URL}/orchestrator/start`, {
@@ -476,19 +576,27 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters: {}, tasks: ['hunt'] }),
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        showToast(data.detail || data.error || `Hunt start failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
       if (data.job_id) {
         setOrchestratorJob({ id: data.job_id, status: 'starting', processed_count: 0, total_count: 0, type: 'hunt' });
+        showToast(`Hunt started — job ${String(data.job_id).slice(0, 8)}…`, 'success');
+      } else {
+        showToast('Hunt accepted but no job ID returned.', 'info');
       }
     } catch (err) {
       console.error('Deep hunt all failed:', err);
+      showToast('Hunt failed — backend unreachable.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleStartDiscovery = async () => {
-    if (!discoveryQuery.trim()) return;
+    if (!discoveryQuery.trim() || !discoveryLocation.trim()) return;
     setIsDiscovering(true);
     try {
       const response = await apiFetch(`${API_BASE_URL}/discovery/start`, {
@@ -496,7 +604,11 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: discoveryQuery, location: discoveryLocation }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showToast(data.detail || data.error || `Discovery failed (HTTP ${response.status})`, 'error');
+        return;
+      }
       if (data.job_id) {
         setOrchestratorJob({
           id: data.job_id,
@@ -506,9 +618,15 @@ export default function Dashboard() {
           processed_count: 0,
           total_count: 0
         });
+        setShowDiscoveryModal(false);
+        showToast(`Discovery started — job ${String(data.job_id).slice(0, 8)}…`, 'success');
+      } else {
+        showToast('Discovery accepted but no job ID returned — check backend logs.', 'info');
       }
     } catch (err) {
       console.error('Discovery failed:', err);
+      showToast('Discovery failed — backend unreachable.', 'error');
+    } finally {
       setIsDiscovering(false);
     }
   };
@@ -520,12 +638,20 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ unique_key: uniqueKey }),
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        showToast(data.detail || data.error || `Harvest failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
       if (data.job_id) {
         setOrchestratorJob({ id: data.job_id, status: 'starting', processed_count: 0, total_count: 1, type: 'enrich' });
+        showToast('Contact harvest queued.', 'success');
+      } else {
+        showToast('Harvest accepted (no job ID).', 'info');
       }
     } catch (err) {
       console.error('Enrichment failed:', err);
+      showToast('Harvest failed — backend unreachable.', 'error');
     } finally {
       setProcessingLeads(prev => ({ ...prev, [uniqueKey]: false }));
     }
@@ -535,19 +661,30 @@ export default function Dashboard() {
     if (!confirm("Are you SURE you want to clear all leads? This cannot be undone.")) return;
     setLoading(true);
     try {
-      await apiFetch(`${API_BASE_URL}/leads/clear`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_BASE_URL}/leads/clear`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(body.error || body.detail || `Clear failed (HTTP ${res.status})`, 'error');
+        return;
+      }
       setLeads([]);
       setInsights(null);
       showToast("All leads have been cleared.", 'success');
       setShowSettings(false);
     } catch (err) {
       console.error('Clear leads failed:', err);
+      showToast('Clear failed — backend unreachable.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const startMassivePipeline = async () => {
+    if (leads.length === 0) {
+      showToast('No leads to orchestrate. Import a CSV first.', 'info');
+      return;
+    }
+    if (!confirm(`Run FULL pipeline (audit + enrich + hunt) on ${leads.length} leads? This is the most expensive operation — multi-minute, multi-source scrape.`)) return;
     setLoading(true);
     try {
       const resp = await apiFetch(`${API_BASE_URL}/orchestrator/start`, {
@@ -555,12 +692,20 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters: {}, tasks: ['audit', 'enrich', 'hunt'] }),
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        showToast(data.detail || data.error || `Orchestrator failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
       if (data.job_id) {
         setOrchestratorJob({ id: data.job_id, status: 'starting', processed_count: 0, total_count: 0, type: 'massive' });
+        showToast(`Pipeline started — job ${String(data.job_id).slice(0, 8)}…`, 'success');
+      } else {
+        showToast('Pipeline accepted but no job ID returned.', 'info');
       }
     } catch (err) {
       console.error('Failed to start massive pipeline:', err);
+      showToast('Pipeline failed — backend unreachable.', 'error');
     } finally {
       setLoading(false);
     }
@@ -569,10 +714,17 @@ export default function Dashboard() {
   const stopOrchestratorJob = async () => {
     if (!orchestratorJob?.id) return;
     try {
-      await apiFetch(`${API_BASE_URL}/orchestrator/stop/${orchestratorJob.id}`, { method: 'POST' });
+      const resp = await apiFetch(`${API_BASE_URL}/orchestrator/stop/${orchestratorJob.id}`, { method: 'POST' });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        showToast(data.detail || data.error || `Stop failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
       setOrchestratorJob({ ...orchestratorJob, status: 'stopped' });
+      showToast('Job stopped.', 'success');
     } catch (err) {
       console.error('Stop job failed:', err);
+      showToast('Stop failed — backend unreachable.', 'error');
     }
   };
 
@@ -584,20 +736,45 @@ export default function Dashboard() {
       console.error('Stop audit failed:', err);
     }
   };
-  const handleDownloadCsv = async () => {
+  const triggerCsvDownload = async (path: string, filename: string, emptyMessage: string) => {
     try {
-      window.open(`${API_BASE_URL}/export/download`, '_blank');
+      const res = await apiFetch(`${API_BASE_URL}${path}`, { cache: 'no-store' });
+      const ctype = res.headers.get('content-type') || '';
+      if (!res.ok || !ctype.includes('csv')) {
+        let detail = emptyMessage;
+        if (ctype.includes('json')) {
+          const body = await res.json().catch(() => null);
+          detail = body?.error || body?.detail || emptyMessage;
+        }
+        showToast(detail, 'error');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast(`${filename} downloaded.`, 'success');
     } catch (err) {
       console.error('Download failed:', err);
+      showToast('Download failed — try again.', 'error');
     }
   };
-  const handleDownloadOutreachCsv = async () => {
-    try {
-      window.open(`${API_BASE_URL}/export/outreach`, '_blank');
-    } catch (err) {
-      console.error('CRM Download failed:', err);
-    }
-  };
+
+  const handleDownloadCsv = () => triggerCsvDownload(
+    '/export/download',
+    `leads-export-${new Date().toISOString().slice(0,10)}.csv`,
+    'No leads to export yet.'
+  );
+  const handleDownloadOutreachCsv = () => triggerCsvDownload(
+    '/export/outreach',
+    `outreach-export-${new Date().toISOString().slice(0,10)}.csv`,
+    'No outreach files generated yet — draft outreach for leads first.'
+  );
 
   const ensureProtocol = (url: string) => {
     if (!url) return '';
@@ -675,6 +852,7 @@ export default function Dashboard() {
             onClick={() => setIsSidebarOpen(true)}
             style={{ background: 'var(--surface-muted)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '44px', minHeight: '44px' }}
             aria-label="Open menu"
+            title="Open navigation menu"
           >
             <Menu size={22} />
           </button>
@@ -854,7 +1032,13 @@ export default function Dashboard() {
                     <tr>
                       <td colSpan={5} style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)' }}>
                         <Users size={48} style={{ marginBottom: '1rem', opacity: 0.2 }} />
-                        <p>{searchTerm ? `No leads matching "${searchTerm}" found.` : "No prospects discovered yet. Start by importing a CSV."}</p>
+                        <p>
+                          {leads.length === 0
+                            ? "No prospects discovered yet. Start by importing a CSV."
+                            : searchTerm
+                              ? `No leads matching "${searchTerm}" found.`
+                              : "No leads match the current filters. Try clearing search, segment, status or score."}
+                        </p>
                       </td>
                     </tr>
                   ) : (
@@ -877,7 +1061,15 @@ export default function Dashboard() {
                                     <Globe size={14} style={{ flexShrink: 0 }} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.website.replace(/^https?:\/\//, '').replace(/\?.*$/, '')}</span>
                                   </a>
                                 )}
-                                {lead.phone && <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}><Phone size={14} /> {lead.phone}</span>}
+                                {lead.phone && (
+                                  <a
+                                    href={`tel:${lead.phone.replace(/[^+0-9]/g, '')}`}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'inherit', textDecoration: 'none' }}
+                                    title={`Call ${lead.phone}`}
+                                  >
+                                    <Phone size={14} aria-hidden="true" /> {lead.phone}
+                                  </a>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -895,9 +1087,34 @@ export default function Dashboard() {
                           </td>
                           <td style={{ padding: '1rem', textAlign: 'center', verticalAlign: 'middle' }}>
                              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
-                               {lead.linkedin_hook && <div title="LinkedIn Hook Ready" style={{ color: 'var(--primary)' }}><Linkedin size={16} /></div>}
-                               {lead.email_hook && <div title="Email Hook Ready" style={{ color: 'var(--secondary)' }}><Mail size={16} /></div>}
-                               {lead.audit_results?.high_risk_flag && <div title="Security Vulnerabilities" style={{ color: 'var(--error)' }}><Shield size={16} /></div>}
+                               {lead.linkedin_hook && (
+                                 <button
+                                   type="button"
+                                   className="intel-hook-btn"
+                                   onClick={() => handleDraftOutreach(lead)}
+                                   title="LinkedIn Hook Ready — click to draft LinkedIn message"
+                                   aria-label={`Draft LinkedIn outreach for ${lead.company_name || lead.name || 'lead'}`}
+                                   style={{ color: 'var(--primary)' }}
+                                 >
+                                   <Linkedin size={16} aria-hidden="true" />
+                                 </button>
+                               )}
+                               {lead.email_hook && (
+                                 <button
+                                   type="button"
+                                   className="intel-hook-btn intel-hook-email"
+                                   onClick={() => handleDraftOutreach(lead)}
+                                   title="Email Hook Ready — click to draft email"
+                                   aria-label={`Draft email outreach for ${lead.company_name || lead.name || 'lead'}`}
+                                 >
+                                   <Mail size={16} aria-hidden="true" />
+                                 </button>
+                               )}
+                               {lead.audit_results?.high_risk_flag && (
+                                 <span title="Security Vulnerabilities" aria-label="Security vulnerabilities flagged" style={{ color: 'var(--error)', display: 'inline-flex', alignItems: 'center' }}>
+                                   <Shield size={16} aria-hidden="true" />
+                                 </span>
+                               )}
                              </div>
                           </td>
                           <td style={{ padding: '1rem', textAlign: 'center', verticalAlign: 'middle' }}>
@@ -1008,10 +1225,54 @@ export default function Dashboard() {
             >
               <X size={24} />
             </button>
-            <h2 id="outreach-modal-title" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Mail color="var(--primary)" /> Outreach for {outreachDraft.leadName}
+            <h2 id="outreach-modal-title" style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <Mail color="var(--primary)" aria-hidden="true" /> Outreach for {outreachDraft.leadName}
             </h2>
-            <div style={{ background: 'var(--surface-muted)', padding: '1.5rem', borderRadius: '12px', color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '2rem', border: '1px solid var(--border-subtle)', fontSize: '0.95rem' }}>
+            {outreachDraft.leadEmail && (() => {
+              const placeholderDomains = ['sentry.wixpress.com', 'sentry.io', 'wixpress.com', 'wix.com', 'squarespace.com', 'shopify.com', 'wordpress.com', 'cloudflare.com'];
+              const isPlaceholder = placeholderDomains.some(d => outreachDraft.leadEmail!.toLowerCase().includes(d));
+              return (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    To:{' '}
+                    <a
+                      href={`mailto:${outreachDraft.leadEmail}${outreachDraft.subject ? `?subject=${encodeURIComponent(outreachDraft.subject)}&body=${encodeURIComponent(outreachDraft.text)}` : ''}`}
+                      rel="noopener noreferrer"
+                      style={{ color: isPlaceholder ? 'var(--warning)' : 'var(--primary)' }}
+                      title="Open in default mail client (prefilled subject + body)"
+                    >
+                      {outreachDraft.leadEmail}
+                    </a>
+                  </div>
+                  {isPlaceholder && (
+                    <div role="alert" style={{ marginTop: '0.5rem', padding: '0.5rem 0.75rem', background: 'var(--warning-tint)', border: '1px solid var(--warning)', borderRadius: '6px', fontSize: '0.75rem', color: 'var(--warning-strong, var(--warning))' }}>
+                      ⚠ This looks like a tracking-tool email (Wix/Sentry/CMS placeholder), not the real owner inbox. Run Harvest Contact Details or open the website directly to find a real contact.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {!outreachDraft.leadEmail && (
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem', fontStyle: 'italic' }}>
+                No email on file — run Harvest Contact Details first.
+              </div>
+            )}
+
+            {outreachDraft.subject && (
+              <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', minWidth: '60px' }}>Subject</span>
+                <span style={{ fontSize: '1rem', color: 'var(--text-primary)', fontWeight: 600 }}>{outreachDraft.subject}</span>
+              </div>
+            )}
+
+            <div
+              onCopy={(e) => {
+                e.preventDefault();
+                const sel = window.getSelection()?.toString() || outreachDraft.text;
+                e.clipboardData.setData('text/plain', sel);
+              }}
+              style={{ background: 'var(--surface-muted)', padding: '1.5rem', borderRadius: '12px', color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '1rem', border: '1px solid var(--border-subtle)', fontSize: '0.95rem' }}
+            >
               {outreachDraft.text}
             </div>
 
@@ -1037,7 +1298,7 @@ export default function Dashboard() {
             {linkedinDraft && (
               <div style={{ marginTop: '0', padding: '1.5rem', background: 'var(--linkedin-tint)', borderRadius: '12px', border: '1px solid rgba(10, 102, 194, 0.2)', marginBottom: '2rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--linkedin)' }}>
-                  <Linkedin size={18} />
+                  <Linkedin size={18} aria-hidden="true" />
                   <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>LinkedIn Connection Request</h3>
                 </div>
                 <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0 }}>
@@ -1061,31 +1322,100 @@ export default function Dashboard() {
                     <p style={{ fontSize: '0.8rem', margin: 0, color: 'var(--text-primary)' }}>{activeLead.linkedin_hook}</p>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', gap: '0.5rem', flexWrap: 'wrap' }}>
                    <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
                     {linkedinDraft.length}/300 characters
                   </p>
-                  <button 
-                    className="btn-secondary" 
-                    style={{ padding: '0.4rem 1rem', fontSize: '0.75rem', background: 'rgba(10, 102, 194, 0.2)', borderColor: 'var(--linkedin)', color: 'var(--text-white)' }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(linkedinDraft);
-                      showToast("LinkedIn draft copied!", 'success');
-                    }}
-                  >
-                    Copy Invite
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {activeLead?.linkedin ? (
+                      <a
+                        href={ensureProtocol(activeLead.linkedin)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-secondary"
+                        style={{ padding: '0.4rem 1rem', fontSize: '0.75rem', background: 'rgba(10, 102, 194, 0.2)', borderColor: 'var(--linkedin)', color: 'var(--text-white)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                        title="Open LinkedIn profile in new tab — click Connect there, then paste"
+                      >
+                        <Linkedin size={12} /> Open Profile
+                      </a>
+                    ) : (
+                      <a
+                        href={`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(outreachDraft.leadName)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-secondary"
+                        style={{ padding: '0.4rem 1rem', fontSize: '0.75rem', background: 'rgba(10, 102, 194, 0.2)', borderColor: 'var(--linkedin)', color: 'var(--text-white)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                        title="No LinkedIn URL on file — search LinkedIn for this company"
+                      >
+                        <Linkedin size={12} /> Search LinkedIn
+                      </a>
+                    )}
+                    <button
+                      className="btn-secondary"
+                      style={{ padding: '0.4rem 1rem', fontSize: '0.75rem', background: 'rgba(10, 102, 194, 0.2)', borderColor: 'var(--linkedin)', color: 'var(--text-white)' }}
+                      onClick={async () => {
+                        try { await navigator.clipboard.writeText(linkedinDraft); } catch { showToast('Copy failed — clipboard blocked.', 'error'); return; }
+                        setCopiedAction('invite');
+                        setTimeout(() => setCopiedAction(p => p === 'invite' ? null : p), 2000);
+                        showToast("LinkedIn message copied — paste into the Connect dialog.", 'success');
+                      }}
+                      title="Copy this message text — LinkedIn has no API for sending invites with prefilled text, so paste manually after clicking Connect on the profile."
+                    >
+                      {copiedAction === 'invite' ? (
+                        <><Check size={12} style={{ marginRight: '0.3rem', verticalAlign: 'middle' }} /> Copied</>
+                      ) : (
+                        <><Copy size={12} style={{ marginRight: '0.3rem', verticalAlign: 'middle' }} /> Copy Message</>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <button className="btn-primary" style={{ flex: 1 }} onClick={() => {
-                navigator.clipboard.writeText(outreachDraft.text);
-                showToast('Draft copied to clipboard!', 'success');
-              }}>
-                Copy to Clipboard
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                className="btn-primary"
+                style={{ flex: '1 1 160px' }}
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(outreachDraft.text); } catch { showToast('Copy failed — clipboard blocked.', 'error'); return; }
+                  setCopiedAction('body');
+                  setTimeout(() => setCopiedAction(p => p === 'body' ? null : p), 2000);
+                  showToast('Draft copied to clipboard!', 'success');
+                }}
+              >
+                {copiedAction === 'body' ? (
+                  <><Check size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copied</>
+                ) : (
+                  <><Copy size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copy Body</>
+                )}
               </button>
-              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setOutreachDraft(null)}>
+              {outreachDraft.subject && (
+                <button
+                  className="btn-secondary"
+                  style={{ flex: '1 1 140px' }}
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(outreachDraft.subject!); } catch { showToast('Copy failed — clipboard blocked.', 'error'); return; }
+                    setCopiedAction('subject');
+                    setTimeout(() => setCopiedAction(p => p === 'subject' ? null : p), 2000);
+                    showToast('Subject copied!', 'success');
+                  }}
+                >
+                  {copiedAction === 'subject' ? (
+                    <><Check size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copied</>
+                  ) : (
+                    <><Copy size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copy Subject</>
+                  )}
+                </button>
+              )}
+              <a
+                href={`https://mail.google.com/mail/?view=cm&fs=1${outreachDraft.leadEmail ? `&to=${encodeURIComponent(outreachDraft.leadEmail)}` : ''}${outreachDraft.subject ? `&su=${encodeURIComponent(outreachDraft.subject)}` : ''}&body=${encodeURIComponent(outreachDraft.text)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary"
+                style={{ flex: '1 1 140px', textAlign: 'center', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
+              >
+                <Mail size={14} /> Open in Gmail
+              </a>
+              <button className="btn-secondary" style={{ flex: '1 1 100px' }} onClick={() => setOutreachDraft(null)}>
                 Discard
               </button>
             </div>
@@ -1100,20 +1430,22 @@ export default function Dashboard() {
             <button
               onClick={() => setShowDiscoveryModal(false)}
               aria-label="Close discovery"
+              title="Close (Esc)"
               style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <X size={24} />
+              <X size={24} aria-hidden="true" />
             </button>
             <h2 id="discovery-modal-title" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Globe color="var(--primary)" /> Lead Discovery Engine
+              <Globe color="var(--primary)" aria-hidden="true" /> Lead Discovery Engine
             </h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
               <div>
-                <label htmlFor="discovery-query" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>What are you looking for?</label>
+                <label htmlFor="discovery-query" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>What are you looking for? <span aria-hidden="true" style={{ color: 'var(--error)' }}>*</span></label>
                 <input
                   type="text"
                   id="discovery-query"
+                  required
                   value={discoveryQuery}
                   onChange={(e) => setDiscoveryQuery(e.target.value)}
                   placeholder="e.g. Dental Clinics"
@@ -1121,10 +1453,11 @@ export default function Dashboard() {
                 />
               </div>
               <div>
-                <label htmlFor="discovery-location" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Location (Optional)</label>
+                <label htmlFor="discovery-location" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Location <span aria-hidden="true" style={{ color: 'var(--error)' }}>*</span></label>
                 <input
                   type="text"
                   id="discovery-location"
+                  required
                   value={discoveryLocation}
                   onChange={(e) => setDiscoveryLocation(e.target.value)}
                   placeholder="e.g. New York, NY"
@@ -1138,7 +1471,7 @@ export default function Dashboard() {
                 className="btn-primary"
                 style={{ flex: 1, gap: '0.75rem', position: 'relative' }}
                 onClick={handleStartDiscovery}
-                disabled={isDiscovering || !discoveryQuery.trim()}
+                disabled={isDiscovering || !discoveryQuery.trim() || !discoveryLocation.trim()}
                 aria-busy={isDiscovering}
               >
                 {isDiscovering ? (
@@ -1237,57 +1570,34 @@ export default function Dashboard() {
               </div>
 
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
-                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Browser Persistence</h3>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-primary)' }}>Keep browser alive between audits</span>
-                  <button
-                    role="switch"
-                    aria-checked={browserPersistence}
-                    aria-label="Toggle browser persistence"
-                    style={{
-                      width: '44px',
-                      height: '24px',
-                      background: browserPersistence ? 'var(--primary)' : 'var(--border-muted)',
-                      borderRadius: '12px',
-                      position: 'relative',
-                      cursor: 'pointer',
-                      transition: 'background 0.2s',
-                      border: 'none',
-                      padding: 0
-                    }}
-                    onClick={() => setBrowserPersistence(!browserPersistence)}
-                  >
-                    <div style={{
-                      width: '18px',
-                      height: '18px',
-                      background: 'white',
-                      borderRadius: '50%',
-                      position: 'absolute',
-                      left: browserPersistence ? '23px' : '3px',
-                      top: '3px',
-                      transition: 'left 0.2s'
-                    }} />
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
                 <h3 style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>Data Export Management</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem' }}>
-                  <button 
-                    className="btn-secondary" 
-                    style={{ fontSize: '0.8rem', justifyContent: 'center' }}
+                  <button
+                    className="btn-secondary"
+                    style={{ fontSize: '0.8rem', justifyContent: 'center', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                    disabled={isGeneratingCsv}
+                    aria-busy={isGeneratingCsv}
                     onClick={async () => {
+                      if (isGeneratingCsv) return;
+                      setIsGeneratingCsv(true);
                       try {
                         const res = await apiFetch(`${API_BASE_URL}/export`);
-                        const data = await res.json();
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) {
+                          showToast(data.detail || data.error || `Export failed (HTTP ${res.status})`, 'error');
+                          return;
+                        }
                         showToast(data.message || "Export generated!", 'success');
                       } catch {
                         showToast("Export generation failed.", 'error');
+                      } finally {
+                        setIsGeneratingCsv(false);
                       }
                     }}
                   >
-                    Generate CSVs
+                    {isGeneratingCsv ? (
+                      <><Loader2 size={14} className="animate-spin" aria-hidden="true" /> Generating…</>
+                    ) : 'Generate CSVs'}
                   </button>
                   <button 
                     className="btn-secondary" 

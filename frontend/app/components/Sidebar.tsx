@@ -12,7 +12,9 @@ import { usePathname, useRouter } from 'next/navigation';
 interface SidebarLead {
   company_name?: string;
   name?: string;
-  outreach_score?: number;
+  outreach_score?: number | null;
+  audit_results?: { score?: number } | null;
+  seo_score?: number | null;
 }
 
 interface SidebarInsights {
@@ -59,6 +61,23 @@ export default function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
 
+  // Restore collapse preference from localStorage on mount. Safe to read
+  // on client only (Sidebar is a client component). User session-scoped
+  // preference, not auth-bound — no PII concern.
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('leadscout:sidebarCollapsed');
+      if (stored === '1') {
+        setIsCollapsed(true);
+        setIsManuallyToggled(true);
+        onCollapsedChange?.(true);
+      }
+    } catch {
+      // localStorage unavailable (private mode / blocked) — non-fatal
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     let timeout: NodeJS.Timeout;
@@ -76,6 +95,7 @@ export default function Sidebar({
     setIsCollapsed(next);
     setIsManuallyToggled(true);
     onCollapsedChange?.(next);
+    try { window.localStorage.setItem('leadscout:sidebarCollapsed', next ? '1' : '0'); } catch { /* ignore */ }
   };
 
   const isInsightsPage = pathname === '/insights';
@@ -101,6 +121,7 @@ export default function Sidebar({
             className="sidebar-toggle"
             onClick={toggleSidebar}
             aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
@@ -214,20 +235,40 @@ export default function Sidebar({
                       <span className="widget-title">TOP PROSPECTS</span>
                   </div>
                   <div className="widget-content">
-                    {leads
-                      .filter(l => (l.outreach_score || 0) > 0)
-                      .sort((a, b) => (b.outreach_score || 0) - (a.outreach_score || 0))
-                      .slice(0, 3)
-                      .map((lead, idx) => (
-                        <div key={idx} className="prospect-item" role="button" tabIndex={0} onClick={() => { setSearchTerm(lead.company_name || lead.name || ''); setIsOpenMobile?.(false); }} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSearchTerm(lead.company_name || lead.name || ''); setIsOpenMobile?.(false); } }}>
-                            <span className="prospect-name truncate">{lead.company_name || lead.name}</span>
-                            <span className="prospect-score">{lead.outreach_score}</span>
-                        </div>
-                      ))
-                    }
-                    {leads.filter(l => (l.outreach_score || 0) > 0).length === 0 && (
-                      <p className="empty-widget">Enrich leads to see rankings.</p>
-                    )}
+                    {(() => {
+                      const effective = (l: SidebarLead) => l.outreach_score ?? l.audit_results?.score ?? l.seo_score ?? 0;
+                      const onDashboard = pathname === '/';
+                      const ranked = leads
+                        .filter(l => effective(l) > 0)
+                        .sort((a, b) => effective(b) - effective(a))
+                        .slice(0, 3);
+                      const handlePick = (name: string) => {
+                        setIsOpenMobile?.(false);
+                        if (onDashboard) {
+                          setSearchTerm(name);
+                        } else {
+                          router.push(`/?search=${encodeURIComponent(name)}`);
+                        }
+                      };
+                      if (ranked.length === 0) return <p className="empty-widget">Enrich leads to see rankings.</p>;
+                      return ranked.map((lead, idx) => {
+                        const name = lead.company_name || lead.name || '';
+                        return (
+                          <div
+                            key={idx}
+                            className="prospect-item"
+                            role="button"
+                            tabIndex={0}
+                            title={`Search for ${name}`}
+                            onClick={() => handlePick(name)}
+                            onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePick(name); } }}
+                          >
+                            <span className="prospect-name truncate">{name}</span>
+                            <span className="prospect-score">{effective(lead)}</span>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
               </div>
@@ -241,6 +282,7 @@ export default function Sidebar({
                     disabled={fetchingInsights}
                     aria-busy={fetchingInsights}
                     aria-label="Refresh AI insights"
+                    title="Refresh AI insights"
                   >
                     <RefreshCw size={14} aria-hidden="true" />
                   </button>
@@ -267,12 +309,29 @@ export default function Sidebar({
                     {Array.isArray(insights.top_priorities) && insights.top_priorities.length > 0 && (
                       <div className="priorities-section">
                         <p className="priorities-title">Priority Outreach</p>
-                        {insights.top_priorities.map((p: { name: string; reason: string }, idx: number) => (
-                          <div key={idx} className="priority-card">
-                            <div className="priority-name">{p.name}</div>
-                            <div className="priority-reason">{p.reason}</div>
-                          </div>
-                        ))}
+                        {insights.top_priorities.map((p: { name: string; reason: string }, idx: number) => {
+                          const onDashboard = pathname === '/';
+                          const pick = () => {
+                            setIsOpenMobile?.(false);
+                            if (onDashboard) setSearchTerm(p.name);
+                            else router.push(`/?search=${encodeURIComponent(p.name)}`);
+                          };
+                          return (
+                            <div
+                              key={idx}
+                              className="priority-card"
+                              role="button"
+                              tabIndex={0}
+                              title={`Search for ${p.name}`}
+                              onClick={pick}
+                              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } }}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              <div className="priority-name">{p.name}</div>
+                              <div className="priority-reason">{p.reason}</div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

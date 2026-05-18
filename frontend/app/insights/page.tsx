@@ -9,6 +9,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Legend, BarChart
 } from 'recharts';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Sidebar from '../components/Sidebar';
 import AIChat from '../components/AIChat';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
@@ -28,9 +29,10 @@ interface Insights {
 }
 
 export default function InsightsPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [insights, setInsights] = useState<Insights | null>(null);
-  const [leads, setLeads] = useState<Array<{ outreach_score?: number; high_risk_flag?: boolean }>>([]);
+  const [leads, setLeads] = useState<Array<{ outreach_score?: number | null; high_risk_flag?: boolean; audit_results?: { score?: number; high_risk_flag?: boolean } | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [fetchingInsights, setFetchingInsights] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -96,11 +98,11 @@ export default function InsightsPage() {
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <Sidebar
         view="all"
-        setView={() => {}}
+        setView={(v) => { if (v !== 'all') router.push(`/?view=${v}`); }}
         showDiscoveryModal={false}
-        setShowDiscoveryModal={() => {}}
+        setShowDiscoveryModal={(open) => { if (open) router.push('/?openDiscovery=1'); }}
         showSettings={false}
-        setShowSettings={() => {}}
+        setShowSettings={(open) => { if (open) router.push('/?openSettings=1'); }}
         leads={leads}
         fetchingInsights={fetchingInsights}
         insights={insights}
@@ -143,40 +145,40 @@ export default function InsightsPage() {
         <div className="content-scroll main-content-wrapper" style={{ padding: '0 2rem 120px 2rem' }}>
           {/* Quick Metrics */}
           <section className="grid-responsive-stats" style={{ marginBottom: '2rem' }}>
-            <div className="card stat-card">
+            <Link href="/" className="card stat-card" style={{ textDecoration: 'none', color: 'inherit', cursor: 'pointer', display: 'flex', gap: '0.75rem', alignItems: 'center' }} title="Open dashboard">
               <div className="stat-icon" style={{ background: 'var(--primary-tint-10)', color: 'var(--primary)' }}>
-                <Users size={20} />
+                <Users size={20} aria-hidden="true" />
               </div>
               <div>
                 <p className="stat-label">Total Leads</p>
                 <div className="stat-value">{stats?.total_leads || 0}</div>
               </div>
-            </div>
-            <div className="card stat-card">
+            </Link>
+            <Link href="/?view=audited" className="card stat-card" style={{ textDecoration: 'none', color: 'inherit', cursor: 'pointer', display: 'flex', gap: '0.75rem', alignItems: 'center' }} title="Filter dashboard to audited leads">
               <div className="stat-icon" style={{ background: 'var(--success-tint)', color: 'var(--success)' }}>
-                <Shield size={20} />
+                <Shield size={20} aria-hidden="true" />
               </div>
               <div>
                 <p className="stat-label">Audited Leads</p>
                 <div className="stat-value">
-                  {stats?.audit_status_distribution?.find(s => s.name === 'completed')?.value || 0}
+                  {stats?.audit_status_distribution?.find(s => s.name?.toLowerCase() === 'completed')?.value || 0}
                 </div>
               </div>
-            </div>
-            <div className="card stat-card">
+            </Link>
+            <div className="card stat-card" title="Leads with SEO score above 70">
               <div className="stat-icon" style={{ background: 'var(--warning-tint)', color: 'var(--warning)' }}>
-                <Target size={20} />
+                <Target size={20} aria-hidden="true" />
               </div>
               <div>
                 <p className="stat-label">Top Prospects</p>
                 <div className="stat-value">
-                  {leads.filter(l => (l.outreach_score || 0) > 70).length}
+                  {leads.filter(l => ((l.outreach_score ?? l.audit_results?.score ?? 0)) > 70).length}
                 </div>
               </div>
             </div>
-            <div className="card stat-card">
+            <Link href="/?view=high-risk" className="card stat-card" style={{ textDecoration: 'none', color: 'inherit', cursor: 'pointer', display: 'flex', gap: '0.75rem', alignItems: 'center' }} title="Filter dashboard to high-risk leads">
               <div className="stat-icon" style={{ background: 'var(--error-tint)', color: 'var(--error)' }}>
-                <Zap size={20} />
+                <Zap size={20} aria-hidden="true" />
               </div>
               <div>
                 <p className="stat-label">High Risk</p>
@@ -184,14 +186,22 @@ export default function InsightsPage() {
                   {leads.filter(l => l.high_risk_flag).length}
                 </div>
               </div>
-            </div>
+            </Link>
           </section>
 
           {/* Charts Row 1 */}
           <div className="grid-responsive-2" style={{ marginBottom: '2rem' }}>
             <div className="card">
               <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>Audit Status Breakdown</h2>
-              <div style={{ width: '100%' }} role="img" aria-label="Audit status distribution chart">
+              <div
+                style={{ width: '100%' }}
+                role="img"
+                aria-label={
+                  stats?.audit_status_distribution?.length
+                    ? `Audit status distribution: ${stats.audit_status_distribution.map(d => `${d.value} ${d.name}`).join(', ')}.`
+                    : 'Audit status distribution chart — no data yet'
+                }
+              >
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
                     <Pie
@@ -214,7 +224,15 @@ export default function InsightsPage() {
 
             <div className="card">
               <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>SEO Score Distribution</h2>
-              <div style={{ width: '100%' }} role="img" aria-label="SEO score distribution chart">
+              <div
+                style={{ width: '100%' }}
+                role="img"
+                aria-label={
+                  stats?.seo_score_ranges?.length
+                    ? `SEO score distribution: ${stats.seo_score_ranges.map(r => `${r.count} leads in ${r.range}`).join(', ')}.`
+                    : 'SEO score distribution chart — no data yet'
+                }
+              >
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={stats?.seo_score_ranges || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-muted)" vertical={false} />
@@ -281,7 +299,15 @@ export default function InsightsPage() {
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-heading)' }}>High-Impact Priorities</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       {(insights?.top_priorities || []).map((priority, idx) => (
-                        <div key={idx} style={{ padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)', transition: 'border-color 0.2s' }}>
+                        <div
+                          key={idx}
+                          role="button"
+                          tabIndex={0}
+                          title={`Search dashboard for ${priority.name}`}
+                          onClick={() => router.push(`/?search=${encodeURIComponent(priority.name)}`)}
+                          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); router.push(`/?search=${encodeURIComponent(priority.name)}`); } }}
+                          style={{ padding: '1rem', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border-subtle)', transition: 'border-color 0.2s, transform 0.1s', cursor: 'pointer' }}
+                        >
                           <div style={{ fontWeight: 700, color: 'var(--text-white)', marginBottom: '0.25rem' }}>{priority.name}</div>
                           <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{priority.reason}</div>
                         </div>

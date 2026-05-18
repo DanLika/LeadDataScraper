@@ -52,13 +52,22 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instruction: { text: userMessage } }),
       });
-      const data = await response.json();
-      
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        // Pydantic 422 returns { detail: [{type, loc, msg, ...}] }. Surface the
+        // first msg so the user sees "String should have at most 4000
+        // characters" instead of a generic placeholder.
+        const detail = Array.isArray(data?.detail)
+          ? data.detail.map((d: { msg?: string }) => d?.msg).filter(Boolean).join('; ')
+          : (data?.detail || data?.error || `Request failed (HTTP ${response.status})`);
+        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${detail}` }]);
+        return;
+      }
       if (data.error) {
         setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${data.error}` }]);
       } else {
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
+        setMessages(prev => [...prev, {
+          role: 'assistant',
           content: data.response || "I've analyzed your request.",
           plan: data.plan
         }]);
@@ -292,6 +301,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
           <button
             type="button"
             aria-label={isLoading ? "AI is processing" : "Clear chat history"}
+            title={isLoading ? "AI is processing" : "Clear chat history"}
             style={{
               background: isLoading ? 'var(--primary)' : 'hsla(var(--primary-hsl), 0.2)',
               borderRadius: '10px',
@@ -325,6 +335,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
               disabled={!query.trim() || isLoading}
               aria-busy={isLoading}
               aria-label="Send message"
+              title="Send message (Enter)"
               style={{
                 background: 'none',
                 border: 'none',
