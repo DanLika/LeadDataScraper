@@ -18,6 +18,18 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
   .filter(Boolean);
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+// Paths that require X-Admin-Token injection in addition to X-API-Key.
+// Add new destructive routes here — keep this list audit-friendly. Match is
+// exact on the joined dynamic segments (no query string, no prefixing).
+const ADMIN_TOKEN_PATHS = new Set<string>([
+  'leads/clear',
+]);
+
+// Match backend `/upload`'s MAX_UPLOAD_BYTES (50 MB). Defense-in-depth
+// against an authed caller POSTing gigabyte-class bodies and forcing the
+// Next.js process to buffer them in memory while waiting on upstream.
+const MAX_PROXY_BODY_BYTES = 50 * 1024 * 1024;
+
 const HOP_BY_HOP = new Set([
   'host',
   'connection',
@@ -83,9 +95,12 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   // Destructive paths require X-Admin-Token (CLAUDE.md security model).
   // Inject from server-side env only — never read from client. Clients
   // cannot set this header on their own; the gate is auth (session) + the
-  // operator having configured ADMIN_TOKEN in the Next env.
-  const isDestructivePath = (path || []).join('/') === 'leads/clear';
-  if (isDestructivePath) {
+  // operator having configured ADMIN_TOKEN in the Next env. Path list is
+  // ADMIN_TOKEN_PATHS at the top of this file — exact match on the
+  // joined dynamic segments, so prefix collisions like `leads/clear-cache`
+  // can't accidentally inherit the admin token.
+  const joinedPath = (path || []).join('/');
+  if (ADMIN_TOKEN_PATHS.has(joinedPath)) {
     const adminToken = process.env.ADMIN_TOKEN || '';
     if (adminToken) headers.set('X-Admin-Token', adminToken);
   }
@@ -108,7 +123,26 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   };
 
   if (method !== 'GET' && method !== 'HEAD') {
+    // Fast-fail on declared Content-Length so an attacker cannot stream
+    // an oversized body to make us buffer the prefix before rejecting.
+    const declaredLength = Number(req.headers.get('content-length') ?? '0');
+    if (declaredLength > MAX_PROXY_BODY_BYTES) {
+      return NextResponse.json(
+        { error: 'Payload too large' },
+        { status: 413, headers: NO_STORE_HEADERS },
+      );
+    }
     const body = await req.arrayBuffer();
+    // Belt-and-braces: chunked / unset Content-Length still gets capped
+    // after buffering. Match backend `/upload`'s 50 MB ceiling so the
+    // failure mode is consistent regardless of whether the cap trips at
+    // the proxy or at FastAPI.
+    if (body.byteLength > MAX_PROXY_BODY_BYTES) {
+      return NextResponse.json(
+        { error: 'Payload too large' },
+        { status: 413, headers: NO_STORE_HEADERS },
+      );
+    }
     if (body.byteLength > 0) init.body = body;
   }
 

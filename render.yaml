@@ -21,6 +21,16 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      # Single-tenancy invariant. When set, the backend's lifespan asserts
+      # Supabase Auth has exactly this one user at boot and fails loudly
+      # if a second user is ever provisioned (per-resource endpoints have
+      # no owner_user_id filter — design assumes one operator).
+      - key: OPERATOR_EMAIL
+        sync: false
+      # Operator signature appended to outreach drafts. Unset → drafts sign
+      # with "Your Name" placeholder.
+      - key: OPERATOR_NAME
+        sync: false
       - key: PYTHON_ENV
         value: production
 
