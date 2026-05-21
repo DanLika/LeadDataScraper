@@ -183,7 +183,11 @@ class DiscoveryEngine:
             "website": website,
             "phone": phone,
             "rating": self._parse_rating(rating),
-            "audit_status": "Pending"
+            "audit_status": "Pending",
+            # Provenance — lets `lead_source = 'google_maps'` queries find these
+            # rows for cleanup, segmentation, or per-source analytics.
+            # See BUGS.md Round 3 A.
+            "lead_source": "google_maps",
         }
 
     @staticmethod

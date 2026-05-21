@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState, useEffect, Fragment, useMemo, useRef } from 'react';
+import { useCallback, useState, useEffect, Fragment, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useFocusTrap } from '@/utils/useFocusTrap';
 import { restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
@@ -129,8 +129,19 @@ function CollapsibleText({ text, maxLength = 250, style }: { text: string; maxLe
   );
 }
 
-// No longer need AuditStatus interface separately as it's merged into backend fallback
+// Suspense wrapper so `useSearchParams()` below doesn't trip Next 16's
+// "missing-suspense-with-csr-bailout" prerender check during `next build`.
+// The dashboard has no meaningful static shell (everything depends on the
+// authed session + live data), so fallback={null} is appropriate.
 export default function Dashboard() {
+  return (
+    <Suspense fallback={null}>
+      <DashboardInner />
+    </Suspense>
+  );
+}
+
+function DashboardInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);

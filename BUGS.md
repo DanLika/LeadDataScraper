@@ -2,6 +2,50 @@
 
 Date: 2026-05-12. Pytest: 99→101 passed. Next build: clean (was 2 warnings).
 
+## Round 3 — E2E verification during /security-audit:run (2026-05-21)
+
+End-to-end browser test of AI execution + Playwright crawl via chrome-devtools
+MCP. Created throw-away Supabase Auth user `claude-audit-test@example.com`,
+logged in via the Server Action path, exercised the full pipeline, deleted
+the test user + scraped rows afterwards.
+
+**PASS** (no regression vs prior round):
+- Login Server Action → httpOnly cookie set, dashboard reachable
+- AI chat status query `"How many leads are in the database?"`
+  → `STATUS_CHECK` autoexec → `"0 leads total."` ✓
+- AI chat action prompt `"Find me 3 dentists in Mostar"`
+  → `DISCOVERY_SEARCH` plan card with Confirm & Execute ✓
+- Confirm & Execute → `/execute` 200 → orchestrator job_id ✓
+- Playwright Chromium → Google Maps query → 16 result containers → 8
+  deduplicated leads in 35s ✓
+- `SupabaseHelper.upsert_leads`: `"Upserted 8/8 leads to Supabase"` ✓
+- Frontend live-refresh: Pipeline Intelligence stats `8 / 8 / 0 / 0`
+  (Total / Pending / High Risk / Healthy) populated within poll window ✓
+- Backend log: zero exceptions
+
+**Found**:
+
+A. **`src/scrapers/discovery_engine.py:180-187` — `_extract_lead_data` returned
+   no `lead_source` or `address` (PARTIAL FIX 2026-05-21)**
+   The dict shipped to `SupabaseHelper.upsert_leads` originally only set
+   `name, unique_key, website, phone, rating, audit_status`. Live
+   verification confirmed both `leads.lead_source` and `leads.address`
+   columns were `NULL` on every Google-Maps-discovered row. Two concrete
+   consequences:
+   - Provenance was lost: there was no way to query "which leads came from
+     Google Maps vs CSV import vs hand entry" — `lead_source` is the
+     contract for that and it was never written.
+   - Test-data cleanup workarounds: the cleanup query
+     `DELETE FROM leads WHERE lead_source = 'google_maps' AND address
+     ILIKE '%Mostar%'` matched zero rows during this audit. Had to fall
+     back to `created_at` timestamp matching.
+   **Fix landed**: `lead_source: "google_maps"` is now set unconditionally
+   in the returned dict. The `address` part remains TODO — Google Maps
+   surfaces it in the side panel after clicking a result; extending the
+   existing panel-fallback block (used for website + phone) to also pull
+   the address span is the natural next step. Until that lands, `address`
+   stays NULL on Google-Maps-discovered rows.
+
 ## Round 2 — Fixed (2026-05-12 second pass)
 
 A. **`backend/main.py:116` — `/docs`, `/openapi.json`, `/redoc` publicly readable**

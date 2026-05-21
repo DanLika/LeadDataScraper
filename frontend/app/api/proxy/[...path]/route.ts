@@ -5,17 +5,24 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Render's `fromService.property: host` returns a bare hostname (no scheme).
-// Prepend `https://` if no scheme is present, and in production assert the
-// final URL is `https://` so a misconfigured BACKEND_URL can't silently
-// downgrade prod traffic to plaintext over the Render network. The
-// localhost fallback stays `http://` for dev.
+// Prepend `https://` if no scheme is present. In production the resolved URL
+// must be `https://` UNLESS the host is loopback (127.0.0.1 / localhost /
+// *.localhost) — `npm run start` against a local backend is a valid
+// integration-test path and pre-empting that breaks builds + local prod
+// smoke tests. Anything else in production must be HTTPS so a misconfigured
+// `BACKEND_URL` cannot silently downgrade prod traffic to plaintext over
+// the Render network. The assertion runs at request time (inside `forward`)
+// so module load during `next build` cannot trip it.
+const _LOOPBACK_HOSTS_RE = /^https?:\/\/(127\.0\.0\.1|localhost|[^/]+\.localhost)(:\d+)?(\/|$)/i;
 function _resolveBackendUrl(): string {
   const raw = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-  if (process.env.NODE_ENV === 'production' && !withScheme.startsWith('https://')) {
-    throw new Error(`BACKEND_URL must use https:// in production; got ${withScheme}`);
-  }
-  return withScheme;
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+}
+function _assertBackendSchemeAllowed(url: string): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (url.startsWith('https://')) return;
+  if (_LOOPBACK_HOSTS_RE.test(url)) return;
+  throw new Error(`BACKEND_URL must use https:// in production; got ${url}`);
 }
 const BACKEND_URL = _resolveBackendUrl();
 const API_SECRET_KEY = process.env.API_SECRET_KEY || '';
@@ -66,6 +73,17 @@ const HOP_BY_HOP = new Set([
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
 
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  // Request-time guard — runs in the live serverless/edge environment, not
+  // at build time. Fails closed with 500 if prod is configured to talk to a
+  // non-HTTPS, non-loopback backend.
+  try {
+    _assertBackendSchemeAllowed(BACKEND_URL);
+  } catch (e) {
+    return NextResponse.json(
+      { error: (e instanceof Error ? e.message : 'BACKEND_URL scheme invalid') },
+      { status: 500, headers: NO_STORE_HEADERS },
+    );
+  }
   if (!API_SECRET_KEY) {
     return NextResponse.json(
       { error: 'API_SECRET_KEY not configured on server' },

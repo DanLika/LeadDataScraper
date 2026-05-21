@@ -286,10 +286,14 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   on successful credential check.
 - **Proxy `BACKEND_URL` scheme assertion** (`frontend/app/api/proxy/[...path]/route.ts`).
   Render's `fromService.property: host` returns a bare hostname, so
-  `_resolveBackendUrl()` prepends `https://` if no scheme is present, and
-  in `NODE_ENV=production` throws if the resolved URL doesn't start with
-  `https://`. Stops a misconfigured `BACKEND_URL` from silently
-  downgrading prod traffic to plaintext over the Render internal network.
+  `_resolveBackendUrl()` prepends `https://` if no scheme is present.
+  `_assertBackendSchemeAllowed()` runs at **request time inside `forward()`**
+  (not at module load — that would crash `next build` against a dev backend
+  on `http://127.0.0.1:8000`). In `NODE_ENV=production`, the resolved URL
+  must be `https://` UNLESS the host is loopback (`127.0.0.1`, `localhost`,
+  `*.localhost`) — that exempts `npm run start` smoke-tests against a
+  local backend while still blocking any prod misconfiguration that would
+  silently downgrade Render-network traffic to plaintext.
 
 ## AI Router invariants (`src/core/agentic_router.py`)
 - `route_instruction()` attaches a `lead_index` (unique_key + name +
@@ -325,6 +329,56 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `OPERATOR_NAME` env, defaulting to "Your Name". The frontend modal
   renders subject + body separately and offers an Open-in-Gmail deep-link
   with both prefilled.
+
+## Discovery engine invariants (`src/scrapers/discovery_engine.py`)
+- `find_leads(query, location)` is the Google-Maps scrape path. The URL host
+  is hardcoded to `google.com` and `query` is `quote_plus`-encoded, so
+  there's no host-controlled SSRF surface. The Playwright route guard
+  (`_install_ssrf_route_guard`) re-runs `assert_safe_url` on every
+  subresource and redirect — closes the TOCTOU gap between pre-flight DNS
+  check and `page.goto()`, and blocks any redirect chain hopping to an
+  internal host.
+- `unique_key` is preferentially derived from the `!1s<id>!` segment of the
+  Google-Maps place URL (stable across runs). Falls back to a 16-char MD5
+  of `name` when no place-URL is present — `usedforsecurity=False`
+  documents the non-crypto intent and keeps Bandit/Semgrep MD5 lints quiet.
+  Collisions only route two distinct businesses to the same row; the human
+  review queue catches that.
+- **Known gap**: `_extract_lead_data` returns only `{name, unique_key,
+  website, phone, rating, audit_status}` — `lead_source` and `address`
+  columns end up NULL on every scraped row. Documented in BUGS.md Round 3
+  (2026-05-21) with the one-line fix for `lead_source`. Until that lands,
+  any cleanup / filtering query that assumes `lead_source = 'google_maps'`
+  will return zero rows; use `created_at` window or `unique_key` for now.
+
+## Next 16 prerender + `useSearchParams` contract
+- `frontend/app/page.tsx` is `'use client'` and uses `useSearchParams()` to
+  consume the cross-page nav query params (`?openSettings=1`,
+  `?view=audited`, etc.). Next 16 requires every `useSearchParams()`
+  consumer to be wrapped in `<Suspense>` so that `next build` can prerender
+  the page shell without bailing out to CSR. The default export is a thin
+  `<Suspense fallback={null}><DashboardInner /></Suspense>` wrapper; the
+  real component is `DashboardInner`. Removing the Suspense will cause
+  `next build` to fail with `missing-suspense-with-csr-bailout` at the
+  static-generation step — a hard deploy blocker on Render's
+  `npm run build` step.
+- Local dev `uvicorn` ships the `server: uvicorn` header by default;
+  Dockerfile's CMD adds `--no-server-header`. This is cosmetic only and
+  prod (via Docker) suppresses the header. The Next.js proxy also strips
+  any `server` header on forward as belt-and-braces.
+
+## End-to-end smoke flow (verified 2026-05-21)
+Logged-in user → AI chat → natural-language action → Confirm & Execute →
+Playwright crawl → Supabase upsert is the load-bearing pipeline. Verified
+end-to-end via chrome-devtools MCP against a throw-away Supabase Auth user
+on 2026-05-21:
+- `"How many leads are in the database?"` → `STATUS_CHECK` autoexec returns
+  `"<N> leads total."` (see `_get_status_summary`).
+- `"Find me 3 dentists in Mostar"` → `DISCOVERY_SEARCH` plan card → Confirm
+  & Execute → orchestrator job → 8 leads in ~35s.
+- Cookie floor + Origin gate + X-API-Key proxy injection all hold under the
+  full flow. No exceptions in backend log. Re-run via the same MCP browser
+  path if the auth / proxy / orchestrator wiring changes.
 
 ## Cross-page navigation contract (`frontend/app/page.tsx` useEffect on mount)
 - Sidebar/Insights/Campaigns all share the same `<Sidebar>` component, but
