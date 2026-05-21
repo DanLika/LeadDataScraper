@@ -44,7 +44,16 @@ def clean_phone(phone_str):
 
 def process_gmaps_df(df, source_label="Google Maps"):
     """Processes a raw Google Maps export DataFrame based on the Colab script logic."""
-    
+
+    # Defensive copy. Callers can pass a view (sliced from a parent
+    # DataFrame), and pandas 2.x emits `FutureWarning:
+    # ChainedAssignmentError` on every subsequent column assignment to
+    # such a view — silenced today, but in pandas 3.0's Copy-on-Write
+    # mode the writes will be no-ops. Forcing a copy here makes
+    # downstream column writes (`df['Website'] = ...` etc.) always
+    # affect the local frame.
+    df = df.copy()
+
     # 1. Rename columns
     df = df.rename(columns=GMAPS_COLUMNS_TO_RENAME)
     
@@ -56,42 +65,49 @@ def process_gmaps_df(df, source_label="Google Maps"):
     # 3. Drop uninformative columns
     df = df.drop(columns=COLUMNS_TO_DROP, errors='ignore').copy()
 
-    # 4. Clean specific columns
+    # 4. Clean specific columns. Use `df.loc[:, col]` rather than `df[col]`
+    # so the writes are explicit single-step assignments — pandas' CoW
+    # preview mode (and pandas 3.0 default) flags `df[col] = ...` as
+    # `FutureWarning: ChainedAssignmentError` when the right-hand side
+    # carries any internal reference back to the frame
+    # (e.g. `df[col].apply(...)`).
     if 'Website' in df.columns:
-        df['Website'] = df['Website'].apply(clean_website)
+        df.loc[:, 'Website'] = df['Website'].apply(clean_website)
 
     if 'Rating' in df.columns:
-        df['Rating'] = pd.to_numeric(
+        df.loc[:, 'Rating'] = pd.to_numeric(
             df['Rating'].astype(str).str.replace(',', '.', regex=False),
             errors='coerce',
         )
 
     if 'Reviews' in df.columns:
-        df['Reviews'] = pd.to_numeric(
+        df.loc[:, 'Reviews'] = pd.to_numeric(
             df['Reviews'].astype(str).str.replace(r'[()]', '', regex=True),
             errors='coerce',
         ).astype('Int64')
 
     if 'Phone' in df.columns:
-        df['Phone'] = df['Phone'].apply(clean_phone).fillna('')
+        df.loc[:, 'Phone'] = df['Phone'].apply(clean_phone).fillna('')
 
     if 'Address' in df.columns:
-        df['Address'] = df['Address'].replace(['·', ''], np.nan)
+        df.loc[:, 'Address'] = df['Address'].replace(['·', ''], np.nan)
 
     if 'Category' in df.columns:
-        df['Category'] = df['Category'].replace(['·', ''], np.nan)
+        df.loc[:, 'Category'] = df['Category'].replace(['·', ''], np.nan)
 
-    # 5. Drop fully empty rows (of essential fields)
-    df.dropna(subset=['Name', 'Google Maps Link', 'Website'], how='all', inplace=True)
+    # 5. Drop fully empty rows. `inplace=True` is deprecated in CoW mode;
+    # explicit reassignment is the future-proof equivalent.
+    df = df.dropna(subset=['Name', 'Google Maps Link', 'Website'], how='all')
 
-    # 6. Add metadata columns
-    df['EXTRACTED_EMAIL'] = np.nan
-    df['SOURCE_FILE'] = source_label
+    # 6. Add metadata columns (loc-based for CoW safety)
+    df.loc[:, 'EXTRACTED_EMAIL'] = np.nan
+    df.loc[:, 'SOURCE_FILE'] = source_label
 
-    # 7. Create unique_key
-    df['unique_key'] = df['Google Maps Link'].fillna('') + '_' + df['Name'].fillna('')
-    df['unique_key'] = df.apply(
-        lambda row: row['unique_key'] if str(row['unique_key']).strip('_') != '' 
+    # 7. Create unique_key (loc-based for CoW safety — see comment block
+    # above on `ChainedAssignmentError` semantics).
+    df.loc[:, 'unique_key'] = df['Google Maps Link'].fillna('') + '_' + df['Name'].fillna('')
+    df.loc[:, 'unique_key'] = df.apply(
+        lambda row: row['unique_key'] if str(row['unique_key']).strip('_') != ''
         else f"gmaps_{source_label.lower().replace(' ', '_')}_{row.name}",
         axis=1
     )
