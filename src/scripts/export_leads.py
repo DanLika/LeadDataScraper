@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from datetime import datetime
 from src.utils.supabase_helper import SupabaseHelper
+from src.utils.csv_helper import sanitize_dataframe_for_csv
 
 def check_vulnerability(row):
     audit = row.get('audit_results') or {}
@@ -75,20 +76,20 @@ def export_leads():
 
     # 1. Full Leads All Data
     full_path = f"{export_dir}/full_leads_all_data_{timestamp}.csv"
-    df.to_csv(full_path, index=False)
+    sanitize_dataframe_for_csv(df).to_csv(full_path, index=False)
     print(f"✅ Exported all leads: {full_path}")
 
     # 2. Leads Vulnerable (No SSL or No H1)
     # Note: audit_results is a JSON column in Supabase
     vulnerable_df = df[df.apply(check_vulnerability, axis=1)]
     vulnerable_path = f"{export_dir}/leads_vulnerable_no_ssl_no_h1_{timestamp}.csv"
-    vulnerable_df.to_csv(vulnerable_path, index=False)
+    sanitize_dataframe_for_csv(vulnerable_df).to_csv(vulnerable_path, index=False)
     print(f"✅ Exported vulnerable leads ({len(vulnerable_df)}): {vulnerable_path}")
 
     # 3. High Priority Outreach List (SEO score < 50)
     high_priority_df = df[df.apply(is_high_priority, axis=1)]
     hp_path = f"{export_dir}/high_priority_outreach_{timestamp}.csv"
-    high_priority_df.to_csv(hp_path, index=False)
+    sanitize_dataframe_for_csv(high_priority_df).to_csv(hp_path, index=False)
     print(f"✅ Exported high priority leads ({len(high_priority_df)}): {hp_path}")
 
     # 4. Outreach Ready List (Has Email OR Phone AND Score > 30)
@@ -132,7 +133,7 @@ def export_leads():
         outreach_export = outreach_export[outreach_export['email'].str.strip() != '']
 
         outreach_path = f"{export_dir}/outreach_ready_leads_{timestamp}.csv"
-        outreach_export.to_csv(outreach_path, index=False)
+        sanitize_dataframe_for_csv(outreach_export).to_csv(outreach_path, index=False)
         print(f"✅ Exported outreach ready leads ({len(outreach_export)}): {outreach_path}")
 
 if __name__ == "__main__":

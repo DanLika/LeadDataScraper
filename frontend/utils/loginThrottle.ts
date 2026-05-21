@@ -39,10 +39,24 @@ export function checkLoginRate(ip: string | null | undefined): { allowed: boolea
 
   // Opportunistic compaction — drop expired buckets when the Map grows.
   // Avoids a separate timer/sweeper which would be wrong-shaped in a
-  // request-scoped module.
+  // request-scoped module. If a single-window flood of unique IPs never
+  // ages anything out, fall back to evicting the oldest bucket so the cap
+  // is hard, not advisory.
   if (buckets.size > MAX_BUCKETS) {
+    const sizeBefore = buckets.size;
     for (const [k, b] of buckets) {
       if (now - b.windowStart > WINDOW_MS) buckets.delete(k);
+    }
+    if (buckets.size === sizeBefore) {
+      let oldestKey: string | undefined;
+      let oldestStart = Infinity;
+      for (const [k, b] of buckets) {
+        if (b.windowStart < oldestStart) {
+          oldestStart = b.windowStart;
+          oldestKey = k;
+        }
+      }
+      if (oldestKey !== undefined) buckets.delete(oldestKey);
     }
   }
 

@@ -11,10 +11,21 @@ on:
 permissions:
   contents: read
 
+# Skip security jobs on fork PRs. `pip-audit` resolves a (potentially
+# attacker-controlled) requirements.txt and pip has no `--ignore-scripts`
+# equivalent — `setup.py` runs arbitrarily. Same-repo PRs still run; fork
+# contributions get audited after a maintainer merges to a branch on the
+# main repo. Push + schedule are unaffected.
+#
+# Note on action pinning: tags below are mutable. For the strongest
+# supply-chain posture, replace each `@v4`/`@v5` with the 40-char commit
+# SHA of the release tag (kept up-to-date by Dependabot's
+# `package-ecosystem: github-actions`).
 jobs:
   pip-audit:
     name: pip-audit (Python deps)
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,6 +42,7 @@ jobs:
   npm-audit:
     name: npm audit (frontend deps)
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     defaults:
       run:
         working-directory: frontend
@@ -50,8 +62,18 @@ jobs:
   semgrep:
     name: semgrep (SAST)
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
-      - uses: returntocorp/semgrep-action@v1
+      - uses: actions/setup-python@v5
         with:
-          config: p/owasp-top-ten p/python p/typescript p/react
+          python-version: '3.12'
+      # Run Semgrep via the official pip package instead of the deprecated
+      # `returntocorp/semgrep-action@v1` (org was renamed to `semgrep/` and
+      # the action repo is stale — a tag re-point or owner-takeover would
+      # execute arbitrary code in the CI runner).
+      - name: Install Semgrep
+        run: python -m pip install --upgrade pip semgrep
+      - name: Run Semgrep scan
+        # `--error` exits non-zero on findings so the job fails on a hit.
+        run: semgrep scan --error --config p/owasp-top-ten --config p/python --config p/typescript --config p/react

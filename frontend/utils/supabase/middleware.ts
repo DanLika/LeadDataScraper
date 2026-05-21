@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { hardenCookieOptions } from './cookie-floor.mjs'
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -24,25 +25,15 @@ export async function updateSession(request: NextRequest) {
           supabaseResponse = NextResponse.next({
             request,
           })
-          // True floor: spread options first, then hard-set protected keys
-          // so Supabase can tighten (Strict / longer maxAge) but never loosen.
-          // SameSite: keep 'strict' if Supabase asked for it, otherwise pin
-          //   to 'lax' (rejects 'none' even if a future SDK sets it).
-          // HttpOnly: always true — JS access to the session cookie is never
-          //   needed by this app.
-          // Secure: pinned in production regardless of what Supabase passes;
-          //   in dev we leave it off so http://localhost works.
+          // Cookie floor lives in cookie-floor.mjs (pure helper, unit-tested).
+          // Supabase can tighten (Strict / longer maxAge) but never loosen.
           const isProd = process.env.NODE_ENV === 'production'
           cookiesToSet.forEach(({ name, value, options }) => {
-            const requestedStrict =
-              (options?.sameSite as string | undefined)?.toLowerCase() === 'strict'
-            const hardened = {
-              ...options,
-              sameSite: (requestedStrict ? 'strict' : 'lax') as 'lax' | 'strict',
-              httpOnly: true,
-              secure: isProd ? true : Boolean(options?.secure),
-            }
-            supabaseResponse.cookies.set(name, value, hardened)
+            supabaseResponse.cookies.set(
+              name,
+              value,
+              hardenCookieOptions(options, isProd),
+            )
           })
         },
       },

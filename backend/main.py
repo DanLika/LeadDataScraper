@@ -218,9 +218,14 @@ def _assert_single_tenant_if_enforced() -> None:
     except RuntimeError:
         raise
     except Exception as e:
-        # Don't hard-fail the boot for a transient Supabase Auth API hiccup —
-        # log loudly so the invariant is still observable.
-        logger.warning("Single-tenancy check could not run: %s", e)
+        # OPERATOR_EMAIL is explicitly opt-in. "Could not run" must not pass
+        # for "passed" — an Auth API hiccup, permission error, or network
+        # blip cannot silently authorise boot when the operator has asked
+        # the invariant to be enforced. Fail closed.
+        raise RuntimeError(
+            f"Single-tenancy check could not run (OPERATOR_EMAIL set): {e}. "
+            "Resolve the Auth API failure or unset OPERATOR_EMAIL to skip."
+        ) from e
 
 
 @asynccontextmanager
@@ -344,7 +349,7 @@ def validate_csv_metadata(file: UploadFile) -> Optional[JSONResponse]:
     if not file.filename or not file.filename.lower().endswith('.csv'):
         return error_response("Only CSV files are allowed.", status_code=400)
 
-    if file.content_type and file.content_type not in ["text/csv", "application/vnd.ms-excel", "application/octet-stream"]:
+    if file.content_type and file.content_type not in ("text/csv", "application/vnd.ms-excel"):
         return error_response(f"Invalid content type: {file.content_type}. Expected text/csv.", status_code=400)
     return None
 
@@ -510,7 +515,8 @@ async def stop_audit(request: Request):
     return {"status": "stopped"}
 
 @app.get("/health/schema", dependencies=[Depends(verify_api_key)])
-async def health_schema():
+@limiter.limit("12/minute")
+async def health_schema(request: Request):
     missing = db.check_schema()
     return {
         "status": "healthy" if not missing else "degraded",
@@ -1021,7 +1027,8 @@ async def export_campaign_messages(request: Request, campaign_id: str):
 
         export_path = f"exports/campaign_{campaign_id[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         os.makedirs("exports", exist_ok=True)
-        df.to_csv(export_path, index=False)
+        from src.utils.csv_helper import sanitize_dataframe_for_csv
+        sanitize_dataframe_for_csv(df).to_csv(export_path, index=False)
 
         return FileResponse(
             path=export_path,

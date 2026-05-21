@@ -28,9 +28,11 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   future `/login-internal` or `/authentication-guide` route from being silently
   unauthenticated by string-prefix overlap.
 - `/login?next=<path>` is sanitised by `sanitizeNext()` in
-  `frontend/app/login/page.tsx`. Only same-origin relative paths are accepted
-  (must start with `/`, must NOT start with `//` or `/\`). Closes open-redirect
-  → phishing-assist on the auth flow.
+  `frontend/app/login/actions.ts`. Only same-origin relative paths are accepted
+  (must start with `/`, must NOT start with `//` or `/\`). The allowlist
+  regex deliberately excludes `@` and `:` so a `/@evil.com/foo` value can't
+  resolve to a same-origin URL whose address bar mimics the `user@host`
+  phishing-display pattern. Closes open-redirect + phishing-assist on auth.
 - Supabase session cookies set via `setAll()` in
   `frontend/utils/supabase/middleware.ts` are true-floored to
   `SameSite=Lax`, `HttpOnly=true`, `Secure=true` (prod). Spread order is
@@ -62,7 +64,12 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `/orchestrator/status/{job_id}`, `/campaigns/{id}/...`) intentionally
   don't filter by `owner_user_id` — design assumes one operator. Setting
   `OPERATOR_EMAIL` makes that invariant trip loudly at startup if a second
-  user is ever provisioned. Unset → check skipped.
+  user is ever provisioned. Unset → check skipped. **The check is fail-closed:**
+  the only swallowed exception is the explicit `RuntimeError` raised on a
+  real invariant violation; any other failure (Supabase Auth API hiccup,
+  permission error, network blip) re-raises and aborts boot — "could not
+  run" must not pass for "passed" when the operator has opted into the
+  invariant.
 - Interactive docs (`/docs`, `/openapi.json`, `/redoc`) are **disabled by default**.
   Enable in dev via `ENABLE_DOCS=true`. Never set in production.
 - **Frontend does NOT hold the API key.** The browser calls a same-origin Next.js
@@ -129,7 +136,28 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   authed shell. `_next/static/*` chunks are excluded (immutable content-hashed
   assets — must stay cacheable for perf).
 - `/upload` streams the request body and aborts at 50 MB (`MAX_UPLOAD_BYTES`)
-  with a 413 — no full-buffer DoS.
+  with a 413 — no full-buffer DoS. Content-Type allowlist is strict:
+  `text/csv` and `application/vnd.ms-excel` only. `application/octet-stream`
+  was removed — defense-in-depth so any downstream code that trusts the
+  declared type can't be tricked by a generic byte stream.
+- **CSV / formula injection guard.** Lead names, `company_name`,
+  `pain_points`, `email_hook`, and other free-text fields come from CSV
+  uploads + Google-Maps scrapes — both attacker-controllable. Every
+  `to_csv` call site funnels through `sanitize_dataframe_for_csv()` in
+  `src/utils/csv_helper.py`, which prefixes any string cell starting with
+  `= @ + - \t \r` with `'` so Excel/Sheets/Numbers render it as literal
+  text instead of executing `=HYPERLINK(...)` or `@SUM(...)` when the
+  operator opens the export. Applied at `save_csv`,
+  `src/scripts/export_leads.py` (4 sites), and the
+  `/campaigns/{id}/export` handler in `backend/main.py`. Any new export
+  path must use the same helper.
+- **SMTP header injection guard** (`src/integrations/email_sender.py`).
+  Recipient regex is `^[^@\s]+@[^@\s]+\.[^@\s]+$` — `\s` excludes `\r\n`
+  so `victim@x.com\r\nBcc: attacker@evil` can't smuggle Cc/Bcc/Subject
+  headers via `msg["To"]`. Subject + from_name additionally pass a
+  CRLF-reject check before they are written into MIME headers — both
+  carry attacker-controllable content (Gemini draft, operator override).
+  When/if SMTP send wires up, this is the boundary check.
 - Outbound HTTP from `seo_audit.py` and `enrichment_engine.py` runs through
   `src/utils/ssrf_guard.py` (`SSRFGuardResolver` + `assert_safe_url`) which
   rejects private / loopback / link-local / reserved / multicast IPs and
@@ -166,7 +194,15 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `orchestration_jobs`. Anon + authenticated roles are revoked. All reads/writes
   go through the backend, which uses `service_role` to bypass RLS server-side.
 - Schema migrations use `add_lead_column(text)` RPC (allowlisted column-name
-  regex). The generic `exec_sql` RPC has been removed.
+  regex). The generic `exec_sql` RPC has been removed. The function is
+  `SECURITY DEFINER` with `SET search_path = pg_catalog, public` so a
+  malicious `public.format(...)` shadow can't hijack the built-in identifier
+  resolution; `ALTER FUNCTION ... OWNER TO postgres` pins the privileged
+  authority; `REVOKE CREATE ON SCHEMA public FROM PUBLIC` blocks roles from
+  creating shadowing objects in the first place. `service_role` bypasses
+  GRANTs implicitly, so the backend still calls it; Supabase Studio
+  operations may need the role re-granted if a future workflow relies on
+  PUBLIC creating in `public` (none currently does).
 - CORS restricted to specific methods (`GET/POST/PUT/DELETE/OPTIONS`) and headers (`Content-Type/Authorization/X-API-Key`)
 - All POST endpoints use Pydantic models for input validation (no raw `dict` payloads)
 - Error responses never leak internal exception details
@@ -201,17 +237,59 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `--no-server-header` so `Server: uvicorn` never leaves the box. The
   Next.js proxy additionally strips any upstream `Server` header on
   forward — belt-and-braces if uvicorn is ever launched without the flag.
+- **Dockerfile hardening.** `build-essential` is installed AND purged in
+  the same `RUN` layer (gcc/make etc. don't ship to the runtime image — no
+  post-RCE local-privesc toolkit). A container-level `HEALTHCHECK` polls
+  `/` (the unauthenticated liveness probe) so `docker run` and local
+  orchestrators can detect a wedged uvicorn worker. Render's external
+  probe still owns prod health.
 - Security invariants for `/execute` are locked in by
   `tests/test_execute_plan_model.py` (17 tests + 17 subtests). Covers
   Literal allowlist, `extra='forbid'`, bounded-length `constr` per key,
   and the `model_dump(exclude_none=True)` requirement that preserves
   handler defaults like `params.get("filters", "high-risk")`. Run via
   `pytest tests/`.
+- **Outreach modal `mailto:` href** (`frontend/app/page.tsx`). `leadEmail`
+  is `encodeURIComponent`-wrapped before interpolation, alongside the
+  subject + body. Without the encode an attacker-controlled lead email
+  like `victim@x.com?bcc=attacker@evil` smuggled Cc/Bcc/Subject/body into
+  the operator's mail client on click.
+- **Frontend dependency pinning policy.** `package.json` drops the `^`
+  prefix on security-critical libs (`next`, `@supabase/ssr`,
+  `@supabase/supabase-js`) so a future `npm install` (vs `npm ci`) can't
+  silently take a minor of `@supabase/supabase-js` — which sees session
+  JWTs and talks to the DB. The lockfile is the authoritative pin;
+  removing `^` is belt-and-braces. The `postcss` override is pinned
+  `^8.5.10` (was unbounded `>=`) to prevent a regenerated lockfile from
+  accepting an arbitrary future postcss.
 - CI security gates in `.github/workflows/security.yml`: `pip-audit --strict`
   on `requirements.txt`, `npm audit --omit=dev --audit-level=high` on the
   frontend, and Semgrep OWASP/Python/TypeScript/React rulesets. Runs on
   push, PR, and daily cron (catches newly-disclosed CVEs in already-pinned
-  deps without a code change).
+  deps without a code change). **Fork-PR guard**: every job carries
+  `if: github.event_name != 'pull_request' || github.event.pull_request
+  .head.repo.full_name == github.repository` so a hostile fork PR can't
+  feed `pip-audit` a `requirements.txt` whose `setup.py` runs arbitrary
+  code in the runner (pip has no `--ignore-scripts` equivalent). Semgrep
+  runs via `pip install semgrep && semgrep scan --error` — the deprecated
+  `returntocorp/semgrep-action@v1` was removed; the org was renamed and
+  the action repo is stale, so a tag re-point would have executed
+  attacker code in CI.
+- **Login brute-force gate** (`frontend/utils/loginThrottle.ts`). In-process
+  per-IP throttle in front of `signInWithPassword`: 5 attempts / 60s.
+  Bucket key derives from `TRUSTED_CLIENT_IP_HEADER` (same trusted-IP
+  source as the proxy); spoofless callers fall back to a synthetic
+  `unknown` bucket. `MAX_BUCKETS = 10_000` is a **hard cap** — when the
+  expired-sweep frees nothing, the oldest bucket is evicted, so a unique-IP
+  flood within one window can't pin memory. Counter increments on every
+  attempt regardless of outcome; `clearLoginRate()` releases the bucket
+  on successful credential check.
+- **Proxy `BACKEND_URL` scheme assertion** (`frontend/app/api/proxy/[...path]/route.ts`).
+  Render's `fromService.property: host` returns a bare hostname, so
+  `_resolveBackendUrl()` prepends `https://` if no scheme is present, and
+  in `NODE_ENV=production` throws if the resolved URL doesn't start with
+  `https://`. Stops a misconfigured `BACKEND_URL` from silently
+  downgrading prod traffic to plaintext over the Render internal network.
 
 ## AI Router invariants (`src/core/agentic_router.py`)
 - `route_instruction()` attaches a `lead_index` (unique_key + name +

@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { hardenCookieOptions } from './cookie-floor.mjs'
 
 export async function createClient() {
   const cookieStore = await cookies()
@@ -13,24 +14,13 @@ export async function createClient() {
           return cookieStore.getAll()
         },
         setAll(cookiesToSet) {
-          // Mirror middleware.ts true-floor: Supabase can tighten (Strict,
-          // longer maxAge) but never loosen. HttpOnly is always true — JS
-          // never needs to read the session cookie. Secure is pinned in
-          // production. Important on Server Action paths (e.g. login) where
-          // the cookie is set directly during the action handler, not via
-          // a middleware-mediated request.
+          // Cookie floor lives in cookie-floor.mjs (pure helper, unit-tested).
+          // Used on Server Action paths (e.g. login) where the cookie is set
+          // directly during the action handler, not via middleware.
           try {
             const isProd = process.env.NODE_ENV === 'production'
             cookiesToSet.forEach(({ name, value, options }) => {
-              const requestedStrict =
-                (options?.sameSite as string | undefined)?.toLowerCase() === 'strict'
-              const hardened = {
-                ...options,
-                sameSite: (requestedStrict ? 'strict' : 'lax') as 'lax' | 'strict',
-                httpOnly: true,
-                secure: isProd ? true : Boolean(options?.secure),
-              }
-              cookieStore.set(name, value, hardened)
+              cookieStore.set(name, value, hardenCookieOptions(options, isProd))
             })
           } catch {
             // The `setAll` method was called from a Server Component, which

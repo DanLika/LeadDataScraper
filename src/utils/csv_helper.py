@@ -6,6 +6,31 @@ from src.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+# CSV / formula injection guard. Lead names, company names, pain_points,
+# email_hook etc. come from CSV uploads + Google-Maps scrapes — both
+# attacker-controllable. Spreadsheet apps execute cells starting with
+# `=`, `@`, `+`, `-`, `\t`, or `\r` as formulas the moment the operator
+# opens the export. Prefix the cell with an apostrophe so the value is
+# rendered as literal text.
+_CSV_FORMULA_PREFIXES = ('=', '@', '+', '-', '\t', '\r')
+
+
+def sanitize_csv_cell(value):
+    if isinstance(value, str) and value and value[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
+def sanitize_dataframe_for_csv(df):
+    """Return a copy of `df` with every string cell neutralised against
+    CSV / formula injection. Cheap on small exports; the dashboard caps
+    leads at 200 per fetch and exports are operator-triggered."""
+    out = df.copy()
+    for col in out.select_dtypes(include=['object']).columns:
+        out[col] = out[col].map(sanitize_csv_cell)
+    return out
+
+
 def merge_and_deduplicate(dataframes):
     """
     Combines multiple DataFrames, ensures unique_key is present, and deduplicates.
@@ -132,9 +157,11 @@ def load_csv_with_unique_key(filepath, df_name="CSV"):
     return df
 
 def save_csv(df, filepath):
-    """Saves DataFrame to CSV and ensures the directory exists."""
+    """Saves DataFrame to CSV and ensures the directory exists.
+    Sanitises every string cell against CSV / formula injection before
+    writing — see `sanitize_dataframe_for_csv`."""
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
-    df.to_csv(filepath, index=False)
+    sanitize_dataframe_for_csv(df).to_csv(filepath, index=False)
     logger.info("Data saved to '%s'.", filepath)
 
 def export_outreach_ready_csv(df, output_path):

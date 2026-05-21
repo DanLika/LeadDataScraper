@@ -4,7 +4,20 @@ import { createClient } from '@/utils/supabase/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+// Render's `fromService.property: host` returns a bare hostname (no scheme).
+// Prepend `https://` if no scheme is present, and in production assert the
+// final URL is `https://` so a misconfigured BACKEND_URL can't silently
+// downgrade prod traffic to plaintext over the Render network. The
+// localhost fallback stays `http://` for dev.
+function _resolveBackendUrl(): string {
+  const raw = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  if (process.env.NODE_ENV === 'production' && !withScheme.startsWith('https://')) {
+    throw new Error(`BACKEND_URL must use https:// in production; got ${withScheme}`);
+  }
+  return withScheme;
+}
+const BACKEND_URL = _resolveBackendUrl();
 const API_SECRET_KEY = process.env.API_SECRET_KEY || '';
 // Platform-injected client-IP header. Defaults to Vercel; set to
 // 'x-forwarded-for' on Render or other XFF-using hosts. Never trust a header

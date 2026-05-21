@@ -22,7 +22,10 @@ const TRUSTED_CLIENT_IP_HEADER = (process.env.TRUSTED_CLIENT_IP_HEADER || 'x-ver
 function sanitizeNext(raw: string | null | undefined): string {
   if (!raw) return '/'
   if (raw.length > 512) return '/'
-  if (!/^\/[A-Za-z0-9._~\-/?#=&%+@:!$'()*,;]*$/.test(raw)) return '/'
+  // `@` and `:` are excluded to avoid `/@evil.com/...` phishing-display
+  // patterns that mimic the userinfo URL form. Neither is needed for
+  // legitimate same-origin paths in this app.
+  if (!/^\/[A-Za-z0-9._~\-/?#=&%+!$'()*,;]*$/.test(raw)) return '/'
   if (raw.startsWith('//')) return '/'
   return raw
 }

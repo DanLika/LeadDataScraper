@@ -5,14 +5,15 @@ FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies if any extra are needed (usually not with the official image)
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install Python dependencies
+# Install build toolchain ONLY for pip wheel compilation, then purge in the
+# same RUN layer so gcc/make/etc don't ship to the runtime image. Keeps the
+# post-RCE local-privesc toolkit out of the container.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && pip install --no-cache-dir -r requirements.txt \
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Playwright browsers (chromium is enough for our scraper)
 RUN playwright install chromium
@@ -32,6 +33,12 @@ EXPOSE 8000
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
+
+# Container-level liveness — Render's external probe still owns prod
+# health, but this lets `docker run` / local orchestrators detect a
+# wedged uvicorn worker. `/` is the unauthenticated liveness probe.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).status==200 else 1)" || exit 1
 
 # Start the FastAPI application via uvicorn.
 # --no-server-header suppresses "Server: uvicorn" — avoids stack fingerprint leakage.

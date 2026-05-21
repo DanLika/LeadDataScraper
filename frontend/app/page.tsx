@@ -1236,7 +1236,7 @@ export default function Dashboard() {
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     To:{' '}
                     <a
-                      href={`mailto:${outreachDraft.leadEmail}${outreachDraft.subject ? `?subject=${encodeURIComponent(outreachDraft.subject)}&body=${encodeURIComponent(outreachDraft.text)}` : ''}`}
+                      href={`mailto:${encodeURIComponent(outreachDraft.leadEmail)}${outreachDraft.subject ? `?subject=${encodeURIComponent(outreachDraft.subject)}&body=${encodeURIComponent(outreachDraft.text)}` : ''}`}
                       rel="noopener noreferrer"
                       style={{ color: isPlaceholder ? 'var(--warning)' : 'var(--primary)' }}
                       title="Open in default mail client (prefilled subject + body)"

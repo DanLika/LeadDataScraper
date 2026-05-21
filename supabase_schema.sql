@@ -127,7 +127,10 @@ CREATE OR REPLACE FUNCTION add_lead_column(col text)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+-- `pg_catalog` first prevents shadowing of `format`/built-ins by a
+-- malicious same-name function in `public`. SECURITY DEFINER runs as the
+-- function owner, so any search_path hijack would inherit that authority.
+SET search_path = pg_catalog, public
 AS $$
 BEGIN
   IF col IS NULL OR col !~ '^[A-Za-z_][A-Za-z0-9_]{0,62}$' THEN
@@ -139,6 +142,15 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION add_lead_column(text) FROM anon, authenticated, public;
 -- service_role bypasses GRANTs implicitly, so backend can still call this.
+
+-- Pin the function to the superuser/postgres owner so the SECURITY DEFINER
+-- authority can't be downgraded by a re-deploy under a less-trusted role.
+ALTER FUNCTION add_lead_column(text) OWNER TO postgres;
+
+-- Block any role from creating shadowing objects in `public` (function,
+-- table, view) that could collide with built-in identifiers resolved via
+-- search_path inside SECURITY DEFINER functions.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 -- =============================================================================
 -- Live-state reconciliation (additive, forward-only)
