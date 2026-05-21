@@ -44,6 +44,11 @@ class TaskOrchestrator:
         self.db = SupabaseHelper()
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self._job_lock = asyncio.Lock()
+        # Active auditor + enricher per job_id, so stop_job can propagate a
+        # cooperative cancel into the gather currently running inside
+        # _process_in_chunks. Without this map, stop_job only flipped the DB
+        # row to status=stopped and the in-flight gather completed regardless.
+        self._active_auditors: Dict[str, ParallelAuditor] = {}
 
     async def run_discovery_job(self, query: str, location: str = ""):
         """
@@ -195,6 +200,11 @@ class TaskOrchestrator:
                 leads_to_upsert.append(res)
                 if not res.get('last_error'):
                     batch_success = True
+            elif isinstance(res, asyncio.CancelledError):
+                # Operator stop: lead was mid-flight; don't write a Failed
+                # row (it was never given a fair attempt). Leaving the row
+                # at its prior state lets a retry pick it up clean.
+                logger.info("Lead cancelled by stop request — leaving row untouched.")
             elif isinstance(res, Exception):
                 logger.error("Task exception: %s", res)
 
@@ -221,6 +231,10 @@ class TaskOrchestrator:
 
         auditor = ParallelAuditor()
         enricher = EnrichmentEngine()
+
+        # Register so stop_job(job_id) can call auditor.stop() and trigger the
+        # cooperative cancel inside audit_single_lead / hunt_single_lead.
+        self._active_auditors[job_id] = auditor
 
         if tasks is None:
             tasks = ["audit", "enrich"]
@@ -283,6 +297,11 @@ class TaskOrchestrator:
                 "current_phase": f"Error: {str(e)}"
             })
             raise e
+        finally:
+            # Unregister the auditor so stop_job stops finding a stale reference
+            # after the job has exited. pop with default to be defensive against
+            # double-finally invocations or unexpected job_id collisions.
+            self._active_auditors.pop(job_id, None)
 
     async def _process_single_lead(self, lead: Dict[str, Any], auditor: ParallelAuditor, enricher: EnrichmentEngine, tasks: List[str] = None) -> Dict[str, Any]:
         """
@@ -367,7 +386,16 @@ class TaskOrchestrator:
         return response.data[0] if response.data else {"status": "not_found"}
 
     async def stop_job(self, job_id: str):
+        # Mark the DB row first so the outer chunk loop in _process_in_chunks
+        # bails before fetching the next chunk.
         await self._update_job_status(job_id, {"status": "stopped", "current_phase": "Stopped by user"})
+        # Propagate the stop into the active auditor so any audit/hunt
+        # coroutine currently mid-flight raises CancelledError at its next
+        # cooperative checkpoint, instead of running to completion (the
+        # B9 race in E2E_TEST_REPORT.md).
+        active = self._active_auditors.get(job_id)
+        if active is not None:
+            active.stop()
         return {"status": "stopping", "job_id": job_id}
 
     async def ingest_leads_from_csv(self, csv_path: str, merge_with_local: bool = True):

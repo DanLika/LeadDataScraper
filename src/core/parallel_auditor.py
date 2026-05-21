@@ -37,6 +37,18 @@ class ParallelAuditor:
         self.status["stop_requested"] = True
         self.status["active"] = False
 
+    def _raise_if_stop_requested(self) -> None:
+        """Cooperative cancellation point.
+
+        Active audit/hunt coroutines call this between awaits so a STOP
+        click can actually interrupt an in-flight job (not just prevent the
+        next chunk from starting). Raises CancelledError, which `_process_
+        and_upsert_chunk` and `run_batch` swallow via `gather(..., return_
+        exceptions=True)`.
+        """
+        if self.status.get("stop_requested"):
+            raise asyncio.CancelledError("stop requested by operator")
+
     async def _scrape_business_details(self, hunter: LeadHunter, lead: Dict) -> Dict:
         """Scrape website and find social links. Returns intermediate data dict."""
         website = lead.get("website")
@@ -106,17 +118,25 @@ class ParallelAuditor:
         """
         unique_key = lead.get("unique_key")
 
+        # Hunter holds an aiohttp.ClientSession lazily; without an explicit
+        # close() in finally, every hunt leaks one connector + several response
+        # handlers (visible in test runs as "Unclosed client session" /
+        # "Unclosed connector" logs). At "Hunt All" volume this adds up.
+        hunter = LeadHunter()
         try:
-            hunter = LeadHunter()
+            # Bail before doing any work if the operator already clicked STOP.
+            self._raise_if_stop_requested()
 
             # 1. Scrape website and find social links
             scraped = await self._scrape_business_details(hunter, lead)
+            self._raise_if_stop_requested()
 
             # 2. Email hunting
             final_email = await self._hunt_for_email(
                 hunter, lead.get("email"), scraped["scraped_email"],
                 scraped["search_name"], lead.get("website")
             )
+            self._raise_if_stop_requested()
 
             # 3. AI enrichment, scoring, segmentation
             enriched = await self._enrich_business_data(hunter, lead, scraped, final_email)
@@ -131,12 +151,24 @@ class ParallelAuditor:
                 **enriched
             }
             return result
+        except asyncio.CancelledError:
+            # Operator-initiated stop. Don't mark the lead Failed — it was
+            # never given a fair attempt. Re-raise so gather sees the
+            # cancellation; the orchestrator filters these out before
+            # upserting.
+            logger.info("Hunt cancelled by stop request for %s", unique_key)
+            raise
         except asyncio.TimeoutError:
             logger.warning("Hunt Timeout for %s", unique_key)
             return {"unique_key": unique_key, "status": "Failed", "error": "Timeout"}
         except Exception as e:
             logger.error("Error hunting lead %s: %s", unique_key, e, exc_info=True)
             return {"unique_key": unique_key, "status": "Failed", "error": str(e)}
+        finally:
+            try:
+                await hunter.close()
+            except Exception:  # noqa: BLE001 — closing must never re-raise
+                pass
 
     async def audit_single_lead(self, lead: Dict):
         """
@@ -151,12 +183,17 @@ class ParallelAuditor:
 
         async with self.semaphore:
             from src.processors.leadhunter import LeadHunter
+            # See hunt_single_lead: hunter owns an aiohttp session that must
+            # be closed even when the audit fails, or we leak per-call.
             hunter = LeadHunter()
             pain_points = []
 
             try:
+                self._raise_if_stop_requested()
+
                 # 1. SEO Audit
                 result = await perform_seo_audit_async(website)
+                self._raise_if_stop_requested()
 
                 # 2. Pain Point Analysis (if we got text)
                 if "page_text" in result and result["page_text"]:
@@ -166,6 +203,7 @@ class ParallelAuditor:
                         audit_results=result
                     )
                     result["pain_points"] = pain_points
+                    self._raise_if_stop_requested()
 
                     # Generate outreach hooks based on pain points and audit data
                     hooks = await hunter.generate_outreach_hooks_async(
@@ -174,6 +212,7 @@ class ParallelAuditor:
                         audit_results=result
                     )
                     result.update(hooks)
+                    self._raise_if_stop_requested()
 
                 # 3. High Risk Determination
                 score = result.get("score")
@@ -211,6 +250,11 @@ class ParallelAuditor:
                 result["needs_manual_review"] = not final_email
 
                 return {"unique_key": unique_key, "status": "Completed", "result": result}
+            except asyncio.CancelledError:
+                # Operator-initiated stop. See hunt_single_lead — re-raise
+                # so gather treats this as a cancellation, not a failure.
+                logger.info("Audit cancelled by stop request for %s", unique_key)
+                raise
             except asyncio.TimeoutError:
                 logger.warning("Audit Timeout for %s", unique_key)
                 return {"unique_key": unique_key, "status": "Failed", "error": "Timeout", "audit_status": "Timeout"}
@@ -223,6 +267,11 @@ class ParallelAuditor:
 
                 logger.error("Error auditing lead %s: %s", unique_key, e, exc_info=True)
                 return {"unique_key": unique_key, "status": "Failed", "error": error_msg, "audit_status": status}
+            finally:
+                try:
+                    await hunter.close()
+                except Exception:  # noqa: BLE001 — closing must never re-raise
+                    pass
 
     async def run_batch(self, leads: List[Dict], task_type: str = "audit"):
         """
@@ -301,9 +350,37 @@ class ParallelAuditor:
                     leads_to_upsert.append(lead_data)
                 else:
                     self.status["failed"] += 1
+                    # Persist the failure to the lead row so the UI can show
+                    # it and the user can decide to retry. Without this, the
+                    # row stayed at "PENDING" / "Pending" indefinitely and a
+                    # "retry" button would just hit the same failure path.
+                    # The `audit_status` field returned by audit_single_lead
+                    # ("Timeout", "403 Forbidden", "404 Not Found", "Invalid
+                    # URL", "Failed") is more specific than a generic boolean.
+                    fail_data = {"unique_key": r.get("unique_key")}
+                    err = (r.get("error") or "")
+                    if err:
+                        fail_data["last_error"] = err[:500]
+                    if task_type == "hunt":
+                        fail_data["enrichment_status"] = "FAILED"
+                    else:
+                        fail_data["audit_status"] = r.get("audit_status") or "Failed"
+                    if fail_data.get("unique_key"):
+                        leads_to_upsert.append(fail_data)
 
             if leads_to_upsert:
-                self.db.upsert_leads(leads_to_upsert)
+                upsert_result = self.db.upsert_leads(leads_to_upsert)
+                if upsert_result is None:
+                    # supabase_helper already logged the underlying APIError.
+                    # Surface the symptom here so a chunk-level failure is
+                    # visible in the orchestrator log (otherwise the chunk
+                    # processed-counter increments while nothing landed in
+                    # the DB — the same lying-success class of bug fixed in
+                    # backend.main.process_csv_background).
+                    logger.error(
+                        "Chunk upsert failed: %d leads did not land in Supabase.",
+                        len(leads_to_upsert),
+                    )
 
             logger.info("Finished chunk. Resuming in 2 seconds...")
             await asyncio.sleep(2)

@@ -257,9 +257,17 @@ body {
 }
 
 .sidebar-toggle {
+  /* Anchor in the sidebar's top-padding region (alongside the logo) instead
+     of overlapping the nav-items below. Previous position (right: 8px;
+     top: 7rem) put the 44×44 hit-target on top of the Dashboard link's
+     right edge — clicks on that strip routed to the toggle and assistive
+     tech reported it as a pointer-events interceptor (Playwright failure
+     captured in the E2E run). The sidebar has padding-top: 3rem, so the
+     top: 0.75rem placement keeps the button visible in the padding strip
+     and gives the logo ~44px of horizontal room on the right. */
   position: absolute;
-  right: 8px;
-  top: 7rem;
+  right: 0.5rem;
+  top: 0.75rem;
   width: 44px;
   height: 44px;
   background: var(--primary);

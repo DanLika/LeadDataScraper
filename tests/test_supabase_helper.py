@@ -121,19 +121,21 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertEqual(len(missing), 2)
 
     def test_delete_all_jobs_success(self):
-        # Setup the chain: table().delete().neq().execute()
+        # Helper now uses `.gte("created_at", "1970-01-01")` instead of
+        # `.neq("id", "null")` because `.neq()` threw on UUID columns —
+        # mirror the real chain so the assertion exercises the right path.
         mock_delete = MagicMock()
         self.helper.client.table.return_value.delete.return_value = mock_delete
-        mock_neq = MagicMock()
-        mock_delete.neq.return_value = mock_neq
+        mock_gte = MagicMock()
+        mock_delete.gte.return_value = mock_gte
         expected_result = MagicMock()
-        mock_neq.execute.return_value = expected_result
+        mock_gte.execute.return_value = expected_result
 
         result = self.helper.delete_all_jobs()
 
         self.assertEqual(result, expected_result)
         self.helper.client.table.assert_called_with("orchestration_jobs")
-        mock_delete.neq.assert_called_once_with("id", "null")
+        mock_delete.gte.assert_called_once_with("created_at", "1970-01-01")
 
     def test_delete_all_jobs_client_none(self):
         self.helper.client = None
@@ -184,14 +186,16 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_delete_all_leads_success(self):
+        # Same migration as test_delete_all_jobs_success: `.neq(...)` →
+        # `.gte("created_at", "1970-01-01")` (column-type-agnostic).
         mock_execute = MagicMock(return_value="deleted")
-        self.helper.client.table.return_value.delete.return_value.neq.return_value.execute = mock_execute
-        
+        self.helper.client.table.return_value.delete.return_value.gte.return_value.execute = mock_execute
+
         result = self.helper.delete_all_leads()
-        
+
         self.assertEqual(result, "deleted")
         self.helper.client.table.assert_called_with("leads")
-        self.helper.client.table.return_value.delete.return_value.neq.assert_called_with("unique_key", "null")
+        self.helper.client.table.return_value.delete.return_value.gte.assert_called_with("created_at", "1970-01-01")
 
 class TestSupabaseHelperUpsert(unittest.TestCase):
     def setUp(self):
@@ -217,18 +221,26 @@ class TestSupabaseHelperUpsert(unittest.TestCase):
     def test_upsert_leads_success(self):
         """Test successful upsert of leads."""
         leads_data = [{"unique_key": "123", "name": "Test Lead"}]
-        mock_execute = MagicMock(return_value="success_result")
+        # Mock the APIResponse-like object so the helper can read result.data
+        # — supabase_helper now reports actual landed-count from `result.data`
+        # rather than input-count, so the mock has to expose it.
+        mock_response = MagicMock(data=[{"unique_key": "123", "name": "Test Lead"}])
+        mock_execute = MagicMock(return_value=mock_response)
         mock_upsert = MagicMock(return_value=MagicMock(execute=mock_execute))
         mock_table = MagicMock(return_value=MagicMock(upsert=mock_upsert))
         self.helper.client.table = mock_table
 
         with patch("src.utils.supabase_helper.logger") as mock_logger:
             result = self.helper.upsert_leads(leads_data)
-            self.assertEqual(result, "success_result")
+            self.assertEqual(result, mock_response)
             mock_table.assert_called_once_with("leads")
             mock_upsert.assert_called_once_with(leads_data)
             mock_execute.assert_called_once()
-            mock_logger.info.assert_called_with("Successfully upserted %d leads to Supabase.", 1)
+            # Log now reports actual/input — pins the lying-success-count
+            # contract change (1/1 on full success, 0/1 on silent rejection).
+            mock_logger.info.assert_called_with(
+                "Upserted %d/%d leads to Supabase.", 1, 1
+            )
 
     def test_upsert_leads_exception_schema_mismatch(self):
         """Test upsert_leads handling schema mismatch (column does not exist)."""

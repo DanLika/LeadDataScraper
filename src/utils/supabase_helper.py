@@ -39,7 +39,12 @@ class SupabaseHelper:
 
         try:
             result = self.client.table("leads").upsert(leads).execute()
-            logger.info("Successfully upserted %d leads to Supabase.", len(leads))
+            # Log the count Postgres actually returned, not the input count —
+            # callers that report success based on len(leads) instead of
+            # len(result.data) silently mask partial rejections (PGRST204,
+            # constraint violations, RLS rejects under a different role).
+            actual = len(getattr(result, "data", None) or [])
+            logger.info("Upserted %d/%d leads to Supabase.", actual, len(leads))
             return result
         except Exception as e:
             if "column" in str(e) and "does not exist" in str(e):
@@ -47,6 +52,9 @@ class SupabaseHelper:
                 logger.warning("Please run the SQL migration script provided in the implementation plan.")
             else:
                 logger.error("Error upserting leads: %s", e, exc_info=True)
+            # Returns None on failure; callers must check the return value and
+            # surface the failure rather than assuming success based on input
+            # count. See backend.main._upsert_leads_to_db.
             return None
 
     def update_lead_info(self, unique_key: str, data: dict):
@@ -133,7 +141,18 @@ class SupabaseHelper:
         if not self.client:
             return []
 
+        # Includes both core columns (written by /upload, /process-lead) and
+        # enrichment columns (written by /hunt-lead, /process-all). The bug
+        # this catches: if any of these columns are missing in the live
+        # database, the boot-time auto-migration runs before the first user
+        # request hits a broken codepath. Previously this list only checked
+        # enrichment fields, so a missing `address` / `updated_at` / etc. was
+        # invisible at boot and only surfaced on the next user upload.
         required_cols = [
+            # Core ingest columns — referenced by /upload + the CSV pipeline.
+            "address", "name", "email", "website", "lead_source", "updated_at",
+            "audit_status", "audit_results",
+            # Enrichment columns — referenced by /hunt-lead + orchestrator.
             "enrichment_status", "high_risk_flag", "seo_score", "company_size",
             "leadership_team", "key_offerings", "contact_details", "business_details",
             "target_clients", "pain_points", "facebook", "instagram", "linkedin",

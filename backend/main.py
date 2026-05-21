@@ -418,13 +418,22 @@ def _filter_valid_columns(df: pd.DataFrame) -> pd.DataFrame:
     ]
     return df[[col for col in df.columns if col in valid_cols]]
 
-def _upsert_leads_to_db(df: pd.DataFrame):
+def _upsert_leads_to_db(df: pd.DataFrame) -> int:
+    """Upsert the dataframe; returns the actual row count Postgres acknowledged.
+
+    The previous implementation returned `len(leads_dict)` regardless of
+    whether `db.upsert_leads` succeeded — so a schema-mismatch APIError
+    swallowed inside `upsert_leads` looked identical to a successful insert
+    in the upload-handler log. Inspect the return value here instead.
+    """
     leads_dict = df.to_dict('records')
     # Clean up NaN for JSON serialization
     leads_dict = [{k: (None if pd.isna(v) else v) for k, v in lead.items()} for lead in leads_dict]
     logger.info("Upserting %d leads with columns: %s", len(leads_dict), df.columns.tolist())
-    db.upsert_leads(leads_dict)
-    return len(leads_dict)
+    result = db.upsert_leads(leads_dict)
+    if result is None:
+        return 0
+    return len(getattr(result, "data", None) or [])
 
 def process_csv_background(temp_path: str):
     """Background task to process the uploaded CSV."""
@@ -434,7 +443,14 @@ def process_csv_background(temp_path: str):
         df = _apply_ai_mapping(df)
         final_df = _filter_valid_columns(df)
         upserted_count = _upsert_leads_to_db(final_df)
-        logger.info("Successfully processed and upserted %d leads.", upserted_count)
+        if upserted_count == 0:
+            logger.error(
+                "Upload completed but 0 rows landed in Supabase. "
+                "Check the supabase_helper upsert error above for the cause "
+                "(typical: schema mismatch / missing column)."
+            )
+        else:
+            logger.info("Successfully processed and upserted %d leads.", upserted_count)
     except Exception as e:
         logger.error("Error processing upload: %s", e, exc_info=True)
     finally:

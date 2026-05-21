@@ -68,7 +68,10 @@ export default function FilterBar({
         </select>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--surface-muted)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Score: {filterMinScore}+</span>
+          {/* Filters on outreach_score (not seo_score). Earlier wording
+              ("Score: 0+") was ambiguous because both scores are visible
+              elsewhere in the inventory and the Insights page. */}
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Outreach: {filterMinScore}+</span>
           <input
             type="range"
             min="0"
@@ -76,7 +79,7 @@ export default function FilterBar({
             value={filterMinScore}
             onChange={(e) => setFilterMinScore(parseInt(e.target.value))}
             id="filter-min-score"
-            aria-label="Minimum score filter"
+            aria-label="Minimum outreach score"
             style={{ accentColor: 'var(--primary)', width: '100px' }}
           />
         </div>

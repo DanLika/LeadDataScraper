@@ -139,3 +139,24 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION add_lead_column(text) FROM anon, authenticated, public;
 -- service_role bypasses GRANTs implicitly, so backend can still call this.
+
+-- =============================================================================
+-- Live-state reconciliation (additive, forward-only)
+--
+-- The production "Lead Scraper" Supabase project has accumulated columns over
+-- time that are not declared in the original CREATE TABLE above. The E2E run
+-- on 2026-05-20 surfaced the drift (see E2E_TEST_REPORT.md, bug B2). The
+-- statements below make a fresh project apply equivalent additions so the
+-- two schemas converge, without dropping anything from existing projects.
+--
+-- All `ADD COLUMN IF NOT EXISTS` so re-running the file is idempotent. None
+-- of these columns are referenced by current backend code paths — they are
+-- declared here as documentation of live reality, not as new requirements.
+-- If a follow-up audit confirms they are dead, replace with `DROP COLUMN IF
+-- EXISTS` in a separate, intentional migration.
+-- =============================================================================
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS phone_number          TEXT;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS campaign_segment      TEXT;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS business_summary      TEXT;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS business_description  TEXT;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS company_description   TEXT;

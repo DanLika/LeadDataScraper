@@ -462,7 +462,18 @@ class LeadHunter:
             try: audit = json.loads(audit)
             except Exception: audit = {}
 
-        pain_points = lead.get('pain_points', []) or (audit and audit.get('pain_points', []))
+        # Coalesce nullable / missing pain_points to an empty container so
+        # `len()` cannot trip on None. The DB column is nullable text; for an
+        # unaudited lead arriving through the hunt path it's None, and the
+        # previous expression's `or [...]` fallback only kicks in when the
+        # value is falsy AND there is no audit dict — when the audit dict
+        # exists but doesn't define `pain_points`, the chain collapses to
+        # None and `len(None)` raises TypeError.
+        pain_points = (
+            lead.get('pain_points')
+            or (audit.get('pain_points') if isinstance(audit, dict) else None)
+            or ""
+        )
         is_high_risk = lead.get('high_risk_flag') or (audit and audit.get('high_risk_flag'))
 
         if is_high_risk or len(pain_points) > 0:

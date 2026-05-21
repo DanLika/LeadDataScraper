@@ -124,8 +124,13 @@ export default function CampaignsPage() {
       const data = await res.json().catch(() => null);
       await Promise.all([fetchCampaignDetails(campaignId), fetchCampaigns()]);
       const count = data?.lead_count ?? data?.generated ?? 0;
+      // The backend returns `lead_count` — the number of leads matched, not
+      // the number of message rows produced. Multi-channel campaigns
+      // generate 2 rows per lead (one email + one LinkedIn), so the inline
+      // Messages inventory below this banner can legitimately show 2× this
+      // value. Label the banner with the unit the count actually represents.
       setStatusMessage(count > 0
-        ? `Generated ${count} message${count === 1 ? '' : 's'} ✓`
+        ? `Generated outreach for ${count} lead${count === 1 ? '' : 's'} ✓`
         : 'Generation complete — no eligible leads matched the filter.');
       setTimeout(() => setStatusMessage(null), 4000);
     } catch (err) {

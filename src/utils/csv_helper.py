@@ -81,11 +81,20 @@ def load_csv_with_unique_key(filepath, df_name="CSV"):
         if lower_name in current_cols:
             actual_col = current_cols[lower_name]
             if actual_col != canonical:
-                # Merge data if canonical doesn't exist or is empty
+                # Rename the source → canonical so the source column is gone.
+                # The previous implementation did `df[canonical] = df[actual_col]`
+                # which COPIES rather than renames — leaving the source column
+                # in place. Once backend.main._load_and_standardize_csv lowercases
+                # the columns afterwards, `name` and `Name` collapse to the same
+                # name, producing duplicate columns. pandas to_dict('records')
+                # then silently drops one of them (input-dependent which value
+                # survives) and the upload is data-lossy without any warning.
                 if canonical not in df.columns:
-                    df[canonical] = df[actual_col]
+                    df.rename(columns={actual_col: canonical}, inplace=True)
                 else:
+                    # Both exist; fill nulls from source then drop it.
                     df[canonical] = df[canonical].fillna(df[actual_col])
+                    df.drop(columns=[actual_col], inplace=True, errors='ignore')
 
     # Ensure all essential columns exist
     for col in essential_cols:
