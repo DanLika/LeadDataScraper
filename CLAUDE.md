@@ -344,12 +344,14 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   documents the non-crypto intent and keeps Bandit/Semgrep MD5 lints quiet.
   Collisions only route two distinct businesses to the same row; the human
   review queue catches that.
-- **Known gap**: `_extract_lead_data` returns only `{name, unique_key,
-  website, phone, rating, audit_status}` — `lead_source` and `address`
-  columns end up NULL on every scraped row. Documented in BUGS.md Round 3
-  (2026-05-21) with the one-line fix for `lead_source`. Until that lands,
-  any cleanup / filtering query that assumes `lead_source = 'google_maps'`
-  will return zero rows; use `created_at` window or `unique_key` for now.
+- `_extract_lead_data` returns `{name, unique_key, website, phone, rating,
+  audit_status, lead_source: 'google_maps', address}`. Address comes from
+  `_extract_address(page, container)` which queries the Maps side-panel
+  in this order: `button[data-item-id='address']` → `button[aria-label^=
+  'Address:']` → `[data-tooltip='Copy address']`. If the panel isn't
+  open, the result card is clicked to open it. Output is normalised via
+  `re.sub(r'\s+', ' ', ...)` + `re.search(r'[\w].*')` to drop the leading
+  icon glyph + collapse whitespace; returns `None` on miss (never raises).
 
 ## Next 16 prerender + `useSearchParams` contract
 - `frontend/app/page.tsx` is `'use client'` and uses `useSearchParams()` to

@@ -177,6 +177,13 @@ class DiscoveryEngine:
             except (PlaywrightError, PlaywrightTimeoutError):
                 pass
 
+        # f. Extract Address — panel-only (not on result cards). The website +
+        # phone fallbacks above may have already opened the side panel; query
+        # first, click as a last resort. Prefer `aria-label` (formatted as
+        # "Address: 123 Main St, City") over button inner text, which can
+        # include leading icons / chevrons.
+        address = await self._extract_address(page, container)
+
         return {
             "name": name.strip(),
             "unique_key": unique_key,
@@ -188,7 +195,55 @@ class DiscoveryEngine:
             # rows for cleanup, segmentation, or per-source analytics.
             # See BUGS.md Round 3 A.
             "lead_source": "google_maps",
+            "address": address,
         }
+
+    @staticmethod
+    async def _extract_address(page, container) -> Optional[str]:
+        """Pull the street address out of the Google Maps side panel.
+
+        Returns None when the address can't be located — never raises.
+        Selector targets (matched in order):
+          1. `button[data-item-id='address']` — the canonical "Copy address" button
+          2. `button[aria-label^='Address:']` — aria-label fallback
+          3. `[data-tooltip='Copy address']` — older Maps DOM
+        """
+        selectors = [
+            "button[data-item-id='address']",
+            "button[aria-label^='Address:']",
+            "[data-tooltip='Copy address']",
+        ]
+        try:
+            elem = None
+            for sel in selectors:
+                elem = await page.query_selector(sel)
+                if elem:
+                    break
+            if not elem:
+                # Panel may not be open; try clicking the result card.
+                try:
+                    await container.click()
+                    await asyncio.sleep(1.2)
+                    for sel in selectors:
+                        elem = await page.query_selector(sel)
+                        if elem:
+                            break
+                except (PlaywrightError, PlaywrightTimeoutError):
+                    return None
+            if not elem:
+                return None
+            aria = await elem.get_attribute("aria-label") or ""
+            raw = aria[len("Address:"):] if aria.lower().startswith("address:") else (await elem.inner_text() or "")
+            # The Maps "Copy address" button includes a leading icon glyph
+            # that comes through `inner_text()` as a whitespace prefix
+            # (often U+E0F0-range Material Icons + `\n`). Collapse all
+            # whitespace into single spaces and drop anything before the
+            # first alphanumeric/diacritic character.
+            text = re.sub(r"\s+", " ", raw).strip()
+            m = re.search(r"[\w].*", text, flags=re.UNICODE)
+            return (m.group(0) if m else text) or None
+        except (PlaywrightError, PlaywrightTimeoutError):
+            return None
 
     @staticmethod
     def _parse_rating(rating_text: Optional[str]) -> Optional[float]:

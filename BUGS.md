@@ -25,8 +25,8 @@ the test user + scraped rows afterwards.
 
 **Found**:
 
-A. **`src/scrapers/discovery_engine.py:180-187` — `_extract_lead_data` returned
-   no `lead_source` or `address` (PARTIAL FIX 2026-05-21)**
+A. **`src/scrapers/discovery_engine.py` — `_extract_lead_data` returned no
+   `lead_source` or `address` (FULL FIX 2026-05-21)**
    The dict shipped to `SupabaseHelper.upsert_leads` originally only set
    `name, unique_key, website, phone, rating, audit_status`. Live
    verification confirmed both `leads.lead_source` and `leads.address`
@@ -39,12 +39,20 @@ A. **`src/scrapers/discovery_engine.py:180-187` — `_extract_lead_data` returne
      `DELETE FROM leads WHERE lead_source = 'google_maps' AND address
      ILIKE '%Mostar%'` matched zero rows during this audit. Had to fall
      back to `created_at` timestamp matching.
-   **Fix landed**: `lead_source: "google_maps"` is now set unconditionally
-   in the returned dict. The `address` part remains TODO — Google Maps
-   surfaces it in the side panel after clicking a result; extending the
-   existing panel-fallback block (used for website + phone) to also pull
-   the address span is the natural next step. Until that lands, `address`
-   stays NULL on Google-Maps-discovered rows.
+   **Both fixed**:
+   1. `lead_source: "google_maps"` set unconditionally in the returned
+      dict.
+   2. New `_extract_address(page, container)` staticmethod pulls the
+      address from the Maps side panel. Tries `button[data-item-id=
+      'address']` first, then `button[aria-label^='Address:']`, then
+      `[data-tooltip='Copy address']`. If none are present (panel
+      closed), clicks the result card to open the panel and re-queries.
+      Prefers the `aria-label` (formatted `"Address: 123 Main St, City"`)
+      and falls back to `inner_text()`. The Maps icon glyph that
+      precedes inner_text is collapsed via `re.sub(r"\s+", " ", ...)` +
+      a `re.search(r"[\w].*")` trim. Live-verified on a bookstore /
+      cafe search in Sarajevo + Tuzla — every returned lead carried a
+      clean Bosnian street address.
 
 ## Round 2 — Fixed (2026-05-12 second pass)
 
