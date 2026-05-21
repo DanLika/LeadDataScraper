@@ -209,6 +209,18 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - Global FastAPI exception handler converts any uncaught exception to JSON
   (`{"error": "Internal server error"}`, 500) so the Next.js proxy can always
   `.json()` the body without SyntaxError.
+- `_validation_with_authz_check` (the `@app.exception_handler(RequestValidationError)`
+  override in `backend/main.py`) gates Pydantic 422 responses behind the
+  X-API-Key check. Without this, FastAPI's default 422 returned the full
+  `detail[]` array (`type`, `loc`, `msg`, `input`, `ctx`) — leaking the
+  expected body shape of every endpoint to an unauthenticated attacker
+  probing with bogus JSON. Anonymous (or wrong-key) callers now get the
+  generic `{"detail": "Invalid or missing API key"}` 403 that
+  `verify_api_key` already returns. Authenticated callers still get the
+  full Pydantic `detail[]` array so the frontend's
+  `AIChat.handleSubmit` join on `detail[].msg` continues to surface
+  user-actionable errors (e.g. "String should have at most 4000
+  characters"). Locked in by `tests/test_validation_authz_gate.py`.
 - Lookups for a single row use `.maybe_single()` (not `.single()`) so a
   missing row returns `data=None` and the handler can answer 404. `.single()`
   raises `APIError(PGRST116)` on 0 rows, which the broad `except` swallows

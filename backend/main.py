@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends, Security, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -293,6 +294,26 @@ async def _json_exception_handler(request: Request, exc: Exception):
     """Ensure all uncaught exceptions return JSON, not plain-text 500 (browser clients call .json())."""
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(content={"error": "Internal server error"}, status_code=500)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_with_authz_check(request: Request, exc: RequestValidationError):
+    """FastAPI's default 422 response embeds the Pydantic `detail[]`
+    array (`type`, `loc`, `msg`, `input`, `ctx`) — leaking the endpoint's
+    expected body shape to anyone who can hit the route, even without a
+    valid `X-API-Key`. An unauthenticated attacker could iterate
+    `/process-lead`, `/execute`, `/orchestrator/start`, etc. with bogus
+    JSON to map the schema. Gate the 422 behind the API-key check: if
+    the caller is unauthenticated, return the same generic 403 that the
+    `verify_api_key` dependency would have returned. Authenticated
+    callers still get the full Pydantic detail array so the frontend's
+    `detail[].msg` join keeps working (`AIChat.handleSubmit` relies on
+    it for the "String should have at most 4000 characters" surface)."""
+    expected = os.getenv("API_SECRET_KEY") or ""
+    provided = request.headers.get("x-api-key") or ""
+    if not expected or not provided or not secrets.compare_digest(provided, expected):
+        return JSONResponse({"detail": "Invalid or missing API key"}, status_code=403)
+    return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 # Configure CORS — explicit origins only. Wildcards are rejected.
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
