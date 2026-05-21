@@ -1,7 +1,14 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { createClient } from '@/utils/supabase/server'
+import { checkLoginRate, clearLoginRate } from '@/utils/loginThrottle'
+
+// Same trusted-IP header the /api/proxy route reads, so the rate-limit
+// bucket key matches across the auth path and the API path. Anything else
+// is forgeable when Next is exposed directly.
+const TRUSTED_CLIENT_IP_HEADER = (process.env.TRUSTED_CLIENT_IP_HEADER || 'x-vercel-forwarded-for').toLowerCase()
 
 /**
  * Only accept same-origin relative paths. Allowlist-shaped: must match a
@@ -34,6 +41,19 @@ export async function signInAction(
     return { error: 'Email and password are required.' }
   }
 
+  // App-layer brute-force gate. Bounded at 5 attempts per 60s per trusted
+  // IP. Supabase rate-limits at its edge too; this layer is in front of
+  // signInWithPassword so a self-hosted Supabase / looser edge config
+  // doesn't leave the operator account exposed. Counter increments on
+  // every attempt regardless of outcome — only a successful credential
+  // check (below) clears it.
+  const hdrs = await headers()
+  const trustedIp = (hdrs.get(TRUSTED_CLIENT_IP_HEADER) || '').split(',')[0]?.trim() || null
+  const rate = checkLoginRate(trustedIp)
+  if (!rate.allowed) {
+    return { error: `Too many sign-in attempts. Try again in ${rate.retryAfterSeconds}s.` }
+  }
+
   const supabase = await createClient()
   const { error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
@@ -41,6 +61,11 @@ export async function signInAction(
     // and the underlying response is also rate-limited at the Supabase edge.
     return { error: error.message }
   }
+
+  // Successful credential check — release the per-IP counter so a
+  // legitimate user who fat-fingered the password a few times before
+  // succeeding doesn't lock themselves out for the rest of the window.
+  clearLoginRate(trustedIp)
 
   // Cookies were set by the server.ts setAll floor (HttpOnly, SameSite=Lax,
   // Secure in prod). redirect() throws — never returns, so the prev-state
