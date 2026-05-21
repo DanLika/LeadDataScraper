@@ -403,13 +403,59 @@ def _load_and_standardize_csv(temp_path: str) -> pd.DataFrame:
     return df
 
 def _apply_ai_mapping(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename CSV columns to the canonical lead schema using GeminiMapper.
+
+    Guards against two failure modes that the BUGS.md Round 4 E2E surfaced:
+    1. The mapper sometimes returns identity self-maps (`name → name`,
+       `website → website`) for columns the CSV doesn't carry — purely
+       hallucinated. `df.rename` would then create duplicate column
+       names alongside the empty placeholders `csv_helper` pre-creates.
+    2. After `rename`, two columns can share a target name (e.g. an empty
+       `email` placeholder and the freshly-renamed `mail → email`).
+       Pandas' `to_dict('records')` then silently drops one — usually the
+       populated source. Coalesce non-null values across duplicates so
+       the populated column wins.
+    """
     from src.processors.ai_mapper import GeminiMapper
     mapper = GeminiMapper()
     mapping = mapper.get_column_mapping(df.columns.tolist())
-    if mapping:
-        logger.info("AI suggested mapping: %s", mapping)
-        df = df.rename(columns=mapping)
+    if not mapping:
+        return df
+    existing_cols = set(df.columns)
+    filtered = {src: tgt for src, tgt in mapping.items()
+                if src in existing_cols and src != tgt}
+    if not filtered:
+        logger.info("AI mapping returned no actionable renames (all identity self-maps or unknown sources): %s", mapping)
+        return df
+    logger.info("AI suggested mapping (filtered): %s", filtered)
+    df = df.rename(columns=filtered)
+    if df.columns.duplicated().any():
+        df = _coalesce_duplicate_columns(df)
     return df
+
+
+def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """For each duplicate column name, merge the columns by taking the
+    first non-null value per row (left-to-right via `bfill` across the
+    duplicate group). Returns a frame with unique column names. Logs the
+    coalesced names for observability."""
+    if not df.columns.duplicated().any():
+        return df
+    dup_names = df.columns[df.columns.duplicated()].unique().tolist()
+    logger.warning("Coalescing %d duplicate column group(s) after AI mapping: %s", len(dup_names), dup_names)
+    seen = set()
+    result = {}
+    for name in df.columns:
+        if name in seen:
+            continue
+        seen.add(name)
+        positions = [i for i, c in enumerate(df.columns) if c == name]
+        if len(positions) == 1:
+            result[name] = df.iloc[:, positions[0]]
+        else:
+            block = df.iloc[:, positions]
+            result[name] = block.bfill(axis=1).iloc[:, 0]
+    return pd.DataFrame(result)
 
 def _filter_valid_columns(df: pd.DataFrame) -> pd.DataFrame:
     valid_cols = [
@@ -434,6 +480,13 @@ def _upsert_leads_to_db(df: pd.DataFrame) -> int:
     leads_dict = df.to_dict('records')
     # Clean up NaN for JSON serialization
     leads_dict = [{k: (None if pd.isna(v) else v) for k, v in lead.items()} for lead in leads_dict]
+    if not leads_dict:
+        # Upstream parser fell back to an empty frame (see BUGS.md Round 4 B).
+        # Short-circuit so we don't hit a misleading PGRST100 from supabase-py
+        # complaining about an empty columns parameter — surface the real
+        # cause (no rows survived parsing) instead.
+        logger.error("Upsert called with 0 leads — upstream parse likely failed; see prior csv_helper / mapping logs.")
+        return 0
     logger.info("Upserting %d leads with columns: %s", len(leads_dict), df.columns.tolist())
     result = db.upsert_leads(leads_dict)
     if result is None:

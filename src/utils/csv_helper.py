@@ -78,9 +78,24 @@ def load_csv_with_unique_key(filepath, df_name="CSV"):
     except FileNotFoundError:
         logger.warning("'%s' not found. Initializing empty DataFrame for %s.", filepath, df_name)
         df = pd.DataFrame(columns=essential_cols, dtype=str)
-    except (pd.errors.EmptyDataError, pd.errors.ParserError) as e:
-        logger.error("Error parsing '%s' for %s: %s. Initializing empty DataFrame.", filepath, df_name, e)
+    except pd.errors.EmptyDataError as e:
+        logger.warning("'%s' is empty for %s: %s. Initializing empty DataFrame.", filepath, df_name, e)
         df = pd.DataFrame(columns=essential_cols, dtype=str)
+    except pd.errors.ParserError as e:
+        # One bad row (typical: unquoted comma inside a value, formula
+        # injection payload, extra delimiter) used to crash the whole
+        # import — pandas' default `error_bad_lines=True` aborts on the
+        # first malformed line and we'd fall back to an empty frame,
+        # losing every preceding valid row. See BUGS.md Round 4 B.
+        # Retry skipping bad lines so the good rows survive; only fall
+        # back to empty if even the lenient parse fails.
+        logger.warning("Initial parse of '%s' failed (%s); retrying with on_bad_lines='skip'.", filepath, e)
+        try:
+            df = pd.read_csv(filepath, dtype=str, on_bad_lines='skip')
+            logger.info("Recovered %d leads from '%s' (some malformed rows skipped).", len(df), filepath)
+        except Exception as e2:
+            logger.error("Recovery parse also failed for '%s' (%s). Initializing empty DataFrame.", filepath, e2)
+            df = pd.DataFrame(columns=essential_cols, dtype=str)
 
     # Case-insensitive column merging logic
     canonical_map = {

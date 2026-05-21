@@ -2,10 +2,10 @@
 
 Date: 2026-05-12. Pytest: 99→101 passed. Next build: clean (was 2 warnings).
 
-## Round 4 — CSV import E2E (2026-05-21)
+## Round 4 — CSV import E2E (2026-05-21) — BOTH FIXED 2026-05-21
 
 Browser-driven CSV upload through `/upload` → `process_csv_background` →
-`SupabaseHelper.upsert_leads`. Two bugs surfaced.
+`SupabaseHelper.upsert_leads`. Two bugs surfaced + fixed.
 
 A. **`backend/main.py:_apply_ai_mapping` + `src/utils/csv_helper.py`
    produce duplicate target column names → silent data loss**
@@ -38,13 +38,18 @@ A. **`backend/main.py:_apply_ai_mapping` + `src/utils/csv_helper.py`
      `company_name` and `phone` survive. The UI shows the company name
      in the lead row (the inventory falls back from `name` to
      `company_name`), so the user **doesn't see the data loss**.
-   - **Fix sketch**: filter AI mapping to keys that actually exist in
-     the dataframe AND drop self-maps (`v == k` where the original
-     column wasn't already canonicalised); deduplicate target names by
-     preferring the populated source over the empty placeholder. Add a
-     `df = df.loc[:, ~df.columns.duplicated()]` guard before upsert with
-     a `logger.warning` listing the dropped columns so the failure is
-     loud, not silent.
+   - **Fix landed**: `_apply_ai_mapping` in `backend/main.py:405-454`
+     now filters the AI dict to entries where the source column exists
+     in the frame AND the target name differs (drops the hallucinated
+     identity self-maps). If a rename still produces a duplicate
+     column name (because csv_helper pre-created an empty placeholder),
+     `_coalesce_duplicate_columns` merges the group by taking the first
+     non-null value per row via `bfill(axis=1).iloc[:, 0]` — populated
+     source wins over empty placeholder. The coalesce path emits a
+     `logger.warning` listing the merged group names. Live-verified:
+     a 3-row CSV with `Business Name`/`Web Address`/`Mail` headers now
+     lands with all four target columns populated; previously
+     `website`, `email`, `name`, `lead_source` were NULL.
 
 B. **Malformed CSV row crashes parser → 0 rows imported instead of
    partial recovery**
@@ -63,17 +68,22 @@ B. **Malformed CSV row crashes parser → 0 rows imported instead of
    - **Frontend signal**: the UI just shows the import button return to
      idle and TOTAL LEADS = 0. No toast, no error banner — the user
      thinks the file was rejected.
-   - **Fix sketch**: switch to `pd.read_csv(..., on_bad_lines='skip')`
-     (or `'warn'` to log each skipped row) so good rows survive.
-     Pre-flight check the column count of every line and surface a
-     row-level error in the toast ("3 of 4 rows imported; row 4
-     malformed — skipped"). Short-circuit the upsert if the dataframe
-     ends up empty and log that as a distinct error path, not a
-     supabase PGRST100.
+   - **Fix landed**: `load_csv_with_unique_key` in
+     `src/utils/csv_helper.py:75-95` now splits the
+     `EmptyDataError`/`ParserError` catch. On `ParserError`, it retries
+     with `pd.read_csv(..., on_bad_lines='skip')` so good rows survive.
+     Only falls back to an empty frame if even the lenient retry
+     raises. Plus `_upsert_leads_to_db` in `backend/main.py:466-471`
+     short-circuits with a `logger.error` when the dataframe is empty,
+     surfacing the real cause instead of the misleading PGRST100 from
+     supabase-py. Live-verified: a 3-row CSV with 1 malformed row now
+     yields 2 rows in the inventory; previously yielded 0.
+   - New regression test `tests/test_csv_helper_health.py::
+     test_load_csv_parser_error_recovers_partial_rows` locks the
+     contract.
 
-Both bugs are pre-existing in `main`; uncovered by the E2E CSV import
-test. Not security-critical (no privilege escalation, no XSS), but
-both cause silent data loss / user confusion. Worth a follow-up commit.
+Both bugs were pre-existing in `main` and have been fixed in the same
+commit that opens this BUGS.md round.
 
 ## Round 3 — E2E verification during /security-audit:run (2026-05-21)
 
