@@ -2,6 +2,79 @@
 
 Date: 2026-05-12. Pytest: 99→101 passed. Next build: clean (was 2 warnings).
 
+## Round 4 — CSV import E2E (2026-05-21)
+
+Browser-driven CSV upload through `/upload` → `process_csv_background` →
+`SupabaseHelper.upsert_leads`. Two bugs surfaced.
+
+A. **`backend/main.py:_apply_ai_mapping` + `src/utils/csv_helper.py`
+   produce duplicate target column names → silent data loss**
+   - Input CSV headers: `Business Name`, `Web Address`, `Mail`, `Phone
+     Number`, `Notes` (intentionally non-canonical to exercise the AI
+     mapper).
+   - csv_helper renames `business_name` → `company_name` and ensures
+     essential cols `Name`, `Website`, `email`, `unique_key` exist
+     (creates empty columns if missing).
+   - backend lowercases columns, then calls `GeminiMapper.get_column_mapping`.
+     The AI returns:
+     ```
+     {'business_name': 'company_name', 'web_address': 'website',
+      'mail': 'email', 'phone_number': 'phone',
+      'name': 'name', 'website': 'website', 'email': 'email'}
+     ```
+     The last three entries are AI hallucinated no-op identity maps for
+     columns the CSV doesn't have, but they collide with the empty
+     placeholder columns csv_helper just created.
+   - `df.rename(columns=mapping)` produces a DataFrame with multiple
+     columns named `website`, `email`. Pandas warns
+     `UserWarning: DataFrame columns are not unique, some columns will
+     be omitted.` and the populated source values are dropped in favour
+     of the empty placeholders.
+   - **Backend log**: `Upserting 3 leads with columns: ['company_name',
+     'website', 'website', 'email', 'email', 'phone', 'name', 'website',
+     'website', 'email', 'email', 'unique_key']` — six duplicates total.
+   - **Live result**: 3 leads land in Supabase, but their `name`,
+     `website`, `email`, `lead_source` columns are all `NULL`. Only
+     `company_name` and `phone` survive. The UI shows the company name
+     in the lead row (the inventory falls back from `name` to
+     `company_name`), so the user **doesn't see the data loss**.
+   - **Fix sketch**: filter AI mapping to keys that actually exist in
+     the dataframe AND drop self-maps (`v == k` where the original
+     column wasn't already canonicalised); deduplicate target names by
+     preferring the populated source over the empty placeholder. Add a
+     `df = df.loc[:, ~df.columns.duplicated()]` guard before upsert with
+     a `logger.warning` listing the dropped columns so the failure is
+     loud, not silent.
+
+B. **Malformed CSV row crashes parser → 0 rows imported instead of
+   partial recovery**
+   - CSV row containing unquoted comma inside parentheses
+     (e.g. `=HYPERLINK("http://evil/csv","sneaky")` rendered as the
+     first cell without enclosing the cell in `"..."`) makes
+     pandas `read_csv` raise `ParserError: Expected 5 fields in line 4,
+     saw 6`.
+   - `src/utils/csv_helper.load_csv_with_unique_key` catches that with
+     `except (pd.errors.EmptyDataError, pd.errors.ParserError)` and
+     falls back to an EMPTY DataFrame with only the essential headers.
+     **All N valid rows that came before the malformed one are lost.**
+   - Downstream: `Upserting 0 leads...` then a misleading PGRST100
+     error from supabase-py because the columns parameter ends up
+     empty.
+   - **Frontend signal**: the UI just shows the import button return to
+     idle and TOTAL LEADS = 0. No toast, no error banner — the user
+     thinks the file was rejected.
+   - **Fix sketch**: switch to `pd.read_csv(..., on_bad_lines='skip')`
+     (or `'warn'` to log each skipped row) so good rows survive.
+     Pre-flight check the column count of every line and surface a
+     row-level error in the toast ("3 of 4 rows imported; row 4
+     malformed — skipped"). Short-circuit the upsert if the dataframe
+     ends up empty and log that as a distinct error path, not a
+     supabase PGRST100.
+
+Both bugs are pre-existing in `main`; uncovered by the E2E CSV import
+test. Not security-critical (no privilege escalation, no XSS), but
+both cause silent data loss / user confusion. Worth a follow-up commit.
+
 ## Round 3 — E2E verification during /security-audit:run (2026-05-21)
 
 End-to-end browser test of AI execution + Playwright crawl via chrome-devtools
