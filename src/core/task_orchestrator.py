@@ -155,7 +155,7 @@ class TaskOrchestrator:
         """
         self.db.client.table("orchestration_jobs").update(updates).eq("id", job_id).execute()
 
-    def _get_total_leads(self, lead_ids: List[str], filters: Dict[str, Any]) -> int:
+    async def _get_total_leads(self, lead_ids: List[str], filters: Dict[str, Any]) -> int:
         """Count total leads to process, either from explicit IDs or via DB query."""
         if lead_ids:
             return len(lead_ids)
@@ -166,10 +166,10 @@ class TaskOrchestrator:
         for k, v in _sanitize_filters(filters).items():
             query = query.eq(k, v)
 
-        response = query.execute()
+        response = await asyncio.to_thread(query.execute)
         return response.count if hasattr(response, 'count') else 0
 
-    def _fetch_chunk(self, lead_ids: List[str], processed_count: int, chunk_size: int, total_leads: int) -> List[Dict[str, Any]]:
+    async def _fetch_chunk(self, lead_ids: List[str], processed_count: int, chunk_size: int, total_leads: int) -> List[Dict[str, Any]]:
         """Fetch the next chunk of leads from DB or explicit ID list."""
         if lead_ids:
             slice_start = processed_count
@@ -178,13 +178,15 @@ class TaskOrchestrator:
                 return []
 
             current_ids = lead_ids[slice_start:slice_end]
-            chunk_resp = self.db.client.table("leads").select("*").in_("unique_key", current_ids).execute()
+            query = self.db.client.table("leads").select("*").in_("unique_key", current_ids)
+            chunk_resp = await asyncio.to_thread(query.execute)
         else:
-            chunk_resp = self.db.client.table("leads").select("*") \
+            query = self.db.client.table("leads").select("*") \
                 .or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED") \
                 .lt("retry_count", 3) \
                 .order("last_processed_at", nullsfirst=True) \
-                .limit(chunk_size).execute()
+                .limit(chunk_size)
+            chunk_resp = await asyncio.to_thread(query.execute)
 
         return chunk_resp.data if chunk_resp.data else []
 
@@ -240,7 +242,7 @@ class TaskOrchestrator:
             tasks = ["audit", "enrich"]
 
         try:
-            total_leads = self._get_total_leads(lead_ids, filters)
+            total_leads = await self._get_total_leads(lead_ids, filters)
 
             await self._update_job_status(job_id, {
                 "status": "running",
@@ -262,7 +264,7 @@ class TaskOrchestrator:
                 if status_check.get("status") in ["stopped", "failed"]:
                     return
 
-                chunk = self._fetch_chunk(lead_ids, processed_count, chunk_size, total_leads)
+                chunk = await self._fetch_chunk(lead_ids, processed_count, chunk_size, total_leads)
                 if not chunk:
                     break
 
