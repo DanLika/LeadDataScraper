@@ -28,11 +28,17 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   future `/login-internal` or `/authentication-guide` route from being silently
   unauthenticated by string-prefix overlap.
 - `/login?next=<path>` is sanitised by `sanitizeNext()` in
-  `frontend/app/login/actions.ts`. Only same-origin relative paths are accepted
-  (must start with `/`, must NOT start with `//` or `/\`). The allowlist
-  regex deliberately excludes `@` and `:` so a `/@evil.com/foo` value can't
-  resolve to a same-origin URL whose address bar mimics the `user@host`
-  phishing-display pattern. Closes open-redirect + phishing-assist on auth.
+  `frontend/utils/url.mjs` (imported by `app/login/actions.ts`). Only
+  same-origin relative paths are accepted (must start with `/`, must NOT
+  start with `//` or `/\`). The allowlist regex deliberately excludes
+  `@` and `:` so a `/@evil.com/foo` value can't resolve to a same-origin
+  URL whose address bar mimics the `user@host` phishing-display pattern.
+  Closes open-redirect + phishing-assist on auth. `utils/url.mjs` also
+  exports `ensureProtocol()` — the `<a href>` scheme guard that forces
+  scraped `website`/social-link values through a `http:`/`https:`-only
+  allowlist (rejects `javascript:` / `data:`). Both are pure functions,
+  CI-covered by `utils/url.test.mjs` (`.mjs` so `node --test` needs no
+  build step — same pattern as `cookie-floor.mjs`).
 - Supabase session cookies set via `setAll()` in
   `frontend/utils/supabase/middleware.ts` are true-floored to
   `SameSite=Lax`, `HttpOnly=true`, `Secure=true` (prod). Spread order is
