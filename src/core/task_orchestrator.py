@@ -381,11 +381,28 @@ class TaskOrchestrator:
             })
             return updated_lead
 
+    @staticmethod
+    def _is_valid_uuid(value: str) -> bool:
+        """`orchestration_jobs.id` is a UUID column. PostgREST rejects a
+        non-UUID `.eq("id", ...)` filter with an APIError that bubbles to
+        a generic 500. Validating the format here turns an attacker
+        probing `/orchestrator/status/notauuid` into a clean `not_found`
+        instead of a 500 (OWASP API8 — improper error handling)."""
+        try:
+            uuid.UUID(str(value))
+            return True
+        except (ValueError, TypeError, AttributeError):
+            return False
+
     async def get_job_status(self, job_id: str):
+        if not self._is_valid_uuid(job_id):
+            return {"status": "not_found"}
         response = self.db.client.table("orchestration_jobs").select("*").eq("id", job_id).execute()
         return response.data[0] if response.data else {"status": "not_found"}
 
     async def stop_job(self, job_id: str):
+        if not self._is_valid_uuid(job_id):
+            return {"status": "not_found", "job_id": job_id}
         # Mark the DB row first so the outer chunk loop in _process_in_chunks
         # bails before fetching the next chunk.
         await self._update_job_status(job_id, {"status": "stopped", "current_phase": "Stopped by user"})
