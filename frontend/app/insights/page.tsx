@@ -43,46 +43,60 @@ export default function InsightsPage() {
   }, isSidebarOpen);
   const COLORS = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--error)', 'var(--secondary)'];
 
-  const fetchLeads = useCallback(async () => {
+  const fetchLeads = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await apiFetch(`${API_BASE_URL}/leads`);
+      const response = await apiFetch(`${API_BASE_URL}/leads`, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setLeads(data.leads || []);
     } catch (err) {
+      // Benign cancellation (effect cleanup / navigation). WebKit reports
+      // it as `TypeError: Load failed`; discriminate on `signal.aborted`.
+      if (signal?.aborted) return;
       console.error('Error fetching leads:', err);
     }
   }, []);
 
-  const fetchStats = useCallback(async () => {
+  const fetchStats = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await apiFetch(`${API_BASE_URL}/stats`);
+      const response = await apiFetch(`${API_BASE_URL}/stats`, { signal });
       const data = await response.json();
       setStats(data);
     } catch (err) {
+      if (signal?.aborted) return;
       console.error('Stats fetch failed:', err);
     }
   }, []);
 
-  const fetchInsightsData = useCallback(async () => {
+  const fetchInsightsData = useCallback(async (signal?: AbortSignal) => {
     setFetchingInsights(true);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/insights`);
+      const response = await apiFetch(`${API_BASE_URL}/insights`, { signal });
       const data = await response.json();
       setInsights(data);
     } catch (err) {
+      if (signal?.aborted) return;
       console.error('Insights fetch failed:', err);
     } finally {
-      setFetchingInsights(false);
+      if (!signal?.aborted) setFetchingInsights(false);
     }
   }, []);
 
   useEffect(() => {
+    // AbortController scopes the fetches to this effect — React 19
+    // StrictMode double-invokes in dev, and without the abort the first
+    // run's requests dangle and WebKit logs `TypeError: Load failed`.
+    const controller = new AbortController();
     const init = async () => {
-      await Promise.all([fetchLeads(), fetchStats(), fetchInsightsData()]);
-      setLoading(false);
+      await Promise.all([
+        fetchLeads(controller.signal),
+        fetchStats(controller.signal),
+        fetchInsightsData(controller.signal),
+      ]);
+      if (!controller.signal.aborted) setLoading(false);
     }
     init();
+    return () => controller.abort();
   }, [fetchLeads, fetchStats, fetchInsightsData]);
 
   if (loading) {

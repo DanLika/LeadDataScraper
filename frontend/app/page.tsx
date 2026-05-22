@@ -231,44 +231,58 @@ function DashboardInner() {
     return () => document.removeEventListener('keydown', handleEsc);
   }, [campaign, outreachDraft, showSettings, showDiscoveryModal, isDiscovering, isSidebarOpen]);
 
-  const fetchLeads = useCallback(async () => {
+  const fetchLeads = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await apiFetch(`${API_BASE_URL}/leads`);
+      const response = await apiFetch(`${API_BASE_URL}/leads`, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setLeads(data.leads || []);
     } catch (err) {
+      // A fetch cancelled by effect-cleanup / navigation is benign. WebKit
+      // reports it as a bare `TypeError: Load failed` (no AbortError), so
+      // we discriminate on `signal.aborted` — whatever the error type, if
+      // WE aborted it, don't spam the console.
+      if (signal?.aborted) return;
       console.error('Error fetching leads:', err);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
-  const fetchInsights = useCallback(async () => {
+  const fetchInsights = useCallback(async (signal?: AbortSignal) => {
     setFetchingInsights(true);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/insights`);
+      const response = await apiFetch(`${API_BASE_URL}/insights`, { signal });
       const data = await response.json();
       setInsights(data);
     } catch (err) {
+      if (signal?.aborted) return;
       console.error('Insights fetch failed:', err);
     } finally {
-      setFetchingInsights(false);
+      if (!signal?.aborted) setFetchingInsights(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchLeads();
-    fetchInsights();
+    // AbortController ties the in-flight fetches to this effect's lifetime.
+    // React 19 StrictMode double-invokes effects in dev (mount → cleanup →
+    // remount); without the abort the first run's fetches dangle and WebKit
+    // surfaces the browser-cancelled request as `TypeError: Load failed`.
+    const controller = new AbortController();
+    fetchLeads(controller.signal);
+    fetchInsights(controller.signal);
 
     // Poll the backend for fresh leads instead of subscribing via the browser
     // Supabase client. Supabase Realtime requires anon access to the table,
     // which is intentionally disabled by RLS — backend is now the only reader.
     const interval = setInterval(() => {
-      fetchLeads();
+      fetchLeads(controller.signal);
     }, 15000);
 
-    return () => clearInterval(interval);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [fetchLeads, fetchInsights]);
 
   // Combined status monitoring for legacy endpoints
