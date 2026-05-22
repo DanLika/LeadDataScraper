@@ -1644,3 +1644,201 @@ When spawning subagents (Agent/Task tool), the routing block is automatically in
 | `ctx stats` | Call the `ctx_stats` MCP tool and display the full output verbatim |
 | `ctx doctor` | Call the `ctx_doctor` MCP tool, run the returned shell command, display as checklist |
 | `ctx upgrade` | Call the `ctx_upgrade` MCP tool, run the returned shell command, display as checklist |
+
+# Session 2026-05-22 — new patterns & docs index
+
+The patterns described below were introduced in PR #185-#199
+(open at time of writing). When those PRs merge in roughly the
+order they were opened, the layout and conventions documented here
+become the canonical project shape. This CLAUDE.md update is
+intended to merge LAST in that queue.
+
+## Layered architecture (handler → service → repository)
+
+Per-domain code splits across three layers:
+
+  backend/main.py             routing + auth + rate-limit + Pydantic
+                              validation + HTTP error mapping
+  src/services/<domain>.py    business logic; takes typed primitives
+                              (NOT Pydantic instances) so non-HTTP
+                              callers (CLI / background tasks) don't
+                              depend on backend.main; raises typed
+                              domain errors
+  src/repositories/<domain>.py  pure PostgREST I/O; translates known
+                                upstream errors (e.g. PGRST205 →
+                                CampaignTableMissingError)
+
+First domain migrated: **campaigns** (PR #192) — 7 endpoints,
+`generate_campaign_messages` handler dropped from 87 LOC to 18 LOC.
+The same pattern applies to `leads` / `orchestration` when those
+domains migrate.
+
+Handler pattern after refactor:
+
+```python
+@app.<method>("/<resource>", dependencies=[Depends(verify_api_key)])
+@limiter.limit("N/period")
+async def handler(request: Request, body: <PydanticModel>):
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
+    try:
+        return _<domain>_service().<method>(...)
+    except <SpecificDomainException>:
+        return error_response("<user message>", status_code=<HTTP>)
+    except Exception:
+        logger.exception("Error ...")
+        return error_response("Failed to ...")
+```
+
+Per-route guards (verify_api_key + slowapi rate limit) stay on the
+handler — the service intentionally has no idea who's calling.
+
+## Canonical error hierarchy (src/errors.py — PR #195)
+
+```
+DomainError                              boundary catch-all
+├── NotFoundError                        → HTTP 404
+│   ├── CampaignNotFoundError
+│   ├── NoMatchingLeadsError
+│   ├── NoCampaignMessagesError
+│   └── LeadNotFoundError
+├── ValidationError                      → HTTP 400/422
+├── ConfigurationError                   → HTTP 503 (operator action)
+│   └── CampaignTableMissingError
+├── LeadError                            → 500; lead-domain catch-all
+│   └── LeadProcessingError
+├── EnrichmentError                      → 500; enrichment pipeline
+│   ├── EnrichmentTimeoutError
+│   └── EnrichmentExtractionError
+└── AuditError                           → 500; SEO audit
+    ├── AuditTimeoutError
+    └── AuditFetchError
+```
+
+Rules for callers:
+- Raise the most specific class that fits
+- NEVER `raise Exception(...)` — pick a class
+- Messages are written for handler authors, NOT end users — handlers
+  choose the user-facing string when mapping to HTTP, never echo
+  `str(exc)` directly (would leak internal context)
+- Catch `except Exception` ONLY at outermost boundary; everywhere else
+  catch the specific type so a real bug in X doesn't silently look
+  like a domain-level failure in Y
+
+`src/services/exceptions.py` is a backward-compat shim that
+re-exports from `src/errors.py`. Once every reference migrates,
+the shim can be deleted.
+
+Audit of the 61 `except Exception` clauses: 27 KEEP (boundary
+catches), 34 NARROW (defer per-domain). See
+`tests/quality/exception-audit.md`.
+
+## Logging convention (PR #195)
+
+Inside an `except` block use `logger.exception(msg, *args)` —
+documented as equivalent to `logger.error(msg, *args, exc_info=True)`
+but the canonical Python idiom. **Do not** use the longer form
+anywhere; it's mechanical to misuse (forgetting `exc_info=True`)
+and clutters the call site.
+
+35 sites swapped in PR #195. Future commits MUST use the short form.
+
+## Constants modules (PR #194)
+
+Numeric policies live in two files:
+
+  src/utils/constants.py        — backend tunables
+  frontend/app/lib/constants.ts — frontend tunables
+
+Grouped by domain: pagination caps, Pydantic field-length caps,
+upload caps, network/browser/SMTP timeouts, log rotation, layout
+breakpoints, user-feedback durations.
+
+Cross-language parity invariant: `MAX_UPLOAD_BYTES` (Py) must equal
+`MAX_PROXY_BODY_BYTES` (TS). Both carry a `BACKEND PARITY` note in
+their docstring. No automated check today; flag drift in PR review.
+
+When adding a new constant, prefer named over inline IF the value
+appears at multiple call sites OR represents a policy the operator
+might tune. One-off literals stay inline at their call site.
+
+## Quality ratchet (PR #196)
+
+`.github/workflows/quality-ratchet.yml` runs on every PR + push to
+main, compares 5 metrics against committed baselines in
+`.quality-baselines.json`, fails CI on regression.
+
+  ruff           : 90 errors (lower-is-better)
+  mypy --strict  : 401 errors
+  pylint score   : 10.00/10 (higher-is-better, --enable=E,F)
+  eslint         : 0 problems (must stay at 0)
+  semgrep        : 0 findings (must stay at 0)
+
+Update policy: lower values mean improvement — the author of an
+improvement-PR may roll the baseline forward in the same commit.
+NEVER raise a baseline to silence a new finding; fix the finding.
+
+The comparator is `scripts/check-quality-baselines.py`. It uses
+`subprocess.run(argv, shell=False)` per CWE-78 — argv lists in the
+JSON, never shell-interpolated. Semgrep-self-scan clean.
+
+## Test organization (PR #199)
+
+```
+tests/
+├── unit/          fast, no I/O, no external services
+├── integration/   real DB / Supabase / Gemini API (skipped without creds)
+├── e2e/           full-stack via Playwright / live infra
+├── security/      auth bypass, injection, CSRF, CRLF, SSRF, prompt-injection
+└── quality/       meta-tests (Pydantic field enforcement, mypy gates)
+```
+
+pytest.ini markers (cross-cutting filters, independent of directory):
+
+  @pytest.mark.slow         takes >5s
+  @pytest.mark.live         requires real external services
+  @pytest.mark.security     security-invariant tests
+  @pytest.mark.integration  real DB / Supabase
+  @pytest.mark.e2e          Playwright + running backend
+
+CI default filter: `-m "not slow and not live"` (set in
+`pytest.ini::addopts`). Override for full sweep: `pytest -m ""`.
+
+When adding a new test:
+- Pick the directory by the test's I/O profile
+- Add the appropriate marker (`@pytest.mark.live` etc.) — directory +
+  marker are both required; marker is what the CLI filter actually
+  selects
+
+When adding a test that reads source files via `os.path.dirname(__file__)`:
+prefer `Path(__file__).resolve().parents[N] / 'src' / ...` — it's
+depth-independent and fails loud if the file moves without the test
+author noticing. Don't use the `'..'`-chain pattern.
+
+## Quality reports — weekly Monday cadence
+
+Run all of these weekly; deltas tracked in the per-report tracker:
+
+  tests/quality/dead-code-report.md         vulture / deptry / ts-prune / knip / depcheck
+  tests/quality/complexity-report.md        radon CC + sonarjs cognitive complexity
+  tests/quality/type-coverage-progress.md   mypy --strict (target 95% on src/utils + src/scrapers + src/processors)
+  tests/quality/duplication-report.md       jscpd + pylint duplicate-code
+  tests/quality/long-functions-report.md    Python ast > 80 LOC + eslint max-lines-per-function
+  tests/quality/component-size-audit.md     frontend component LOC + render-block size
+  tests/quality/exception-audit.md          except Exception inventory + verdict
+  tests/quality/docstring-coverage.md       interrogate (target 80% then ratchet)
+  tests/quality/test-reorg-report.md        per-file bucket + marker plan
+  docs/architecture/module-graph.md         pydeps + madge cycle detection
+  docs/tech-debt-register.md                grep TODO/FIXME/HACK/XXX/@deprecated
+
+The reproducing commands are in each report's "Reproducing" section.
+Operator should re-run + update each tracker table Monday morning;
+trend visible across rows.
+
+## Known pre-existing test failure
+
+`tests/unit/test_logging_config.py::test_setup_logging` fails on
+origin/main and every session branch — root logger expected DEBUG,
+observed INFO. Test-ordering issue (an earlier test in the suite
+resets the root logger). Not caused by any session refactor; defer
+to a focused fix.
