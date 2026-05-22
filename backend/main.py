@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import os
 import secrets
+import asyncio
 import uuid
 import pandas as pd
 import aiofiles
@@ -665,42 +666,45 @@ async def get_stats(request: Request):
         if not db.client:
             return error_response("Database not connected", status_code=503)
 
-        # 1. Fetch relevant columns for all leads (limit to 1000 for stats)
-        response = db.client.table("leads").select("audit_status", "audit_results", "seo_score", "lead_source").execute()
-        leads = response.data
+        def _fetch_stats_sync():
+            # 1. Fetch relevant columns for all leads (limit to 1000 for stats)
+            response = db.client.table("leads").select("audit_status", "audit_results", "seo_score", "lead_source").execute()
+            leads = response.data
 
-        if not leads:
+            if not leads:
+                return {
+                    "total_leads": 0,
+                    "audit_status_distribution": [],
+                    "seo_score_ranges": [],
+                    "source_distribution": []
+                }
+
+            df = pd.DataFrame(leads)
+
+            # 2. Audit Status Distribution
+            status_dist = df['audit_status'].value_counts().to_dict()
+            status_list = [{"name": k, "value": int(v)} for k, v in status_dist.items()]
+
+            # 3. SEO Score Ranges
+            # Handle potential None/NaN in seo_score
+            scores = pd.to_numeric(df['seo_score'], errors='coerce').dropna()
+            score_bins = [0, 20, 40, 60, 80, 100]
+            score_labels = ["0-20", "21-40", "41-60", "61-80", "81-100"]
+            score_ranges = pd.cut(scores, bins=score_bins, labels=score_labels).value_counts().to_dict()
+            score_list = [{"range": k, "count": int(v)} for k, v in score_ranges.items()]
+
+            # 4. Source Distribution
+            source_dist = df['lead_source'].fillna('Unknown').value_counts().head(5).to_dict()
+            source_list = [{"name": k, "value": int(v)} for k, v in source_dist.items()]
+
             return {
-                "total_leads": 0,
-                "audit_status_distribution": [],
-                "seo_score_ranges": [],
-                "source_distribution": []
+                "total_leads": len(df),
+                "audit_status_distribution": status_list,
+                "seo_score_ranges": score_list,
+                "source_distribution": source_list
             }
 
-        df = pd.DataFrame(leads)
-
-        # 2. Audit Status Distribution
-        status_dist = df['audit_status'].value_counts().to_dict()
-        status_list = [{"name": k, "value": int(v)} for k, v in status_dist.items()]
-
-        # 3. SEO Score Ranges
-        # Handle potential None/NaN in seo_score
-        scores = pd.to_numeric(df['seo_score'], errors='coerce').dropna()
-        score_bins = [0, 20, 40, 60, 80, 100]
-        score_labels = ["0-20", "21-40", "41-60", "61-80", "81-100"]
-        score_ranges = pd.cut(scores, bins=score_bins, labels=score_labels).value_counts().to_dict()
-        score_list = [{"range": k, "count": int(v)} for k, v in score_ranges.items()]
-
-        # 4. Source Distribution
-        source_dist = df['lead_source'].fillna('Unknown').value_counts().head(5).to_dict()
-        source_list = [{"name": k, "value": int(v)} for k, v in source_dist.items()]
-
-        return {
-            "total_leads": len(df),
-            "audit_status_distribution": status_list,
-            "seo_score_ranges": score_list,
-            "source_distribution": source_list
-        }
+        return await asyncio.to_thread(_fetch_stats_sync)
     except Exception as e:
         logger.error("Error fetching stats: %s", e, exc_info=True)
         return error_response("Failed to fetch stats")
