@@ -302,7 +302,7 @@ class ParallelAuditor:
                 # For hunting, we might want to target those without social links
                 response = self.db.client.table("leads").select("*").or_("facebook.is.null,instagram.is.null").limit(chunk_size).execute()
             else:
-                response = self.db.get_pending_leads()
+                response = self.db.client.table("leads").select("*").eq("audit_status", "Pending").limit(chunk_size).execute()
 
             leads = response.data if hasattr(response, 'data') else []
 

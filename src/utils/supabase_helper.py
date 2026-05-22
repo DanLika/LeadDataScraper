@@ -101,15 +101,6 @@ class SupabaseHelper:
             logger.error("Error updating audit for %s: %s", unique_key, e, exc_info=True)
             return None
 
-    def get_pending_leads(self):
-        """
-        Retrieves leads that haven't been audited yet.
-        """
-        if not self.client:
-            return []
-
-        return self.client.table("leads").select("*").eq("audit_status", "Pending").execute()
-
     def delete_all_leads(self):
         """
         Deletes all rows from the 'leads' table.

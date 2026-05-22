@@ -142,22 +142,6 @@ class TestSupabaseHelper(unittest.TestCase):
         result = self.helper.delete_all_jobs()
         self.assertIsNone(result)
 
-    def test_get_pending_leads_success(self):
-        mock_execute = MagicMock(return_value=MagicMock(data=[{"unique_key": "123", "audit_status": "Pending"}]))
-        self.helper.client.table.return_value.select.return_value.eq.return_value.execute = mock_execute
-        
-        result = self.helper.get_pending_leads()
-        
-        self.assertEqual(result.data, [{"unique_key": "123", "audit_status": "Pending"}])
-        self.helper.client.table.assert_called_with("leads")
-        self.helper.client.table.return_value.select.assert_called_with("*")
-        self.helper.client.table.return_value.select.return_value.eq.assert_called_with("audit_status", "Pending")
-
-    def test_get_pending_leads_client_none(self):
-        self.helper.client = None
-        result = self.helper.get_pending_leads()
-        self.assertEqual(result, [])
-
     def test_update_audit_success(self):
         unique_key = "test_key"
         audit_data = {
