@@ -33,7 +33,10 @@ def clean_phone(phone_str):
         return np.nan
     cleaned = ''
     if phone_str.startswith('+'):
-        cleaned = '+' + re.sub(r'[^+\d]', '', phone_str)
+        # Strip to digits only, then prepend a single `+`. Using `[^+\d]`
+        # here would KEEP the original leading `+` and the prepend would
+        # produce a malformed `++` prefix.
+        cleaned = '+' + re.sub(r'[^\d]', '', phone_str)
     else:
         cleaned = re.sub(r'[^+\d]', '', phone_str)
     

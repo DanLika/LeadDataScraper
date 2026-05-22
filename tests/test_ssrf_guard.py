@@ -13,10 +13,12 @@ locally without a network round-trip. Every other case uses IP
 literals or the hostname denylist — no DNS.
 """
 import ipaddress
+import socket
 import unittest
 
 from src.utils.ssrf_guard import (
     SSRFError,
+    SSRFGuardResolver,
     assert_safe_scheme,
     assert_safe_url,
     _assert_public_ip,
@@ -126,6 +128,44 @@ class TestAssertSafeUrl(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_ip_literal_passes(self):
         await assert_safe_url("https://8.8.8.8/")    # no raise — global IP
+
+    async def test_dns_resolution_failure_raises_ssrf_error(self):
+        # A `.invalid` TLD (RFC 2606) is guaranteed NXDOMAIN — the
+        # `socket.gaierror` branch must surface as an SSRFError, not leak
+        # the raw resolver exception.
+        with self.assertRaises(SSRFError):
+            await assert_safe_url("https://nonexistent-zzz-9988random.invalid/")
+
+
+class TestSSRFGuardResolver(unittest.IsolatedAsyncioTestCase):
+    """The aiohttp resolver subclass used by the SEO-audit connector —
+    it must reject blocked hostnames and non-public DNS results before
+    aiohttp ever opens a socket."""
+
+    async def test_blocked_metadata_hostname_rejected(self):
+        resolver = SSRFGuardResolver()
+        with self.assertRaises(SSRFError):
+            await resolver.resolve("metadata.google.internal", 80, socket.AF_INET)
+
+    async def test_blocked_hostname_case_insensitive(self):
+        resolver = SSRFGuardResolver()
+        with self.assertRaises(SSRFError):
+            await resolver.resolve("KUBERNETES.DEFAULT.SVC", 80, socket.AF_INET)
+
+    async def test_localhost_resolves_to_loopback_and_is_rejected(self):
+        # `localhost` clears the hostname denylist but `super().resolve()`
+        # returns 127.0.0.1 — the resolved-IP check must reject it.
+        resolver = SSRFGuardResolver()
+        with self.assertRaises(SSRFError):
+            await resolver.resolve("localhost", 80, socket.AF_INET)
+
+    async def test_public_host_resolves_and_returns_results(self):
+        # A public host clears both checks and the resolver returns the
+        # aiohttp result list unchanged.
+        resolver = SSRFGuardResolver()
+        results = await resolver.resolve("example.com", 80, socket.AF_INET)
+        assert isinstance(results, list) and len(results) >= 1
+        assert all("host" in r for r in results)
 
 
 if __name__ == "__main__":
