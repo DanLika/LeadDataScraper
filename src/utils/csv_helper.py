@@ -68,110 +68,166 @@ def merge_and_deduplicate(dataframes: list[pd.DataFrame]) -> pd.DataFrame:
 
 
 
-def load_csv_with_unique_key(filepath: str, df_name: str = "CSV") -> pd.DataFrame:
-    """
-    Loads a CSV file, initializes if not found/empty, and ensures a 'unique_key' column exists.
-    Also ensures default essential columns are present if initializing.
-    """
-    essential_cols = ['Name', 'Website', 'email', 'unique_key']
+# ---- load_csv_with_unique_key helpers ---------------------------------------
+# Decomposed from a 105-LOC method into four single-concern helpers + a thin
+# orchestrator. Behaviour preserved verbatim; the existing
+# tests/test_csv_helper_health.py covers the surface.
 
+_ESSENTIAL_COLS: list[str] = ['Name', 'Website', 'email', 'unique_key']
+
+# Case-insensitive source-column → canonical-name map. Lower-case keys are
+# matched against `c.lower() for c in df.columns`; values are the canonical
+# column names the rest of the pipeline expects. A canonical mapping to
+# itself (e.g. `'unique_key': 'unique_key'`) is a no-op normaliser.
+_CANONICAL_COLUMN_MAP: dict[str, str] = {
+    'name': 'Name',
+    'website': 'Website',
+    'extracted_email': 'email',
+    'e-mail': 'email',
+    'email_address': 'email',
+    'unique_key': 'unique_key',
+    'unique_key_colab': 'UNIQUE_KEY',
+    'company': 'company_name',
+    'company_name': 'company_name',
+    'business_name': 'company_name',
+    'rating': 'Rating',
+    'reviews': 'Reviews',
+    'score': 'Rating',
+    'review_count': 'Reviews',
+}
+
+
+def _read_csv_with_recovery(filepath: str, df_name: str, essential_cols: list[str]) -> pd.DataFrame:
+    """Load `filepath` as a CSV with a defensive fallback chain.
+
+    Failure modes handled:
+      - FileNotFoundError → return empty frame seeded with `essential_cols`
+      - pd.errors.EmptyDataError → return empty seeded frame
+      - pd.errors.ParserError → retry with on_bad_lines='skip' so a single
+        bad row (unquoted comma inside a value, formula-injection payload,
+        extra delimiter) doesn't abort the whole import (see BUGS.md
+        Round 4 B). If the lenient parse also fails, fall back to empty.
+    """
     try:
         df = pd.read_csv(filepath, dtype=str)
         logger.info("Successfully loaded %d leads from '%s' for %s.", len(df), filepath, df_name)
+        return df
     except FileNotFoundError:
         logger.warning("'%s' not found. Initializing empty DataFrame for %s.", filepath, df_name)
-        df = pd.DataFrame(columns=essential_cols, dtype=str)
+        return pd.DataFrame(columns=essential_cols, dtype=str)
     except pd.errors.EmptyDataError as e:
         logger.warning("'%s' is empty for %s: %s. Initializing empty DataFrame.", filepath, df_name, e)
-        df = pd.DataFrame(columns=essential_cols, dtype=str)
+        return pd.DataFrame(columns=essential_cols, dtype=str)
     except pd.errors.ParserError as e:
-        # One bad row (typical: unquoted comma inside a value, formula
-        # injection payload, extra delimiter) used to crash the whole
-        # import — pandas' default `error_bad_lines=True` aborts on the
-        # first malformed line and we'd fall back to an empty frame,
-        # losing every preceding valid row. See BUGS.md Round 4 B.
-        # Retry skipping bad lines so the good rows survive; only fall
-        # back to empty if even the lenient parse fails.
         logger.warning("Initial parse of '%s' failed (%s); retrying with on_bad_lines='skip'.", filepath, e)
         try:
             df = pd.read_csv(filepath, dtype=str, on_bad_lines='skip')
             logger.info("Recovered %d leads from '%s' (some malformed rows skipped).", len(df), filepath)
+            return df
         except Exception as e2:
             logger.error("Recovery parse also failed for '%s' (%s). Initializing empty DataFrame.", filepath, e2)
-            df = pd.DataFrame(columns=essential_cols, dtype=str)
+            return pd.DataFrame(columns=essential_cols, dtype=str)
 
-    # Case-insensitive column merging logic
-    canonical_map = {
-        'name': 'Name',
-        'website': 'Website',
-        'extracted_email': 'email',
-        'e-mail': 'email',
-        'email_address': 'email',
-        'unique_key': 'unique_key',
-        'unique_key_colab': 'UNIQUE_KEY',
-        'company': 'company_name',
-        'company_name': 'company_name',
-        'business_name': 'company_name',
-        'rating': 'Rating',
-        'reviews': 'Reviews',
-        'score': 'Rating',
-        'review_count': 'Reviews'
-    }
 
+def _canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename source columns to canonical names via `_CANONICAL_COLUMN_MAP`,
+    in place. When both source and canonical exist, fills nulls in canonical
+    from source then drops source.
+
+    Why rename (not copy): the previous implementation did
+    `df[canonical] = df[actual_col]` which COPIES rather than renames —
+    leaving the source column in place. Once
+    backend.main._load_and_standardize_csv lowercases the columns
+    afterwards, `name` and `Name` collapse to the same name, producing
+    duplicate columns. pandas to_dict('records') then silently drops one
+    of them (input-dependent which value survives) and the upload becomes
+    data-lossy without any warning.
+    """
     current_cols = {c.lower(): c for c in df.columns}
+    for lower_name, canonical in _CANONICAL_COLUMN_MAP.items():
+        if lower_name not in current_cols:
+            continue
+        actual_col = current_cols[lower_name]
+        if actual_col == canonical:
+            continue
+        if canonical not in df.columns:
+            df.rename(columns={actual_col: canonical}, inplace=True)
+        else:
+            # Both exist; fill nulls from source then drop it.
+            df[canonical] = df[canonical].fillna(df[actual_col])
+            df.drop(columns=[actual_col], inplace=True, errors='ignore')
+    return df
 
-    for lower_name, canonical in canonical_map.items():
-        if lower_name in current_cols:
-            actual_col = current_cols[lower_name]
-            if actual_col != canonical:
-                # Rename the source → canonical so the source column is gone.
-                # The previous implementation did `df[canonical] = df[actual_col]`
-                # which COPIES rather than renames — leaving the source column
-                # in place. Once backend.main._load_and_standardize_csv lowercases
-                # the columns afterwards, `name` and `Name` collapse to the same
-                # name, producing duplicate columns. pandas to_dict('records')
-                # then silently drops one of them (input-dependent which value
-                # survives) and the upload is data-lossy without any warning.
-                if canonical not in df.columns:
-                    df.rename(columns={actual_col: canonical}, inplace=True)
-                else:
-                    # Both exist; fill nulls from source then drop it.
-                    df[canonical] = df[canonical].fillna(df[actual_col])
-                    df.drop(columns=[actual_col], inplace=True, errors='ignore')
 
-    # Ensure all essential columns exist
+def _ensure_essential_columns(df: pd.DataFrame, essential_cols: list[str]) -> pd.DataFrame:
+    """Add any missing column from `essential_cols` as np.nan-filled, in place."""
     for col in essential_cols:
         if col not in df.columns:
             df[col] = np.nan
+    return df
 
-    # Sync unique_key and UNIQUE_KEY
+
+def _ensure_unique_key(df: pd.DataFrame, df_name: str) -> pd.DataFrame:
+    """Guarantee a non-empty `unique_key` column.
+
+    Two strategies (first one that applies wins):
+      1. Sync from `UNIQUE_KEY` (Colab convention) when present and
+         `unique_key` is missing or entirely null.
+      2. Generate from per-row fallback chain: `f"{website}_{email}"`
+         → `website` → `Name` → `f"idx_{row.name}"`.
+
+    The generation path runs when `unique_key` is missing OR all-null
+    OR all-empty-string — covering both fresh CSV (no column) and the
+    "column exists but unpopulated" case (Colab-style empty placeholder).
+    """
     if 'UNIQUE_KEY' in df.columns and ('unique_key' not in df.columns or df['unique_key'].isnull().all()):
         df['unique_key'] = df['UNIQUE_KEY']
 
-    if 'unique_key' not in df.columns or df['unique_key'].isnull().all() or (df['unique_key'] == '').all():
-        logger.info("Generating 'unique_key' for %s...", df_name)
+    needs_generation = (
+        'unique_key' not in df.columns
+        or df['unique_key'].isnull().all()
+        or (df['unique_key'] == '').all()
+    )
+    if not needs_generation:
+        return df
 
-        # Helper to get value from canonical or fallback
-        def get_val(row: "pd.Series[Any]", col: str) -> str:
-            val = row.get(col)
-            return str(val) if pd.notna(val) and str(val).strip() != '' else ""
+    logger.info("Generating 'unique_key' for %s...", df_name)
 
-        def generate_row_key(row: "pd.Series[Any]") -> str:
-            w = get_val(row, 'Website')
-            e = get_val(row, 'email')
-            n = get_val(row, 'Name')
+    def get_val(row: "pd.Series[Any]", col: str) -> str:
+        val = row.get(col)
+        return str(val) if pd.notna(val) and str(val).strip() != '' else ""
 
-            if w and e:
-                return f"{w}_{e}"
-            if w:
-                return w
-            if n:
-                return n
-            return f"idx_{row.name}"
+    def generate_row_key(row: "pd.Series[Any]") -> str:
+        w = get_val(row, 'Website')
+        e = get_val(row, 'email')
+        n = get_val(row, 'Name')
+        if w and e:
+            return f"{w}_{e}"
+        if w:
+            return w
+        if n:
+            return n
+        return f"idx_{row.name}"
 
-        df['unique_key'] = df.apply(generate_row_key, axis=1)
-        logger.info("Finished generating 'unique_key' for %s.", df_name)
+    df['unique_key'] = df.apply(generate_row_key, axis=1)
+    logger.info("Finished generating 'unique_key' for %s.", df_name)
+    return df
 
+
+def load_csv_with_unique_key(filepath: str, df_name: str = "CSV") -> pd.DataFrame:
+    """Load a CSV and return a normalised DataFrame.
+
+    Pipeline:
+      1. `_read_csv_with_recovery` — bad-row-tolerant load
+      2. `_canonicalize_columns` — rename case-insensitive source columns
+         to canonical names (Name / Website / email / company_name / …)
+      3. `_ensure_essential_columns` — Name / Website / email / unique_key
+      4. `_ensure_unique_key` — sync from UNIQUE_KEY or generate
+    """
+    df = _read_csv_with_recovery(filepath, df_name, _ESSENTIAL_COLS)
+    df = _canonicalize_columns(df)
+    df = _ensure_essential_columns(df, _ESSENTIAL_COLS)
+    df = _ensure_unique_key(df, df_name)
     return df
 
 def save_csv(df: pd.DataFrame, filepath: str) -> None:
