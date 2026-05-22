@@ -25,7 +25,16 @@ from src.core.parallel_auditor import ParallelAuditor
 from src.core.task_orchestrator import TaskOrchestrator
 from src.scripts.export_leads import export_leads
 from src.utils.logging_config import setup_logging, get_logger
+from src.repositories.campaign_repository import CampaignRepository
+from src.services.campaign_service import CampaignService
+from src.services.exceptions import (
+    CampaignNotFoundError,
+    CampaignTableMissingError,
+    NoCampaignMessagesError,
+    NoMatchingLeadsError,
+)
 from fastapi.responses import FileResponse
+import asyncio
 
 logger = get_logger(__name__)
 
@@ -866,13 +875,25 @@ async def download_outreach_export(request: Request):
         return error_response("Outreach export failed")
 
 
-# ============================================================
-# Campaign Management Endpoints (Step 4: Outreach)
-# ============================================================
+# ---- Campaign handlers --------------------------------------------------
+# Routing + validation + service-call + HTTP error mapping ONLY. Business
+# logic lives in src/services/campaign_service.py; DB access in
+# src/repositories/campaign_repository.py. Domain exceptions from
+# src/services/exceptions.py are translated here to HTTP responses.
+#
+# Per-route guards (verify_api_key + slowapi rate limit) stay on the
+# handler — never let the service run uninvoked-from-handler code paths
+# without re-auth. The service intentionally has no idea who's calling.
+#
+# Per-handler `if not db.client` 503 stays here for the same reason: the
+# DB connectivity check is a pre-condition for constructing the
+# repository.
 
-def _is_table_missing_error(e: Exception) -> bool:
-    """Check if a Supabase error indicates a missing table (PGRST205)."""
-    return "PGRST205" in str(e)
+def _campaign_service() -> CampaignService:
+    """Per-request service factory. `db.client` is guaranteed non-None
+    by the handler's connectivity check before this is invoked."""
+    return CampaignService(CampaignRepository(db.client))
+
 
 @app.post("/campaigns", dependencies=[Depends(verify_api_key)])
 @limiter.limit("20/minute")
@@ -881,28 +902,22 @@ async def create_campaign(request: Request, campaign: CampaignCreate):
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
-        import uuid
-        campaign_data = {
-            "id": str(uuid.uuid4()),
-            "name": campaign.name,
-            "channel": campaign.channel,
-            "segment_filter": campaign.segment_filter,
-            "status": "draft",
-            "total_leads": 0,
-            "sent_count": 0,
-            "reply_count": 0,
-        }
-        result = db.client.table("campaigns").insert(campaign_data).execute()
-        return {"campaign": result.data[0] if result.data else campaign_data}
-    except Exception as e:
-        if _is_table_missing_error(e):
-            logger.warning("Campaigns table not found. Run the SQL from supabase_schema.sql to create it.")
-            return error_response(
-                "Campaigns table not created yet. Please run the campaigns migration SQL in Supabase SQL Editor.",
-                status_code=503,
-            )
-        logger.error("Error creating campaign: %s", e, exc_info=True)
+        result = _campaign_service().create(
+            name=campaign.name,
+            channel=campaign.channel,
+            segment_filter=campaign.segment_filter,
+        )
+        return {"campaign": result}
+    except CampaignTableMissingError:
+        logger.warning("Campaigns table not found. Run the SQL from supabase_schema.sql to create it.")
+        return error_response(
+            "Campaigns table not created yet. Please run the campaigns migration SQL in Supabase SQL Editor.",
+            status_code=503,
+        )
+    except Exception:
+        logger.exception("Error creating campaign")
         return error_response("Failed to create campaign")
+
 
 @app.get("/campaigns", dependencies=[Depends(verify_api_key)])
 @limiter.limit("60/minute")
@@ -911,13 +926,13 @@ async def list_campaigns(request: Request):
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
-        result = db.client.table("campaigns").select("*").order("created_at", desc=True).execute()
-        return {"campaigns": result.data or []}
-    except Exception as e:
-        if _is_table_missing_error(e):
-            return {"campaigns": [], "warning": "Campaigns table not created yet."}
-        logger.error("Error listing campaigns: %s", e, exc_info=True)
+        return {"campaigns": _campaign_service().list_all()}
+    except CampaignTableMissingError:
+        return {"campaigns": [], "warning": "Campaigns table not created yet."}
+    except Exception:
+        logger.exception("Error listing campaigns")
         return error_response("Failed to list campaigns")
+
 
 @app.get("/campaigns/{campaign_id}", dependencies=[Depends(verify_api_key)])
 @limiter.limit("60/minute")
@@ -926,34 +941,13 @@ async def get_campaign(request: Request, campaign_id: str):
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
-        # maybe_single returns data=None on 0 rows instead of raising APIError;
-        # lets us return a proper 404 instead of falling through to the generic 500.
-        campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
-        if not campaign or not campaign.data:
-            return error_response("Campaign not found", status_code=404)
-
-        # Performance optimization: Count stats at the database level instead of fetching all rows into memory
-        stats = {"pending": 0, "sent": 0, "delivered": 0, "replied": 0, "bounced": 0}
-
-        # We perform individual exact count queries for each status. This is much faster
-        # and memory-efficient than returning potentially hundreds of thousands of full rows.
-        for status in stats.keys():
-            res = db.client.table("campaign_messages").select("id", count="exact").eq("campaign_id", campaign_id).eq("status", status).limit(1).execute()
-            stats[status] = res.count or 0
-
-        # We limit the payload to 50 messages to reduce network transfer time and API response size.
-        # The frontend only displays the first 50 messages.
-        messages = db.client.table("campaign_messages").select("*").eq("campaign_id", campaign_id).limit(50).execute()
-
-        return {
-            "campaign": campaign.data,
-            "messages": messages.data or [],
-            "stats": stats,
-            "total_messages": sum(stats.values())
-        }
-    except Exception as e:
-        logger.error("Error getting campaign %s: %s", campaign_id, e, exc_info=True)
+        return _campaign_service().get_with_stats(campaign_id)
+    except CampaignNotFoundError:
+        return error_response("Campaign not found", status_code=404)
+    except Exception:
+        logger.exception("Error getting campaign %s", campaign_id)
         return error_response("Failed to get campaign")
+
 
 @app.post("/campaigns/{campaign_id}/generate", dependencies=[Depends(verify_api_key)])
 @limiter.limit("3/minute")
@@ -962,86 +956,25 @@ async def generate_campaign_messages(request: Request, campaign_id: str, backgro
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
-        # maybe_single() — same reasoning as get_campaign: don't let 0-row
-        # APIError get swallowed by the broad except below.
-        campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
-        if not campaign or not campaign.data:
-            return error_response("Campaign not found", status_code=404)
-
-        camp = campaign.data
-
-        # Build lead query based on segment filter
-        query = db.client.table("leads").select("*")
-        if camp.get("segment_filter"):
-            query = query.eq("segment", camp["segment_filter"])
-
-        # Only leads with email for email campaigns, or linkedin for linkedin campaigns
-        if camp["channel"] == "email":
-            query = query.not_.is_("email", "null")
-        elif camp["channel"] == "linkedin":
-            query = query.not_.is_("linkedin", "null")
-
-        leads_resp = query.execute()
-        leads = leads_resp.data or []
-
-        if not leads:
-            return error_response("No matching leads found for this segment and channel.", status_code=404)
-
-        # Generate messages in background
-        async def generate_messages():
-            from src.processors.leadhunter import LeadHunter
-            hunter = LeadHunter()
-            messages_to_insert = []
-
-            for lead in leads:
-                lead_name = lead.get("name") or lead.get("company_name") or "there"
-                pain = lead.get("pain_points") or ""
-
-                if camp["channel"] in ["email", "multi"]:
-                    hook = lead.get("email_hook") or ""
-                    company = lead.get("company_name") or lead_name
-                    subject = f"Quick question about {company}"
-                    if hook:
-                        body = f"Hi {{{{first_name}}}},\n\n{hook}\n\nI'd love to share a few specific ideas that could help. Would you be open to a quick 10-minute chat this week?\n\nBest,"
-                    else:
-                        body = f"Hi {{{{first_name}}}},\n\nI came across {company}'s website and noticed a few areas where you might be leaving growth on the table. {pain[:200]}\n\nWould you be open to a quick chat about it?\n\nBest,"
-
-                    messages_to_insert.append({
-                        "campaign_id": campaign_id,
-                        "lead_unique_key": lead["unique_key"],
-                        "channel": "email",
-                        "subject": subject,
-                        "body": body,
-                        "status": "pending"
-                    })
-
-                if camp["channel"] in ["linkedin", "multi"]:
-                    hook = lead.get("linkedin_hook") or ""
-                    company = lead.get("company_name") or lead_name
-                    body = hook if hook else f"Hi, I came across {company} and was impressed by what you're building. I work in a similar space and would love to connect."
-
-                    messages_to_insert.append({
-                        "campaign_id": campaign_id,
-                        "lead_unique_key": lead["unique_key"],
-                        "channel": "linkedin",
-                        "subject": None,
-                        "body": body,
-                        "status": "pending"
-                    })
-
-            if messages_to_insert:
-                db.client.table("campaign_messages").insert(messages_to_insert).execute()
-                db.client.table("campaigns").update({
-                    "total_leads": len(leads),
-                    "status": "draft"
-                }).eq("id", campaign_id).execute()
-
-        await generate_messages()
-
-        return {"status": "generated", "lead_count": len(leads)}
-    except Exception as e:
-        logger.error("Error generating campaign messages: %s", e, exc_info=True)
+        # `generate_messages` is sync (PostgREST calls only). Run on a
+        # worker thread so the event loop is free to serve other
+        # requests during what can be a multi-hundred-row insert path.
+        # See `CampaignService.generate_messages` docstring.
+        lead_count = await asyncio.to_thread(
+            _campaign_service().generate_messages, campaign_id
+        )
+        return {"status": "generated", "lead_count": lead_count}
+    except CampaignNotFoundError:
+        return error_response("Campaign not found", status_code=404)
+    except NoMatchingLeadsError:
+        return error_response(
+            "No matching leads found for this segment and channel.",
+            status_code=404,
+        )
+    except Exception:
+        logger.exception("Error generating campaign messages")
         return error_response("Failed to generate campaign messages")
+
 
 @app.post("/campaigns/{campaign_id}/start", dependencies=[Depends(verify_api_key)])
 @limiter.limit("10/minute")
@@ -1050,13 +983,12 @@ async def start_campaign(request: Request, campaign_id: str):
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
-        db.client.table("campaigns").update({
-            "status": "active"
-        }).eq("id", campaign_id).execute()
+        _campaign_service().set_status(campaign_id, "active")
         return {"status": "active", "message": "Campaign started. Messages will be sent according to rate limits."}
-    except Exception as e:
-        logger.error("Error starting campaign %s: %s", campaign_id, e, exc_info=True)
+    except Exception:
+        logger.exception("Error starting campaign %s", campaign_id)
         return error_response("Failed to start campaign")
+
 
 @app.post("/campaigns/{campaign_id}/pause", dependencies=[Depends(verify_api_key)])
 @limiter.limit("10/minute")
@@ -1065,13 +997,12 @@ async def pause_campaign(request: Request, campaign_id: str):
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
-        db.client.table("campaigns").update({
-            "status": "paused"
-        }).eq("id", campaign_id).execute()
+        _campaign_service().set_status(campaign_id, "paused")
         return {"status": "paused"}
-    except Exception as e:
-        logger.error("Error pausing campaign %s: %s", campaign_id, e, exc_info=True)
+    except Exception:
+        logger.exception("Error pausing campaign %s", campaign_id)
         return error_response("Failed to pause campaign")
+
 
 @app.get("/campaigns/{campaign_id}/export", dependencies=[Depends(verify_api_key)])
 @limiter.limit("12/hour")
@@ -1080,37 +1011,16 @@ async def export_campaign_messages(request: Request, campaign_id: str):
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
-        messages = db.client.table("campaign_messages").select(
-            "lead_unique_key, channel, subject, body, status"
-        ).eq("campaign_id", campaign_id).execute()
-
-        if not messages.data:
-            return error_response("No messages found for this campaign.", status_code=404)
-
-        df = pd.DataFrame(messages.data)
-
-        # Enrich with lead data
-        unique_keys = df["lead_unique_key"].unique().tolist()
-        leads_resp = db.client.table("leads").select(
-            "unique_key, name, email, linkedin, company_name, first_name"
-        ).in_("unique_key", unique_keys).execute()
-
-        leads_df = pd.DataFrame(leads_resp.data) if leads_resp.data else pd.DataFrame()
-        if not leads_df.empty:
-            df = df.merge(leads_df, left_on="lead_unique_key", right_on="unique_key", how="left")
-
-        export_path = f"exports/campaign_{campaign_id[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        os.makedirs("exports", exist_ok=True)
-        from src.utils.csv_helper import sanitize_dataframe_for_csv
-        sanitize_dataframe_for_csv(df).to_csv(export_path, index=False)
-
+        export_path = _campaign_service().export_messages_to_csv(campaign_id)
         return FileResponse(
             path=export_path,
             filename=f"campaign_export_{datetime.now().strftime('%Y%m%d')}.csv",
-            media_type="text/csv"
+            media_type="text/csv",
         )
-    except Exception as e:
-        logger.error("Error exporting campaign messages: %s", e, exc_info=True)
+    except NoCampaignMessagesError:
+        return error_response("No messages found for this campaign.", status_code=404)
+    except Exception:
+        logger.exception("Error exporting campaign messages")
         return error_response("Failed to export campaign messages")
 
 
