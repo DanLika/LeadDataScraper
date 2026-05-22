@@ -1116,4 +1116,6 @@ async def export_campaign_messages(request: Request, campaign_id: str):
 
 if __name__ == "__main__":
     debug = os.getenv("DEBUG", "False").lower() == "true"
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=debug)
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("backend.main:app", host=host, port=port, reload=debug)
