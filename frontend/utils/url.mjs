@@ -28,3 +28,29 @@ export function ensureProtocol(url) {
     return '';
   }
 }
+
+/**
+ * Open-redirect guard for the login `?next=` parameter.
+ *
+ * Accepts ONLY same-origin relative paths. Allowlist-shaped: the value
+ * must match a strict character set so the WHATWG URL parser cannot
+ * smuggle the redirect to another origin via control chars (`\t \n \r`
+ * are stripped by the parser and would otherwise let `/\t//evil.com`
+ * resolve to `https://evil.com/`), embedded backslashes (normalised to
+ * `/` for special-scheme URLs), or a protocol-relative `//evil.com`.
+ *
+ * `@` and `:` are deliberately excluded from the allowlist so a value
+ * like `/@evil.com/foo` — which mimics the `user@host` userinfo URL
+ * form and is a phishing-display aid — can't pass. Neither character is
+ * needed for a legitimate same-origin path in this app.
+ *
+ * Anything that fails the checks collapses to `'/'` (the app root).
+ */
+export function sanitizeNext(raw) {
+  if (!raw) return '/';
+  if (typeof raw !== 'string') return '/';
+  if (raw.length > 512) return '/';
+  if (!/^\/[A-Za-z0-9._~\-/?#=&%+!$'()*,;]*$/.test(raw)) return '/';
+  if (raw.startsWith('//')) return '/';
+  return raw;
+}

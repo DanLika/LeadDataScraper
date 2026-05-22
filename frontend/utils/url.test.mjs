@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ensureProtocol } from './url.mjs'
+import { ensureProtocol, sanitizeNext } from './url.mjs'
 
 /**
  * Core security invariant: `ensureProtocol` output is ALWAYS either the
@@ -92,3 +92,48 @@ test('non-string input never throws + stays scheme-safe', () => {
 test('garbage with spaces → ""', () => {
   assert.equal(ensureProtocol('not a url at all'), '')
 })
+
+// ─────────────────────────── sanitizeNext ───────────────────────────
+// Open-redirect guard for the login ?next= param.
+
+test('sanitizeNext: plain same-origin path passes', () => {
+  assert.equal(sanitizeNext('/'), '/')
+  assert.equal(sanitizeNext('/insights'), '/insights')
+  assert.equal(sanitizeNext('/campaigns?view=audited'), '/campaigns?view=audited')
+})
+
+test('sanitizeNext: nullish / empty → /', () => {
+  assert.equal(sanitizeNext(null), '/')
+  assert.equal(sanitizeNext(undefined), '/')
+  assert.equal(sanitizeNext(''), '/')
+})
+
+test('sanitizeNext: non-string → /', () => {
+  assert.equal(sanitizeNext(123), '/')
+  assert.equal(sanitizeNext({}), '/')
+})
+
+test('sanitizeNext: over-length (>512) → /', () => {
+  assert.equal(sanitizeNext('/' + 'a'.repeat(600)), '/')
+})
+
+// the open-redirect attack matrix — every one must collapse to '/'
+for (const evil of [
+  '//evil.com',                       // protocol-relative
+  '//evil.com/path',
+  'https://evil.com',                 // absolute — no leading '/'
+  'http://evil.com',
+  'javascript:alert(1)',              // scheme — no leading '/'
+  '/\t//evil.com',                    // control char → parser strips → //evil
+  '/\n//evil.com',
+  '/\r//evil.com',
+  '/\\evil.com',                      // backslash → normalised to /
+  '/@evil.com/foo',                   // userinfo phishing-display form
+  '/path:8080',                       // ':' excluded from allowlist
+  'relative-no-slash',                // must start with '/'
+  '/ space',                          // raw space not allowed
+]) {
+  test(`sanitizeNext: open-redirect payload ${JSON.stringify(evil)} → /`, () => {
+    assert.equal(sanitizeNext(evil), '/')
+  })
+}

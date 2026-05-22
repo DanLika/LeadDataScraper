@@ -4,31 +4,16 @@ import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createClient } from '@/utils/supabase/server'
 import { checkLoginRate, clearLoginRate } from '@/utils/loginThrottle'
+import { sanitizeNext } from '@/utils/url.mjs'
 
 // Same trusted-IP header the /api/proxy route reads, so the rate-limit
 // bucket key matches across the auth path and the API path. Anything else
 // is forgeable when Next is exposed directly.
 const TRUSTED_CLIENT_IP_HEADER = (process.env.TRUSTED_CLIENT_IP_HEADER || 'x-vercel-forwarded-for').toLowerCase()
 
-/**
- * Only accept same-origin relative paths. Allowlist-shaped: must match a
- * strict character set so WHATWG URL parser cannot smuggle the redirect to
- * another origin via control chars (\t / \n / \r get stripped by the parser
- * and would otherwise let `/\t//evil.com` resolve to https://evil.com/),
- * embedded backslashes (normalised to `/` for special-scheme URLs), or
- * protocol-relative `//evil.com`. Mirrors the client-side sanitizeNext that
- * used to live in page.tsx.
- */
-function sanitizeNext(raw: string | null | undefined): string {
-  if (!raw) return '/'
-  if (raw.length > 512) return '/'
-  // `@` and `:` are excluded to avoid `/@evil.com/...` phishing-display
-  // patterns that mimic the userinfo URL form. Neither is needed for
-  // legitimate same-origin paths in this app.
-  if (!/^\/[A-Za-z0-9._~\-/?#=&%+!$'()*,;]*$/.test(raw)) return '/'
-  if (raw.startsWith('//')) return '/'
-  return raw
-}
+// `sanitizeNext` (the open-redirect guard for `?next=`) lives in
+// utils/url.mjs alongside `ensureProtocol` — pure, exported, and
+// unit-tested by utils/url.test.mjs.
 
 export type LoginActionState = { error: string | null } | undefined
 
