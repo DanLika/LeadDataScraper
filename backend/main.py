@@ -1,6 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends, Security, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
+from starlette.concurrency import run_in_threadpool
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -928,7 +930,9 @@ async def get_campaign(request: Request, campaign_id: str):
     try:
         # maybe_single returns data=None on 0 rows instead of raising APIError;
         # lets us return a proper 404 instead of falling through to the generic 500.
-        campaign = db.client.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
+        campaign = await run_in_threadpool(
+            lambda: db.client.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
+        )
         if not campaign or not campaign.data:
             return error_response("Campaign not found", status_code=404)
 
@@ -937,13 +941,27 @@ async def get_campaign(request: Request, campaign_id: str):
 
         # We perform individual exact count queries for each status. This is much faster
         # and memory-efficient than returning potentially hundreds of thousands of full rows.
-        for status in stats.keys():
-            res = db.client.table("campaign_messages").select("id", count="exact").eq("campaign_id", campaign_id).eq("status", status).limit(1).execute()
-            stats[status] = res.count or 0
+        # Run queries in parallel via run_in_threadpool to unblock the main event loop
+        # and reduce overall request latency.
+        async def fetch_count(status: str) -> int:
+            res = await run_in_threadpool(
+                lambda: db.client.table("campaign_messages").select("id", count="exact")
+                .eq("campaign_id", campaign_id).eq("status", status).limit(1).execute()
+            )
+            return res.count or 0
+
+        status_keys = list(stats.keys())
+        tasks = [fetch_count(status) for status in status_keys]
+        results = await asyncio.gather(*tasks)
+
+        for i, status in enumerate(status_keys):
+            stats[status] = results[i]
 
         # We limit the payload to 50 messages to reduce network transfer time and API response size.
         # The frontend only displays the first 50 messages.
-        messages = db.client.table("campaign_messages").select("*").eq("campaign_id", campaign_id).limit(50).execute()
+        messages = await run_in_threadpool(
+            lambda: db.client.table("campaign_messages").select("*").eq("campaign_id", campaign_id).limit(50).execute()
+        )
 
         return {
             "campaign": campaign.data,
