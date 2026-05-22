@@ -1,6 +1,9 @@
-import pandas as pd
-import numpy as np
 import os
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
 from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -15,13 +18,13 @@ logger = get_logger(__name__)
 _CSV_FORMULA_PREFIXES = ('=', '@', '+', '-', '\t', '\r')
 
 
-def sanitize_csv_cell(value):
+def sanitize_csv_cell(value: Any) -> Any:
     if isinstance(value, str) and value and value[0] in _CSV_FORMULA_PREFIXES:
         return "'" + value
     return value
 
 
-def sanitize_dataframe_for_csv(df):
+def sanitize_dataframe_for_csv(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy of `df` with every string cell neutralised against
     CSV / formula injection. Cheap on small exports; the dashboard caps
     leads at 200 per fetch and exports are operator-triggered."""
@@ -31,7 +34,7 @@ def sanitize_dataframe_for_csv(df):
     return out
 
 
-def merge_and_deduplicate(dataframes):
+def merge_and_deduplicate(dataframes: list[pd.DataFrame]) -> pd.DataFrame:
     """
     Combines multiple DataFrames, ensures unique_key is present, and deduplicates.
     Consolidated from data_manager.py.
@@ -65,7 +68,7 @@ def merge_and_deduplicate(dataframes):
 
 
 
-def load_csv_with_unique_key(filepath, df_name="CSV"):
+def load_csv_with_unique_key(filepath: str, df_name: str = "CSV") -> pd.DataFrame:
     """
     Loads a CSV file, initializes if not found/empty, and ensures a 'unique_key' column exists.
     Also ensures default essential columns are present if initializing.
@@ -149,11 +152,11 @@ def load_csv_with_unique_key(filepath, df_name="CSV"):
         logger.info("Generating 'unique_key' for %s...", df_name)
 
         # Helper to get value from canonical or fallback
-        def get_val(row, col):
+        def get_val(row: "pd.Series[Any]", col: str) -> str:
             val = row.get(col)
             return str(val) if pd.notna(val) and str(val).strip() != '' else ""
 
-        def generate_row_key(row):
+        def generate_row_key(row: "pd.Series[Any]") -> str:
             w = get_val(row, 'Website')
             e = get_val(row, 'email')
             n = get_val(row, 'Name')
@@ -171,7 +174,7 @@ def load_csv_with_unique_key(filepath, df_name="CSV"):
 
     return df
 
-def save_csv(df, filepath):
+def save_csv(df: pd.DataFrame, filepath: str) -> None:
     """Saves DataFrame to CSV and ensures the directory exists.
     Sanitises every string cell against CSV / formula injection before
     writing — see `sanitize_dataframe_for_csv`."""
@@ -179,7 +182,7 @@ def save_csv(df, filepath):
     sanitize_dataframe_for_csv(df).to_csv(filepath, index=False)
     logger.info("Data saved to '%s'.", filepath)
 
-def export_outreach_ready_csv(df, output_path):
+def export_outreach_ready_csv(df: pd.DataFrame, output_path: str) -> pd.DataFrame:
     """
     Formats and exports the lead data specifically for outreach platforms (Instantly, Apollo, etc.)
     Layout: email, website, category, first_name, location, pain_point
@@ -239,7 +242,7 @@ def export_outreach_ready_csv(df, output_path):
     logger.info("Outreach ready export created with %d leads: %s", len(export_df), output_path)
     return export_df
 
-def export_facebook_links(df: pd.DataFrame, output_path: str):
+def export_facebook_links(df: pd.DataFrame, output_path: str) -> pd.DataFrame:
     """
     Extracts unique Facebook links from the DataFrame and saves them to a CSV.
     Matches the logic in the user's Colab script.

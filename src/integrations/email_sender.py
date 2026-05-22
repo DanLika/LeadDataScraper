@@ -5,15 +5,29 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, TypedDict
 from datetime import datetime, timezone
+
+
+class EmailSendResult(TypedDict, total=False):
+    """Return shape from `EmailSenderBase.send`.
+
+    Always carries `status` ("sent" | "error" | "bounced"); the remaining
+    keys are populated depending on the outcome. `total=False` so handlers
+    can produce a partial dict without `pyright`/`mypy` reading absent
+    keys as type errors.
+    """
+    status: str
+    to: str
+    sent_at: str
+    error: str
 
 
 class EmailSenderBase(ABC):
     """Abstract base class for email sending implementations."""
 
     @abstractmethod
-    async def send(self, to: str, subject: str, body: str, from_name: Optional[str] = None) -> dict:
+    async def send(self, to: str, subject: str, body: str, from_name: Optional[str] = None) -> EmailSendResult:
         """Send an email and return status dict."""
         pass
 
@@ -21,7 +35,7 @@ class EmailSenderBase(ABC):
 class SMTPEmailSender(EmailSenderBase):
     """SMTP-based email sender with rate limiting and bounce tracking."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
         self.smtp_port = int(os.environ.get("SMTP_PORT", "587"))
         self.smtp_user = os.environ.get("SMTP_USER", "")
@@ -31,13 +45,13 @@ class SMTPEmailSender(EmailSenderBase):
 
         # Rate limiting: max emails per minute
         self.rate_limit = int(os.environ.get("EMAIL_RATE_LIMIT", "10"))
-        self._send_times: list = []
+        self._send_times: list[float] = []
         self._lock = asyncio.Lock()
 
         # Bounce tracking
-        self.bounced_emails: set = set()
+        self.bounced_emails: set[str] = set()
 
-    async def _wait_for_rate_limit(self):
+    async def _wait_for_rate_limit(self) -> None:
         """Enforce rate limiting by waiting if necessary."""
         async with self._lock:
             now = datetime.now(timezone.utc).timestamp()
@@ -51,7 +65,7 @@ class SMTPEmailSender(EmailSenderBase):
 
             self._send_times.append(now)
 
-    async def send(self, to: str, subject: str, body: str, from_name: Optional[str] = None) -> dict:
+    async def send(self, to: str, subject: str, body: str, from_name: Optional[str] = None) -> EmailSendResult:
         """Send an email via SMTP with rate limiting."""
         if not self.smtp_user or not self.smtp_pass:
             return {"status": "error", "error": "SMTP credentials not configured."}
@@ -102,7 +116,7 @@ class SMTPEmailSender(EmailSenderBase):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def _send_smtp(self, msg: MIMEMultipart, to: str):
+    def _send_smtp(self, msg: MIMEMultipart, to: str) -> None:
         """Synchronous SMTP send (run in executor)."""
         with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
             server.starttls()

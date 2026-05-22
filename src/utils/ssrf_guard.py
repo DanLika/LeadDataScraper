@@ -13,9 +13,18 @@ import asyncio
 import ipaddress
 import re
 import socket
+from typing import Any, Union
 from urllib.parse import urlparse
 
 from aiohttp.resolver import DefaultResolver
+
+
+# `ipaddress.ip_address()` returns one of these concrete subclasses; the
+# abstract `_BaseAddress` parent doesn't declare `is_multicast` /
+# `is_reserved` / `is_unspecified` / `is_global` (those live on the
+# subclasses), so annotating helpers against the parent makes mypy reject
+# every attribute access. Use the union alias instead.
+_IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
 
 class SSRFError(ValueError):
@@ -56,7 +65,7 @@ def assert_safe_scheme(url: str) -> None:
     _assert_public_ip(ip, parsed.hostname)
 
 
-def _assert_public_ip(ip: ipaddress._BaseAddress, host: str) -> None:
+def _assert_public_ip(ip: _IPAddress, host: str) -> None:
     if ip.is_multicast or ip.is_reserved or ip.is_unspecified or not ip.is_global:
         raise SSRFError(f"Blocked non-public IP {ip} for host {host!r}")
 
@@ -87,13 +96,21 @@ async def assert_safe_url(url: str) -> None:
         _assert_public_ip(ip, host)
 
 
-class SSRFGuardResolver(DefaultResolver):
+# `aiohttp.resolver.DefaultResolver` is a runtime alias — assigned to
+# either `AsyncResolver` (when `aiodns` is installed) or `ThreadedResolver`
+# otherwise. mypy can't treat a variable as a base class. The `type: ignore`
+# is the canonical workaround; switching to `ThreadedResolver` explicitly
+# would drop the async-when-available fast path. Listed against the
+# specific codes so a real bug here can't hide behind a blanket ignore.
+class SSRFGuardResolver(DefaultResolver):  # type: ignore[valid-type,misc]
     """aiohttp resolver that rejects non-public DNS results."""
 
-    async def resolve(self, host: str, port: int = 0, family: int = socket.AF_INET):
+    async def resolve(
+        self, host: str, port: int = 0, family: int = socket.AF_INET
+    ) -> list[dict[str, Any]]:
         if host.lower() in _BLOCKED_HOSTS:
             raise SSRFError(f"Blocked hostname: {host}")
-        results = await super().resolve(host, port, family)
+        results: list[dict[str, Any]] = await super().resolve(host, port, family)
         for r in results:
             try:
                 ip = ipaddress.ip_address(r["host"])
