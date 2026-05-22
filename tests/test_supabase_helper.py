@@ -158,33 +158,6 @@ class TestSupabaseHelper(unittest.TestCase):
         result = self.helper.get_pending_leads()
         self.assertEqual(result, [])
 
-    def test_update_audit_success(self):
-        unique_key = "test_key"
-        audit_data = {
-            "score": 85,
-            "emails": ["test@example.com"],
-            "high_risk_flag": True
-        }
-        
-        mock_execute = MagicMock(return_value="success")
-        self.helper.client.table.return_value.update.return_value.eq.return_value.execute = mock_execute
-        
-        result = self.helper.update_audit(unique_key, audit_data)
-        
-        self.assertEqual(result, "success")
-        self.helper.client.table.assert_called_with("leads")
-        
-        update_call = self.helper.client.table.return_value.update.call_args[0][0]
-        self.assertEqual(update_call["audit_status"], "Completed")
-        self.assertEqual(update_call["email"], "test@example.com")
-        self.assertEqual(update_call["seo_score"], 85.0)
-        self.assertEqual(update_call["high_risk_flag"], True)
-
-    def test_update_audit_error(self):
-        self.helper.client.table.return_value.update.return_value.eq.return_value.execute.side_effect = Exception("DB Error")
-        result = self.helper.update_audit("key", {})
-        self.assertIsNone(result)
-
     def test_delete_all_leads_success(self):
         # Same migration as test_delete_all_jobs_success: `.neq(...)` →
         # `.gte("created_at", "1970-01-01")` (column-type-agnostic).

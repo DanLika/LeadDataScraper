@@ -70,37 +70,6 @@ class SupabaseHelper:
             logger.error("Error updating lead info for %s: %s", unique_key, e, exc_info=True)
             return None
 
-    def update_audit(self, unique_key: str, audit_data: dict):
-        """
-        Updates the audit results for a specific lead.
-        """
-        if not self.client:
-            return None
-
-        update_data = {
-            "audit_status": "Completed",
-            "audit_results": audit_data
-        }
-
-        # Extract intelligence fields if present
-        if "emails" in audit_data and audit_data["emails"]:
-            update_data["email"] = audit_data["emails"][0]
-
-        if "score" in audit_data:
-            try:
-                update_data["seo_score"] = float(audit_data["score"])
-            except (ValueError, TypeError):
-                update_data["seo_score"] = 0
-
-        if "high_risk_flag" in audit_data:
-            update_data["high_risk_flag"] = bool(audit_data["high_risk_flag"])
-
-        try:
-            return self.client.table("leads").update(update_data).eq("unique_key", unique_key).execute()
-        except Exception as e:
-            logger.error("Error updating audit for %s: %s", unique_key, e, exc_info=True)
-            return None
-
     def get_pending_leads(self):
         """
         Retrieves leads that haven't been audited yet.
