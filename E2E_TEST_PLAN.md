@@ -12,7 +12,7 @@ Branch under test: `main` at `abbf30c` + uncommitted `discovery_engine` lead_sou
 - **Cleanup**: every section that creates state (leads, users, jobs, files) names the rollback SQL/command. Final cleanup leaves the DB at `1 user (operator) + 0 leads + 0 jobs`.
 - **Order of execution**: top-to-bottom. Later sections depend on earlier ones (e.g. SEO Audit needs leads from Discovery or SQL-seeded; Outreach needs Audit completion).
 - **Pass criteria**: every test row marks `Expected` and `Verification`. `PASS` only when verification matches expected exactly.
-- **Out of scope (this pass)**: paid Gemini cost stress (only smoke calls), real email sending (`/integrations/email_sender` is unwired), payment flow (no such flow exists), Realtime channels (feature unused).
+- **Out of scope (this pass)**: paid Gemini cost stress (only smoke calls), real email sending, payment flow (no such flow exists), Realtime channels (feature unused).
 
 ## Preconditions
 

@@ -151,12 +151,6 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `src/scripts/export_leads.py` (4 sites), and the
   `/campaigns/{id}/export` handler in `backend/main.py`. Any new export
   path must use the same helper.
-- **SMTP header injection guard** (`src/integrations/email_sender.py`).
-  Recipient regex is `^[^@\s]+@[^@\s]+\.[^@\s]+$` — `\s` excludes `\r\n`
-  so `victim@x.com\r\nBcc: attacker@evil` can't smuggle Cc/Bcc/Subject
-  headers via `msg["To"]`. Subject + from_name additionally pass a
-  CRLF-reject check before they are written into MIME headers — both
-  carry attacker-controllable content (Gemini draft, operator override).
   When/if SMTP send wires up, this is the boundary check.
 - Outbound HTTP from `seo_audit.py` and `enrichment_engine.py` runs through
   `src/utils/ssrf_guard.py` (`SSRFGuardResolver` + `assert_safe_url`) which
