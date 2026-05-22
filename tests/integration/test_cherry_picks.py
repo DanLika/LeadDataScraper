@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import MagicMock, patch, AsyncMock
 
 # Ensure project root is on the path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 # ============================================================
@@ -24,7 +24,7 @@ class TestFix1_SSLBypassRemoved(unittest.TestCase):
 
     def test_no_cert_none_in_seo_audit(self):
         """The file must not contain any ssl.CERT_NONE usage."""
-        seo_audit_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'scrapers', 'seo_audit.py')
+        seo_audit_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'scrapers', 'seo_audit.py')
         with open(seo_audit_path, 'r') as f:
             content = f.read()
 
@@ -57,7 +57,7 @@ class TestFix2_UUIDTempFilenames(unittest.TestCase):
 
     def test_no_purepath_in_backend(self):
         """PurePath import should be removed from backend/main.py."""
-        backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'main.py')
+        backend_path = os.path.join(os.path.dirname(__file__), '..', '..', 'backend', 'main.py')
         with open(backend_path, 'r') as f:
             content = f.read()
 
@@ -66,7 +66,7 @@ class TestFix2_UUIDTempFilenames(unittest.TestCase):
 
     def test_uuid_import_present(self):
         """UUID module should be imported."""
-        backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'main.py')
+        backend_path = os.path.join(os.path.dirname(__file__), '..', '..', 'backend', 'main.py')
         with open(backend_path, 'r') as f:
             content = f.read()
 
@@ -75,7 +75,7 @@ class TestFix2_UUIDTempFilenames(unittest.TestCase):
 
     def test_temp_path_uses_uuid(self):
         """Temp path construction should use uuid4, not user filename."""
-        backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'main.py')
+        backend_path = os.path.join(os.path.dirname(__file__), '..', '..', 'backend', 'main.py')
         with open(backend_path, 'r') as f:
             content = f.read()
 
@@ -102,7 +102,7 @@ class TestFix3_APIKeyLeakPrevention(unittest.TestCase):
 
     def test_no_api_key_in_error_messages(self):
         """No error message should contain 'GEMINI_API_KEY'."""
-        router_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'core', 'agentic_router.py')
+        router_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'core', 'agentic_router.py')
         with open(router_path, 'r') as f:
             content = f.read()
 
@@ -119,7 +119,7 @@ class TestFix3_APIKeyLeakPrevention(unittest.TestCase):
 
     def test_generic_error_messages_used(self):
         """Error messages should be generic, not revealing env var names."""
-        router_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'core', 'agentic_router.py')
+        router_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'core', 'agentic_router.py')
         with open(router_path, 'r') as f:
             content = f.read()
 
@@ -137,7 +137,7 @@ class TestFix4_CORSWildcardGuard(unittest.TestCase):
 
     def test_wildcard_guard_code_exists(self):
         """Backend should strip wildcard origins entirely (stricter than disabling credentials)."""
-        backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'main.py')
+        backend_path = os.path.join(os.path.dirname(__file__), '..', '..', 'backend', 'main.py')
         with open(backend_path, 'r') as f:
             content = f.read()
 
@@ -187,7 +187,7 @@ class TestFix5_SQLInjectionRegex(unittest.TestCase):
 
     def test_regex_uses_backslash_Z(self):
         """The regex should use \\Z, not $ for end-of-string matching."""
-        helper_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'utils', 'supabase_helper.py')
+        helper_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'utils', 'supabase_helper.py')
         with open(helper_path, 'r') as f:
             content = f.read()
 
@@ -263,7 +263,7 @@ class TestFix6_ParallelEnrichmentFetching(unittest.TestCase):
 
     def test_asyncio_gather_in_enrichment(self):
         """The enrichment engine should use asyncio.gather for parallel fetching."""
-        engine_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'scrapers', 'enrichment_engine.py')
+        engine_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'scrapers', 'enrichment_engine.py')
         with open(engine_path, 'r') as f:
             content = f.read()
 
@@ -274,7 +274,7 @@ class TestFix6_ParallelEnrichmentFetching(unittest.TestCase):
 
     def test_no_sequential_loop_for_pages(self):
         """There should not be a sequential for loop that fetches pages one by one."""
-        engine_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'scrapers', 'enrichment_engine.py')
+        engine_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'scrapers', 'enrichment_engine.py')
         with open(engine_path, 'r') as f:
             content = f.read()
 
@@ -286,7 +286,7 @@ class TestFix6_ParallelEnrichmentFetching(unittest.TestCase):
 
     def test_concurrent_fetch_preserves_results(self):
         """Verify the gather results are properly collected into content_blocks."""
-        engine_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'scrapers', 'enrichment_engine.py')
+        engine_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'scrapers', 'enrichment_engine.py')
         with open(engine_path, 'r') as f:
             content = f.read()
 
@@ -303,7 +303,7 @@ class TestFix7_SmartWaitInDiscovery(unittest.TestCase):
 
     def test_no_hardcoded_sleep_for_initial_load(self):
         """The discovery engine should NOT use asyncio.sleep(5) for initial page load."""
-        engine_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'scrapers', 'discovery_engine.py')
+        engine_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'scrapers', 'discovery_engine.py')
         with open(engine_path, 'r') as f:
             content = f.read()
 
@@ -316,7 +316,7 @@ class TestFix7_SmartWaitInDiscovery(unittest.TestCase):
 
     def test_wait_for_selector_used(self):
         """Should use wait_for_selector for maps results."""
-        engine_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'scrapers', 'discovery_engine.py')
+        engine_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'scrapers', 'discovery_engine.py')
         with open(engine_path, 'r') as f:
             content = f.read()
 
@@ -327,7 +327,7 @@ class TestFix7_SmartWaitInDiscovery(unittest.TestCase):
 
     def test_timeout_fallback_exists(self):
         """The wait_for_selector should have a timeout with graceful fallback."""
-        engine_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'scrapers', 'discovery_engine.py')
+        engine_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'scrapers', 'discovery_engine.py')
         with open(engine_path, 'r') as f:
             content = f.read()
 
@@ -342,7 +342,7 @@ class TestFix8_NPlus1QueryElimination(unittest.TestCase):
 
     def test_lead_data_passthrough_exists(self):
         """The campaign strategy should pass lead_data to avoid re-fetching."""
-        router_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'core', 'agentic_router.py')
+        router_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'core', 'agentic_router.py')
         with open(router_path, 'r') as f:
             content = f.read()
 
@@ -351,7 +351,7 @@ class TestFix8_NPlus1QueryElimination(unittest.TestCase):
 
     def test_outreach_draft_accepts_lead_data(self):
         """_generate_outreach_draft should check for lead_data in params before querying."""
-        router_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'core', 'agentic_router.py')
+        router_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'core', 'agentic_router.py')
         with open(router_path, 'r') as f:
             content = f.read()
 
@@ -360,7 +360,7 @@ class TestFix8_NPlus1QueryElimination(unittest.TestCase):
 
     def test_fallback_query_still_works(self):
         """When lead_data is not provided, it should still fetch from DB."""
-        router_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'core', 'agentic_router.py')
+        router_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'core', 'agentic_router.py')
         with open(router_path, 'r') as f:
             content = f.read()
 
@@ -383,7 +383,7 @@ class TestFix9_PrecompiledRegex(unittest.TestCase):
 
     def test_compiled_patterns_at_module_level(self):
         """All 6 segment patterns should be compiled at module level."""
-        hunter_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'processors', 'leadhunter.py')
+        hunter_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'processors', 'leadhunter.py')
         with open(hunter_path, 'r') as f:
             content = f.read()
 
@@ -434,7 +434,7 @@ class TestFix9_PrecompiledRegex(unittest.TestCase):
 
     def test_no_inline_any_patterns_in_segment_lead(self):
         """segment_lead should use compiled patterns, not inline any() calls."""
-        hunter_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'processors', 'leadhunter.py')
+        hunter_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'processors', 'leadhunter.py')
         with open(hunter_path, 'r') as f:
             content = f.read()
 
