@@ -122,17 +122,6 @@ class SupabaseHelper:
             return None
         return self.client.table("leads").delete().gte("created_at", "1970-01-01").execute()
 
-    def delete_all_jobs(self):
-        """
-        Deletes all rows from the 'orchestration_jobs' table.
-        Earlier `.neq("id", "null")` threw `invalid input syntax for type
-        uuid: "null"` because id is UUID, not text. Match on created_at
-        instead — works regardless of column types.
-        """
-        if not self.client:
-            return None
-        return self.client.table("orchestration_jobs").delete().gte("created_at", "1970-01-01").execute()
-
     def check_schema(self):
         """
         Polls the database to check if all necessary columns exist in the 'leads' table.

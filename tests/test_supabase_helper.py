@@ -120,28 +120,6 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertNotIn("tiktok", missing)
         self.assertEqual(len(missing), 2)
 
-    def test_delete_all_jobs_success(self):
-        # Helper now uses `.gte("created_at", "1970-01-01")` instead of
-        # `.neq("id", "null")` because `.neq()` threw on UUID columns —
-        # mirror the real chain so the assertion exercises the right path.
-        mock_delete = MagicMock()
-        self.helper.client.table.return_value.delete.return_value = mock_delete
-        mock_gte = MagicMock()
-        mock_delete.gte.return_value = mock_gte
-        expected_result = MagicMock()
-        mock_gte.execute.return_value = expected_result
-
-        result = self.helper.delete_all_jobs()
-
-        self.assertEqual(result, expected_result)
-        self.helper.client.table.assert_called_with("orchestration_jobs")
-        mock_delete.gte.assert_called_once_with("created_at", "1970-01-01")
-
-    def test_delete_all_jobs_client_none(self):
-        self.helper.client = None
-        result = self.helper.delete_all_jobs()
-        self.assertIsNone(result)
-
     def test_get_pending_leads_success(self):
         mock_execute = MagicMock(return_value=MagicMock(data=[{"unique_key": "123", "audit_status": "Pending"}]))
         self.helper.client.table.return_value.select.return_value.eq.return_value.execute = mock_execute
@@ -186,7 +164,7 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_delete_all_leads_success(self):
-        # Same migration as test_delete_all_jobs_success: `.neq(...)` →
+        # Migrated from `.neq(...)` →
         # `.gte("created_at", "1970-01-01")` (column-type-agnostic).
         mock_execute = MagicMock(return_value="deleted")
         self.helper.client.table.return_value.delete.return_value.gte.return_value.execute = mock_execute

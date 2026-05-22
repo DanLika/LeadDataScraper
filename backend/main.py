@@ -775,11 +775,10 @@ async def start_enrichment(request: Request, payload: LeadProcessRequest):
 )
 @limiter.limit("3/hour")
 async def clear_leads(request: Request):
-    """Purge all leads and job history (Danger Zone). Requires X-Admin-Token."""
+    """Purge all leads (Danger Zone). Requires X-Admin-Token."""
     db.delete_all_leads()
-    db.delete_all_jobs()
-    logger.warning("DESTRUCTIVE: /leads/clear invoked — all leads + jobs wiped.")
-    return {"status": "cleared", "message": "All leads and jobs have been deleted."}
+    logger.warning("DESTRUCTIVE: /leads/clear invoked — all leads wiped.")
+    return {"status": "cleared", "message": "All leads have been deleted."}
 
 @app.post("/orchestrator/start", dependencies=[Depends(verify_api_key)])
 @limiter.limit("3/minute")
