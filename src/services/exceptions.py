@@ -1,51 +1,28 @@
-"""Domain exceptions for service-layer error translation.
+"""Backward-compatibility shim. The canonical hierarchy now lives in
+`src/errors.py` — see the module docstring there for the rules and
+the full hierarchy diagram.
 
-Each layer translates errors upward to its own vocabulary:
+Imports from `src.services.exceptions` continue to resolve so that
+in-flight PRs and downstream callers don't have to update in lockstep.
 
-  Repository  → catches `postgrest.APIError`, translates known cases
-                (e.g. PGRST205 → CampaignTableMissingError) and lets the
-                rest bubble.
-  Service     → catches repo-raised domain exceptions and may translate
-                further, but typically just lets the handler decide the
-                HTTP mapping.
-  Handler     → maps domain exceptions to HTTP responses + status codes.
-
-Operator messages on these exceptions are written for human handler
-authors, NOT end users — handlers should choose the user-facing string
-when mapping to an HTTP response, never echo `str(exc)` directly.
+New code MUST import from `src.errors` directly. This shim can be
+removed once every reference to `src.services.exceptions` has been
+migrated.
 """
-from __future__ import annotations
+from src.errors import (
+    CampaignNotFoundError,
+    CampaignTableMissingError,
+    DomainError,
+    NoCampaignMessagesError,
+    NoMatchingLeadsError,
+    NotFoundError,
+)
 
-
-class DomainError(Exception):
-    """Base for all service-layer domain errors. Caught at the handler."""
-
-
-class NotFoundError(DomainError):
-    """Resource not found. Maps to HTTP 404 at the handler boundary."""
-
-
-class CampaignNotFoundError(NotFoundError):
-    """A campaign id does not exist."""
-
-
-class CampaignTableMissingError(DomainError):
-    """The `campaigns` (or `campaign_messages`) table is not provisioned.
-
-    Translated from PostgREST `PGRST205 schema cache` errors. Maps to
-    HTTP 503 at the handler with an operator-friendly hint to run the
-    Supabase migration SQL.
-    """
-
-
-class NoMatchingLeadsError(NotFoundError):
-    """No leads matched the campaign's channel / segment filter.
-
-    Distinct from CampaignNotFoundError because the campaign DOES exist —
-    it just selects an empty audience. Maps to HTTP 404 with the
-    "No matching leads found" message so the operator can adjust filters.
-    """
-
-
-class NoCampaignMessagesError(NotFoundError):
-    """Export was requested for a campaign with no generated messages."""
+__all__ = [
+    "CampaignNotFoundError",
+    "CampaignTableMissingError",
+    "DomainError",
+    "NoCampaignMessagesError",
+    "NoMatchingLeadsError",
+    "NotFoundError",
+]

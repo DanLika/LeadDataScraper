@@ -162,7 +162,7 @@ class ParallelAuditor:
             logger.warning("Hunt Timeout for %s", unique_key)
             return {"unique_key": unique_key, "status": "Failed", "error": "Timeout"}
         except Exception as e:
-            logger.error("Error hunting lead %s: %s", unique_key, e, exc_info=True)
+            logger.exception("Error hunting lead %s: %s", unique_key, e)
             return {"unique_key": unique_key, "status": "Failed", "error": str(e)}
         finally:
             try:
@@ -265,7 +265,7 @@ class ParallelAuditor:
                 elif "404" in error_msg: status = "404 Not Found"
                 elif "DNS" in error_msg or "not resolve" in error_msg: status = "Invalid URL"
 
-                logger.error("Error auditing lead %s: %s", unique_key, e, exc_info=True)
+                logger.exception("Error auditing lead %s: %s", unique_key, e)
                 return {"unique_key": unique_key, "status": "Failed", "error": error_msg, "audit_status": status}
             finally:
                 try:

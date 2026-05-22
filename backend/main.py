@@ -365,10 +365,10 @@ async def list_leads(request: Request):
         response = db.client.table("leads").select("*").order("created_at", desc=True).limit(200).execute()
         return {"leads": response.data}
     except APIError as e:
-        logger.error("Database API Error fetching leads: %s", e, exc_info=True)
+        logger.exception("Database API Error fetching leads: %s", e)
         return error_response("Failed to fetch leads from database", status_code=502)
     except Exception as e:
-        logger.error("Unexpected error fetching leads: %s", e, exc_info=True)
+        logger.exception("Unexpected error fetching leads: %s", e)
         return error_response("An unexpected error occurred while fetching leads")
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
@@ -540,7 +540,7 @@ def process_csv_background(temp_path: str):
         else:
             logger.info("Successfully processed and upserted %d leads.", upserted_count)
     except Exception as e:
-        logger.error("Error processing upload: %s", e, exc_info=True)
+        logger.exception("Error processing upload: %s", e)
     finally:
         Path(temp_path).unlink(missing_ok=True)
 
@@ -646,7 +646,7 @@ async def ask_ai(request: Request, payload: AskRequest, background_tasks: Backgr
         # 4. Process-heavy tasks: return the plan for UI confirmation.
         return {"plan": plan, "response": "I've analyzed your request. Should I proceed with the task: " + plan.get("task", "Unknown") + "?"}
     except Exception as e:
-        logger.error("Error in /ask: %s", e, exc_info=True)
+        logger.exception("Error in /ask: %s", e)
         return error_response("Failed to process instruction")
 
 @app.get("/insights", dependencies=[Depends(verify_api_key)])
@@ -663,7 +663,7 @@ async def get_insights(request: Request):
             return error_response(result["error"], status_code=503)
         return result
     except Exception as e:
-        logger.error("Error getting insights: %s", e, exc_info=True)
+        logger.exception("Error getting insights: %s", e)
         return error_response("Insights currently unavailable")
 
 @app.get("/stats", dependencies=[Depends(verify_api_key)])
@@ -711,7 +711,7 @@ async def get_stats(request: Request):
             "source_distribution": source_list
         }
     except Exception as e:
-        logger.error("Error fetching stats: %s", e, exc_info=True)
+        logger.exception("Error fetching stats: %s", e)
         return error_response("Failed to fetch stats")
 
 @app.post("/draft-outreach", dependencies=[Depends(verify_api_key)])
@@ -821,7 +821,7 @@ async def trigger_export(request: Request):
         export_leads()
         return {"message": "Exports generated successfully in the 'exports' directory."}
     except Exception as e:
-        logger.error("Export error: %s", e, exc_info=True)
+        logger.exception("Export error: %s", e)
         return error_response("Export failed")
 
 @app.get("/export/download", dependencies=[Depends(verify_api_key)])
@@ -849,7 +849,7 @@ async def download_full_export(request: Request):
             media_type="text/csv"
         )
     except Exception as e:
-        logger.error("Export download error: %s", e, exc_info=True)
+        logger.exception("Export download error: %s", e)
         return error_response("Export download failed")
 
 @app.get("/export/outreach", dependencies=[Depends(verify_api_key)])
@@ -871,7 +871,7 @@ async def download_outreach_export(request: Request):
             media_type="text/csv"
         )
     except Exception as e:
-        logger.error("Outreach export error: %s", e, exc_info=True)
+        logger.exception("Outreach export error: %s", e)
         return error_response("Outreach export failed")
 
 

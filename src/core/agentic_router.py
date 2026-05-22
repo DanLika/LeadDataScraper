@@ -208,7 +208,7 @@ class AgenticRouter:
                 "raw": response.text if response.text else "No text response"
             }
         except Exception as e:
-            logger.error("Route instruction failed: %s", e, exc_info=True)
+            logger.exception("Route instruction failed: %s", e)
             return {
                 "task": "ERROR",
                 "params": {},
@@ -360,7 +360,7 @@ class AgenticRouter:
             )
             return {"answer": summary_response.text}
         except Exception as e:
-            logger.error("Database query AI call failed: %s", e, exc_info=True)
+            logger.exception("Database query AI call failed: %s", e)
             return {"error": "AI query failed"}
 
     async def _generate_outreach_draft(self, params: dict):
@@ -445,7 +445,7 @@ class AgenticRouter:
                 "operator_name": operator_name,
             }
         except Exception as e:
-            logger.error("Outreach draft generation failed for %s: %s", unique_key, e, exc_info=True)
+            logger.exception("Outreach draft generation failed for %s: %s", unique_key, e)
             return {"error": "Failed to generate outreach draft"}
 
     async def _generate_linkedin_draft(self, params: dict):
@@ -501,7 +501,7 @@ class AgenticRouter:
                 "recipient": lead.get('leadership_team', 'there')
             }
         except Exception as e:
-            logger.error("LinkedIn draft generation failed for %s: %s", unique_key, e, exc_info=True)
+            logger.exception("LinkedIn draft generation failed for %s: %s", unique_key, e)
             return {"error": "Failed to generate LinkedIn draft"}
 
     async def _get_strategic_insights(self):
@@ -552,7 +552,7 @@ class AgenticRouter:
                 return result
             return {"summary": "System analysis completed.", "insights": [ai_response.text[:100]], "top_priorities": []}
         except Exception as e:
-            logger.error("Strategic insights AI call failed: %s", e, exc_info=True)
+            logger.exception("Strategic insights AI call failed: %s", e)
             return {"summary": "Insights currently unavailable.", "insights": [], "top_priorities": []}
 
     async def _execute_data_merge(self):
@@ -664,7 +664,7 @@ class AgenticRouter:
                 "status_url": f"/orchestrator/status/{job_id}"
             }
         except Exception as e:
-            logger.error("Massive pipeline execution failed: %s", e, exc_info=True)
+            logger.exception("Massive pipeline execution failed: %s", e)
             return {"error": "Failed to start massive pipeline"}
 
     async def _generate_campaign_strategy(self, params: dict):
@@ -718,5 +718,5 @@ class AgenticRouter:
                 "reasoning": f"Curated a selection of {filters} leads for immediate outreach."
             }
         except Exception as e:
-            logger.error("Campaign strategy generation failed: %s", e, exc_info=True)
+            logger.exception("Campaign strategy generation failed: %s", e)
             return {"error": "Failed to generate campaign strategy"}

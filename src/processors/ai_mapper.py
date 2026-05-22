@@ -117,5 +117,5 @@ class GeminiMapper:
                 safe_mapping[src] = dst
             return safe_mapping
         except Exception as e:
-            logger.error("AI Mapping failed: %s", e, exc_info=True)
+            logger.exception("AI Mapping failed: %s", e)
             return {}

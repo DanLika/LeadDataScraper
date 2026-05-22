@@ -105,7 +105,7 @@ class TaskOrchestrator:
                     "processed_count": 0
                 })
         except Exception as e:
-            logger.error("Discovery job %s failed: %s", job_id, e, exc_info=True)
+            logger.exception("Discovery job %s failed: %s", job_id, e)
             await self._update_job_status(job_id, {
                 "status": "failed",
                 "current_phase": f"Discovery failed: {str(e)}"
@@ -291,7 +291,7 @@ class TaskOrchestrator:
             })
 
         except Exception as e:
-            logger.error("Fatal pipeline error for job %s: %s", job_id, e, exc_info=True)
+            logger.exception("Fatal pipeline error for job %s: %s", job_id, e)
             await self._update_job_status(job_id, {
                 "status": "failed",
                 "current_phase": f"Error: {str(e)}"
@@ -371,7 +371,7 @@ class TaskOrchestrator:
                 return updated_lead
 
         except Exception as e:
-            logger.error("Error processing lead %s: %s", lead_id, e, exc_info=True)
+            logger.exception("Error processing lead %s: %s", lead_id, e)
             retry_count = (lead.get("retry_count") or 0) + 1
             updated_lead.update({
                 "last_error": str(e),

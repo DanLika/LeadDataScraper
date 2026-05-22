@@ -166,7 +166,7 @@ class EnrichmentEngine:
             result = extract_json_from_response(response.text)
             return result if result else {}
         except Exception as e:
-            logger.error("AI Enrichment Error for %s: %s", lead_name, e, exc_info=True)
+            logger.exception("AI Enrichment Error for %s: %s", lead_name, e)
             return {}
 
     async def enrich_lead(self, lead: Dict[str, Any]) -> Dict[str, Any]:
@@ -227,7 +227,7 @@ class EnrichmentEngine:
                         if res:
                             content_blocks.append(res)
                 except Exception as e:
-                    logger.error("Browser failure: %s", e, exc_info=True)
+                    logger.exception("Browser failure: %s", e)
                 finally:
                     if browser:
                         await browser.close()

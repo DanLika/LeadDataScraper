@@ -54,7 +54,7 @@ async def run_discovery_for_niches():
             await asyncio.sleep(10)
             
         except Exception as e:
-            logger.error("Error during discovery for %s: %s", niche, e, exc_info=True)
+            logger.exception("Error during discovery for %s: %s", niche, e)
             print(f"❌ Failed discovery for {niche}: {e}")
 
     print("✨ Multi-niche discovery process completed.")

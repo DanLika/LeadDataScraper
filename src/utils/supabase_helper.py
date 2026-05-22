@@ -51,7 +51,7 @@ class SupabaseHelper:
                 logger.error("DATABASE SCHEMA MISMATCH: %s", e)
                 logger.warning("Please run the SQL migration script provided in the implementation plan.")
             else:
-                logger.error("Error upserting leads: %s", e, exc_info=True)
+                logger.exception("Error upserting leads: %s", e)
             # Returns None on failure; callers must check the return value and
             # surface the failure rather than assuming success based on input
             # count. See backend.main._upsert_leads_to_db.
@@ -67,7 +67,7 @@ class SupabaseHelper:
         try:
             return self.client.table("leads").update(data).eq("unique_key", unique_key).execute()
         except Exception as e:
-            logger.error("Error updating lead info for %s: %s", unique_key, e, exc_info=True)
+            logger.exception("Error updating lead info for %s: %s", unique_key, e)
             return None
 
     def update_audit(self, unique_key: str, audit_data: dict):
@@ -98,7 +98,7 @@ class SupabaseHelper:
         try:
             return self.client.table("leads").update(update_data).eq("unique_key", unique_key).execute()
         except Exception as e:
-            logger.error("Error updating audit for %s: %s", unique_key, e, exc_info=True)
+            logger.exception("Error updating audit for %s: %s", unique_key, e)
             return None
 
     def get_pending_leads(self):
@@ -185,7 +185,7 @@ class SupabaseHelper:
                         missing.append(col)
             return missing
         except Exception as e:
-            logger.error("Error checking schema: %s", e, exc_info=True)
+            logger.exception("Error checking schema: %s", e)
             return []
 
     def auto_migrate(self, missing_columns: list) -> bool:

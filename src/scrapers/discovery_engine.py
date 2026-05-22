@@ -79,7 +79,7 @@ class DiscoveryEngine:
                         continue
 
             except (PlaywrightError, PlaywrightTimeoutError) as e:
-                logger.error("Error during lead discovery process: %s", e, exc_info=True)
+                logger.exception("Error during lead discovery process: %s", e)
             finally:
                 await browser.close()
 

@@ -60,7 +60,7 @@ def merge_and_deduplicate(dataframes):
 
         return final_df
     except Exception as e:
-        logger.error("Error during merge and deduplication: %s", e, exc_info=True)
+        logger.exception("Error during merge and deduplication: %s", e)
         return pd.DataFrame()
 
 

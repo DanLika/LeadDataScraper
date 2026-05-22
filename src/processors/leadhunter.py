@@ -328,7 +328,7 @@ class LeadHunter:
 
                 return business_name, phone, email, text_content
         except Exception as e:
-            logger.error("Error in scrape_business_details_async: %s", e, exc_info=True)
+            logger.exception("Error in scrape_business_details_async: %s", e)
             return None, None, None, None
 
     def _extract_business_name(self, soup: BeautifulSoup) -> Optional[str]:
@@ -612,7 +612,7 @@ class LeadHunter:
             text = response.text.strip()
             return text
         except Exception as e:
-            logger.error("Pain point analysis error: %s", e, exc_info=True)
+            logger.exception("Pain point analysis error: %s", e)
             return "Could not analyze pain points."
 
     async def generate_outreach_hooks_async(self, pain_points: str, business_name: str, audit_results: Optional[dict] = None) -> dict:
@@ -683,7 +683,7 @@ class LeadHunter:
                 return result
             return {"linkedin_hook": "", "email_hook": ""}
         except Exception as e:
-            logger.error("Hook generation error: %s", e, exc_info=True)
+            logger.exception("Hook generation error: %s", e)
             return {"linkedin_hook": "", "email_hook": ""}
 
     async def enrich_business_data_async(self, page_text: str, business_name: Optional[str] = None) -> dict:
@@ -750,5 +750,5 @@ class LeadHunter:
                 return bounded
             return {}
         except Exception as e:
-            logger.error("Enrichment error: %s", e, exc_info=True)
+            logger.exception("Enrichment error: %s", e)
             return {}
