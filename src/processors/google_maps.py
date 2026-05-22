@@ -31,12 +31,15 @@ def clean_website(url):
 def clean_phone(phone_str):
     if not isinstance(phone_str, str) or not phone_str.strip():
         return np.nan
-    cleaned = ''
-    if phone_str.startswith('+'):
-        cleaned = '+' + re.sub(r'[^+\d]', '', phone_str)
-    else:
-        cleaned = re.sub(r'[^+\d]', '', phone_str)
     
+    cleaned = re.sub(r'[^+\d]', '', phone_str)
+
+    # Ensure only a single leading '+' is kept if it was originally there
+    if cleaned.startswith('+'):
+        cleaned = '+' + cleaned.replace('+', '')
+    else:
+        cleaned = cleaned.replace('+', '')
+
     digits_only = re.sub(r'[^\d]', '', cleaned)
     if len(digits_only) >= 7:
         return cleaned
