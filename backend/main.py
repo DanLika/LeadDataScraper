@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import os
 import secrets
+import asyncio
 import uuid
 import pandas as pd
 import aiofiles
@@ -935,11 +936,16 @@ async def get_campaign(request: Request, campaign_id: str):
         # Performance optimization: Count stats at the database level instead of fetching all rows into memory
         stats = {"pending": 0, "sent": 0, "delivered": 0, "replied": 0, "bounced": 0}
 
-        # We perform individual exact count queries for each status. This is much faster
-        # and memory-efficient than returning potentially hundreds of thousands of full rows.
-        for status in stats.keys():
+        # We execute individual exact count queries concurrently. This is much faster
+        # than sequential queries and more memory-efficient than returning all rows.
+        def get_count(status):
             res = db.client.table("campaign_messages").select("id", count="exact").eq("campaign_id", campaign_id).eq("status", status).limit(1).execute()
-            stats[status] = res.count or 0
+            return status, res.count or 0
+
+        tasks = [asyncio.to_thread(get_count, status) for status in stats.keys()]
+        results = await asyncio.gather(*tasks)
+        for status, count in results:
+            stats[status] = count
 
         # We limit the payload to 50 messages to reduce network transfer time and API response size.
         # The frontend only displays the first 50 messages.
