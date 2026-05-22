@@ -316,7 +316,7 @@ async def _validation_with_authz_check(request: Request, exc: RequestValidationE
     return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 # Configure CORS — explicit origins only. Wildcards are rejected.
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 allowed_origins = [origin for origin in allowed_origins if origin != "*"]
 if not allowed_origins:

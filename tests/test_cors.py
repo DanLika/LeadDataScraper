@@ -16,24 +16,24 @@ if backend_path not in sys.path:
 from main import app
 
 def test_cors_default_origin():
-    # By default, ALLOWED_ORIGINS is http://localhost:3000
+    # By default, ALLOWED_ORIGINS is empty, so no origin is allowed
     client = TestClient(app)
 
-    # Allowed origin
+    # Disallowed origin (was previously allowed)
     response = client.options("/", headers={
         "Origin": "http://localhost:3000",
         "Access-Control-Request-Method": "GET"
     })
-    assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    # When CORS is explicitly misconfigured/empty, CORSMiddleware might block with 400
+    # instead of just returning 200 with no allow header, if allow_origins is empty.
+    # We just need to check the request is disallowed and the allow-origin header is not present.
+    assert "access-control-allow-origin" not in response.headers
 
     # Disallowed origin
     response = client.options("/", headers={
         "Origin": "http://evil.com",
         "Access-Control-Request-Method": "GET"
     })
-    # FastAPI/CORSMiddleware returns 200 for OPTIONS even if origin is not allowed,
-    # but the 'access-control-allow-origin' header will be missing.
     assert "access-control-allow-origin" not in response.headers
 
 def test_cors_custom_origins():
