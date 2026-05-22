@@ -19,6 +19,7 @@ import HealthChart from './components/HealthChart';
 import StatsCards from './components/StatsCards';
 import FilterBar from './components/FilterBar';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
+import { ensureProtocol } from '@/utils/url.mjs';
 
 interface Lead {
   id?: string;
@@ -800,20 +801,6 @@ function DashboardInner() {
     `outreach-export-${new Date().toISOString().slice(0,10)}.csv`,
     'No outreach files generated yet — draft outreach for leads first.'
   );
-
-  const ensureProtocol = (url: string) => {
-    if (!url) return '';
-    const trimmed = url.trim();
-    if (!trimmed) return '';
-    const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    try {
-      const u = new URL(candidate);
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
-      return u.toString();
-    } catch {
-      return '';
-    }
-  };
 
   const filteredLeads = useMemo(() => leads.filter((lead: Lead) => {
     const matchesSearch = (lead.company_name || lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||

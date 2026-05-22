@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test utils/supabase/cookie-floor.test.mjs"
+    "test": "node --test utils/supabase/cookie-floor.test.mjs utils/url.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.10.3",
