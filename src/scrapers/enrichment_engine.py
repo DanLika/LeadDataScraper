@@ -5,6 +5,11 @@ from typing import List, Dict, Any
 from playwright.async_api import async_playwright
 from google import genai
 from dotenv import load_dotenv
+from src.utils.constants import (
+    ENRICHMENT_OUTER_TIMEOUT_S,
+    ENRICHMENT_PAGE_LOAD_TIMEOUT_MS,
+    ENRICHMENT_RETRY_TIMEOUT_MS,
+)
 from src.utils.json_helper import extract_json_from_response
 from src.utils.logging_config import get_logger
 from src.utils.ssrf_guard import SSRFError, assert_safe_url
@@ -84,8 +89,8 @@ class EnrichmentEngine:
                 try:
                     # Navigation timeout and wait_until refinement
                     await asyncio.wait_for(
-                        page.goto(url, wait_until="domcontentloaded", timeout=45000),
-                        timeout=50.0
+                        page.goto(url, wait_until="domcontentloaded", timeout=ENRICHMENT_PAGE_LOAD_TIMEOUT_MS),
+                        timeout=ENRICHMENT_OUTER_TIMEOUT_S
                     )
                     # Get the body text, stripping scripts and styles
                     text = await page.evaluate("() => document.body.innerText")
@@ -210,7 +215,7 @@ class EnrichmentEngine:
                         page = await context.new_page()
                         try:
                             # Shorter navigation timeout per page to avoid whole job hang
-                            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                            await page.goto(url, wait_until="domcontentloaded", timeout=ENRICHMENT_RETRY_TIMEOUT_MS)
                             text = await page.evaluate("() => document.body.innerText")
                             if text and len(text.strip()) > 100:
                                 return text[:5000]

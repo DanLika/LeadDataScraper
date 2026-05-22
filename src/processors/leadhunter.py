@@ -9,6 +9,7 @@ import json
 from urllib.parse import unquote, quote_plus, urlparse, parse_qs
 from google import genai
 from google.genai import types as genai_types
+from src.utils.constants import CRAWLBASE_HTTP_TIMEOUT_S
 from src.utils.json_helper import extract_json_from_response
 from src.utils.logging_config import get_logger
 from src.utils.prompt_safety import (
@@ -399,7 +400,7 @@ class LeadHunter:
             'user_agent': random.choice(USER_AGENTS)
         }
         try:
-            async with session.get(CRAWLBASE_API_URL_NORMAL, params=params, timeout=30) as response:
+            async with session.get(CRAWLBASE_API_URL_NORMAL, params=params, timeout=CRAWLBASE_HTTP_TIMEOUT_S) as response:
                 if response.status == 200:
                     html = await response.text()
                     sub_soup = BeautifulSoup(html, 'html.parser')

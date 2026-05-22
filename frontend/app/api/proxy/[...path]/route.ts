@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { MAX_PROXY_BODY_BYTES } from '@/app/lib/constants';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,10 +46,11 @@ const ADMIN_TOKEN_PATHS = new Set<string>([
   'leads/clear',
 ]);
 
-// Match backend `/upload`'s MAX_UPLOAD_BYTES (50 MB). Defense-in-depth
+// MAX_PROXY_BODY_BYTES is imported from `@/app/lib/constants` — defense-in-depth
 // against an authed caller POSTing gigabyte-class bodies and forcing the
-// Next.js process to buffer them in memory while waiting on upstream.
-const MAX_PROXY_BODY_BYTES = 50 * 1024 * 1024;
+// Next.js process to buffer them in memory while waiting on upstream. Pinned
+// to the backend's `MAX_UPLOAD_BYTES` (50 MiB) — see the BACKEND PARITY note
+// in the constants file when retuning.
 
 const HOP_BY_HOP = new Set([
   'host',

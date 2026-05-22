@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from datetime import datetime, timezone
 
+from src.utils.constants import SMTP_SEND_TIMEOUT_S
+
 
 class EmailSenderBase(ABC):
     """Abstract base class for email sending implementations."""
@@ -92,7 +94,7 @@ class SMTPEmailSender(EmailSenderBase):
             loop = asyncio.get_event_loop()
             await asyncio.wait_for(
                 loop.run_in_executor(None, self._send_smtp, msg, to),
-                timeout=30
+                timeout=SMTP_SEND_TIMEOUT_S
             )
 
             return {"status": "sent", "to": to, "sent_at": datetime.now(timezone.utc).isoformat()}

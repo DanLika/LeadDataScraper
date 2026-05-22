@@ -3,6 +3,11 @@ import json
 from google import genai
 from google.genai import types as genai_types
 from dotenv import load_dotenv
+from src.utils.constants import (
+    AI_DATABASE_QUERY_SAMPLE,
+    DASHBOARD_LEAD_CAP,
+    INSIGHTS_SAMPLE_SIZE,
+)
 from src.utils.supabase_helper import SupabaseHelper
 from src.utils.json_helper import extract_json_from_response
 from src.utils.logging_config import get_logger
@@ -161,7 +166,7 @@ class AgenticRouter:
             try:
                 rows = self.db.client.table("leads").select(
                     "unique_key,name,company_name"
-                ).limit(200).execute()
+                ).limit(DASHBOARD_LEAD_CAP).execute()
                 lead_index = rows.data if hasattr(rows, "data") else []
             except Exception:
                 lead_index = []
@@ -332,7 +337,7 @@ class AgenticRouter:
         response = self.db.client.table("leads").select(
             "unique_key,name,company_name,audit_status,seo_score,lead_source,"
             "email,phone,website,high_risk_flag,segment"
-        ).limit(50).execute()
+        ).limit(AI_DATABASE_QUERY_SAMPLE).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         query_prompt = (
@@ -514,7 +519,7 @@ class AgenticRouter:
             return {"error": "AI model not initialized."}
 
         # Fetch recent leads with audit results
-        response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(200).execute()
+        response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(DASHBOARD_LEAD_CAP).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:

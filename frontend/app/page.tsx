@@ -19,6 +19,13 @@ import HealthChart from './components/HealthChart';
 import StatsCards from './components/StatsCards';
 import FilterBar from './components/FilterBar';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
+import {
+  BLOB_URL_REVOKE_DELAY_MS,
+  COPY_FEEDBACK_MS,
+  MAX_UPLOAD_BYTES_UI,
+  POST_ACTION_REFRESH_DELAY_MS,
+  TOAST_AUTO_DISMISS_MS,
+} from '@/app/lib/constants';
 
 interface Lead {
   id?: string;
@@ -88,7 +95,9 @@ interface CampaignItem {
 }
 
 const ALLOWED_UPLOAD_TYPES = ['text/csv', 'application/vnd.ms-excel'];
-const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10MB
+// MAX_UPLOAD_BYTES_UI imported from @/app/lib/constants (10 MiB; soft UI cap
+// below the 50 MiB hard proxy cap so the operator gets actionable feedback
+// instead of a 413 from the server).
 const DISCOVERY_STEPS = [
   "Initializing Google Maps crawler...",
   "Navigating to search results...",
@@ -210,7 +219,7 @@ function DashboardInner() {
     // the same ms.
     const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
     setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), TOAST_AUTO_DISMISS_MS);
   }, []);
 
   // ESC key handler for all modals + mobile drawer
@@ -428,7 +437,7 @@ function DashboardInner() {
       e.target.value = '';
       return;
     }
-    if (file.size > MAX_UPLOAD_SIZE) {
+    if (file.size > MAX_UPLOAD_BYTES_UI) {
       showToast('File is too large. Maximum size is 10MB.', 'error');
       e.target.value = '';
       return;
@@ -457,7 +466,7 @@ function DashboardInner() {
             : 'CSV uploaded — processing in the background.');
       showToast(msg, 'success');
       // Schedule a follow-up refresh in 5s to let background task land
-      setTimeout(() => { fetchLeads(); }, 5000);
+      setTimeout(() => { fetchLeads(); }, POST_ACTION_REFRESH_DELAY_MS);
     } catch (err) {
       console.error('Upload failed:', err);
       showToast('Upload failed — backend unreachable.', 'error');
@@ -782,7 +791,7 @@ function DashboardInner() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setTimeout(() => URL.revokeObjectURL(url), BLOB_URL_REVOKE_DELAY_MS);
       showToast(`${filename} downloaded.`, 'success');
     } catch (err) {
       console.error('Download failed:', err);
@@ -1309,7 +1318,7 @@ function DashboardInner() {
                     onClick={() => {
                       navigator.clipboard.writeText(activeLead.email_hook || '');
                       setCopiedHookType('email');
-                      setTimeout(() => setCopiedHookType(null), 2000);
+                      setTimeout(() => setCopiedHookType(null), COPY_FEEDBACK_MS);
                     }}
                     style={{ background: 'none', border: 'none', color: 'var(--primary-light)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem', minHeight: '32px', padding: '0.35rem 0.5rem' }}
                   >
@@ -1337,7 +1346,7 @@ function DashboardInner() {
                         onClick={() => {
                           navigator.clipboard.writeText(activeLead.linkedin_hook || '');
                           setCopiedHookType('linkedin');
-                          setTimeout(() => setCopiedHookType(null), 2000);
+                          setTimeout(() => setCopiedHookType(null), COPY_FEEDBACK_MS);
                         }}
                         style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.65rem', minHeight: '32px', padding: '0.35rem 0.5rem' }}
                       >
@@ -1381,7 +1390,7 @@ function DashboardInner() {
                       onClick={async () => {
                         try { await navigator.clipboard.writeText(linkedinDraft); } catch { showToast('Copy failed — clipboard blocked.', 'error'); return; }
                         setCopiedAction('invite');
-                        setTimeout(() => setCopiedAction(p => p === 'invite' ? null : p), 2000);
+                        setTimeout(() => setCopiedAction(p => p === 'invite' ? null : p), COPY_FEEDBACK_MS);
                         showToast("LinkedIn message copied — paste into the Connect dialog.", 'success');
                       }}
                       title="Copy this message text — LinkedIn has no API for sending invites with prefilled text, so paste manually after clicking Connect on the profile."
@@ -1403,7 +1412,7 @@ function DashboardInner() {
                 onClick={async () => {
                   try { await navigator.clipboard.writeText(outreachDraft.text); } catch { showToast('Copy failed — clipboard blocked.', 'error'); return; }
                   setCopiedAction('body');
-                  setTimeout(() => setCopiedAction(p => p === 'body' ? null : p), 2000);
+                  setTimeout(() => setCopiedAction(p => p === 'body' ? null : p), COPY_FEEDBACK_MS);
                   showToast('Draft copied to clipboard!', 'success');
                 }}
               >
@@ -1420,7 +1429,7 @@ function DashboardInner() {
                   onClick={async () => {
                     try { await navigator.clipboard.writeText(outreachDraft.subject!); } catch { showToast('Copy failed — clipboard blocked.', 'error'); return; }
                     setCopiedAction('subject');
-                    setTimeout(() => setCopiedAction(p => p === 'subject' ? null : p), 2000);
+                    setTimeout(() => setCopiedAction(p => p === 'subject' ? null : p), COPY_FEEDBACK_MS);
                     showToast('Subject copied!', 'success');
                   }}
                 >

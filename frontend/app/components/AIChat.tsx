@@ -3,6 +3,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Shield, Loader2, Play, Send, Copy, Check } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
+import {
+  COPY_FEEDBACK_MS,
+  MOBILE_BREAKPOINT_PX,
+  RESIZE_DEBOUNCE_MS,
+  TABLET_MIN_PX,
+} from '@/app/lib/constants';
 
 interface AIChatPlan {
   task: string;
@@ -107,21 +113,24 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
     }
   };
 
-  const [windowWidth, setWindowWidth] = useState(1024);
+  // Initial value matches MOBILE_BREAKPOINT_PX so the first render before
+  // the useEffect-driven measurement falls into the "desktop" branch (any
+  // first-render mobile flicker would be more disruptive than the inverse).
+  const [windowWidth, setWindowWidth] = useState(MOBILE_BREAKPOINT_PX);
 
   useEffect(() => {
     setWindowWidth(window.innerWidth);
     let timeout: NodeJS.Timeout;
     const handleResize = () => {
       clearTimeout(timeout);
-      timeout = setTimeout(() => setWindowWidth(window.innerWidth), 150);
+      timeout = setTimeout(() => setWindowWidth(window.innerWidth), RESIZE_DEBOUNCE_MS);
     };
     window.addEventListener('resize', handleResize);
     return () => { window.removeEventListener('resize', handleResize); clearTimeout(timeout); };
   }, []);
 
-  const isMobile = windowWidth < 768;
-  const isTablet = windowWidth >= 768 && windowWidth < 1024;
+  const isMobile = windowWidth < TABLET_MIN_PX;
+  const isTablet = windowWidth >= TABLET_MIN_PX && windowWidth < MOBILE_BREAKPOINT_PX;
 
   if (hidden) return null;
 
@@ -215,7 +224,7 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
                       onClick={() => {
                         navigator.clipboard.writeText(msg.content);
                         setCopiedIdx(idx);
-                        setTimeout(() => setCopiedIdx(null), 2000);
+                        setTimeout(() => setCopiedIdx(null), COPY_FEEDBACK_MS);
                       }}
                       aria-label="Copy message"
                       style={{

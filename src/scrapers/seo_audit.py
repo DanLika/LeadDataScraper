@@ -6,6 +6,7 @@ import time
 from bs4 import BeautifulSoup
 from typing import Optional
 
+from src.utils.constants import SEO_AUDIT_HTTP_TIMEOUT_S
 from src.utils.ssrf_guard import SSRFError, SSRFGuardResolver, assert_safe_scheme
 
 # Pre-compiled regex patterns for social URL filtering (performance optimization)
@@ -239,7 +240,7 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
             connector = aiohttp.TCPConnector(resolver=SSRFGuardResolver())
             async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
                 try:
-                    async with session.get(url, timeout=12) as response:
+                    async with session.get(url, timeout=SEO_AUDIT_HTTP_TIMEOUT_S) as response:
                         html = await response.text()
                         results["is_up"] = True
                         results["response_time"] = round(time.time() - start_time, 2)

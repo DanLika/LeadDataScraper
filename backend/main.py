@@ -25,6 +25,16 @@ from src.core.parallel_auditor import ParallelAuditor
 from src.core.task_orchestrator import TaskOrchestrator
 from src.scripts.export_leads import export_leads
 from src.utils.logging_config import setup_logging, get_logger
+from src.utils.constants import (
+    AI_INSTRUCTION_MAX_LENGTH,
+    BULK_LEAD_IDS_MAX_LENGTH,
+    BULK_TASKS_MAX_LENGTH,
+    MAX_UPLOAD_BYTES,
+    NAME_MAX_LENGTH,
+    SEARCH_QUERY_MAX_LENGTH,
+    SHORT_IDENTIFIER_MAX_LENGTH,
+    UNIQUE_KEY_MAX_LENGTH,
+)
 from fastapi.responses import FileResponse
 
 logger = get_logger(__name__)
@@ -81,24 +91,24 @@ _PIPELINE_FILTER_KEYS = frozenset({
 
 class CampaignCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: constr(min_length=1, max_length=200)
+    name: constr(min_length=1, max_length=NAME_MAX_LENGTH)
     channel: CampaignChannel
-    segment_filter: Optional[constr(max_length=200)] = None
+    segment_filter: Optional[constr(max_length=NAME_MAX_LENGTH)] = None
 
 class CampaignUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: Optional[constr(min_length=1, max_length=200)] = None
+    name: Optional[constr(min_length=1, max_length=NAME_MAX_LENGTH)] = None
     status: Optional[CampaignStatus] = None
 
 class LeadProcessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    unique_key: constr(min_length=1, max_length=128)
+    unique_key: constr(min_length=1, max_length=UNIQUE_KEY_MAX_LENGTH)
 
 class AskInstruction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # Cap the prompt that flows into Gemini to bound billing per request and
     # keep raw prompt-injection blobs from being forwarded.
-    text: constr(min_length=1, max_length=4000)
+    text: constr(min_length=1, max_length=AI_INSTRUCTION_MAX_LENGTH)
 
 class AskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -106,14 +116,14 @@ class AskRequest(BaseModel):
 
 class DiscoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    query: constr(min_length=1, max_length=500)
-    location: Optional[constr(max_length=200)] = ""
+    query: constr(min_length=1, max_length=SEARCH_QUERY_MAX_LENGTH)
+    location: Optional[constr(max_length=NAME_MAX_LENGTH)] = ""
 
 class PipelineRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     filters: Optional[dict] = None
-    lead_ids: Optional[conlist(constr(min_length=1, max_length=128), max_length=10_000)] = None
-    tasks: Optional[conlist(constr(min_length=1, max_length=64), max_length=64)] = None
+    lead_ids: Optional[conlist(constr(min_length=1, max_length=UNIQUE_KEY_MAX_LENGTH), max_length=BULK_LEAD_IDS_MAX_LENGTH)] = None
+    tasks: Optional[conlist(constr(min_length=1, max_length=SHORT_IDENTIFIER_MAX_LENGTH), max_length=BULK_TASKS_MAX_LENGTH)] = None
 
 # /execute is the AI router's "execute the proposed plan" surface. Lock the
 # task name to the AgenticRouter handler allowlist and bound each accepted
@@ -137,15 +147,15 @@ ExecutableTask = Literal[
 
 class ExecutePlanParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    unique_key: Optional[constr(min_length=1, max_length=128)] = None
-    query: Optional[constr(min_length=1, max_length=500)] = None
-    location: Optional[constr(max_length=200)] = None
+    unique_key: Optional[constr(min_length=1, max_length=UNIQUE_KEY_MAX_LENGTH)] = None
+    query: Optional[constr(min_length=1, max_length=SEARCH_QUERY_MAX_LENGTH)] = None
+    location: Optional[constr(max_length=NAME_MAX_LENGTH)] = None
     # Natural-language sub-question fenced as UNTRUSTED_DATA by the handler.
-    query_text: Optional[constr(max_length=4000)] = None
+    query_text: Optional[constr(max_length=AI_INSTRUCTION_MAX_LENGTH)] = None
     # Free-form bucket label ("high-risk" etc.). Handler treats anything other
     # than "high-risk" as "default" — bounded string is enough.
-    filters: Optional[constr(max_length=64)] = None
-    type: Optional[constr(max_length=64)] = None
+    filters: Optional[constr(max_length=SHORT_IDENTIFIER_MAX_LENGTH)] = None
+    type: Optional[constr(max_length=SHORT_IDENTIFIER_MAX_LENGTH)] = None
 
 class ExecutePlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -362,7 +372,9 @@ async def list_leads(request: Request):
         logger.error("Unexpected error fetching leads: %s", e, exc_info=True)
         return error_response("An unexpected error occurred while fetching leads")
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
+# NOTE: MAX_UPLOAD_BYTES is re-exported from src.utils.constants — kept here
+# as a module-level alias so existing callers (`read_capped`,
+# `validate_csv_metadata`) can keep importing it from `main` without churn.
 
 
 def validate_csv_metadata(file: UploadFile) -> Optional[JSONResponse]:

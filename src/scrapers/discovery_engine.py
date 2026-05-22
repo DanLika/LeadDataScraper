@@ -5,6 +5,10 @@ from urllib.parse import quote_plus
 from typing import List, Optional
 from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
 from src.scrapers.enrichment_engine import _install_ssrf_route_guard
+from src.utils.constants import (
+    PLAYWRIGHT_MAPS_LOAD_TIMEOUT_MS,
+    PLAYWRIGHT_MAPS_SELECTOR_TIMEOUT_MS,
+)
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.agentic_router import AgenticRouter
 from src.utils.logging_config import get_logger
@@ -42,9 +46,9 @@ class DiscoveryEngine:
             try:
                 # 1. Navigate to Google Maps
                 url = f"https://www.google.com/maps/search/{quote_plus(search_query)}"
-                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                await page.goto(url, wait_until="domcontentloaded", timeout=PLAYWRIGHT_MAPS_LOAD_TIMEOUT_MS)
                 try:
-                    await page.wait_for_selector("div[role='article'], a[href*='/maps/place/']", timeout=10000)
+                    await page.wait_for_selector("div[role='article'], a[href*='/maps/place/']", timeout=PLAYWRIGHT_MAPS_SELECTOR_TIMEOUT_MS)
                 except PlaywrightTimeoutError:
                     pass
 

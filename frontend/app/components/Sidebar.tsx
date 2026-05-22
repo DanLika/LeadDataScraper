@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { MOBILE_BREAKPOINT_PX, RESIZE_DEBOUNCE_MS } from '@/app/lib/constants';
 
 interface SidebarLead {
   company_name?: string;
@@ -83,7 +84,7 @@ export default function Sidebar({
     let timeout: NodeJS.Timeout;
     const check = () => {
       clearTimeout(timeout);
-      timeout = setTimeout(() => setIsMobile(window.innerWidth <= 1024), 150);
+      timeout = setTimeout(() => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT_PX), RESIZE_DEBOUNCE_MS);
     };
     check();
     window.addEventListener('resize', check);
