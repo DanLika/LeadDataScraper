@@ -10,6 +10,7 @@ logger = get_logger(__name__)
 
 class SupabaseHelper:
     def __init__(self):
+        self._cached_missing_columns = None
         url: str = os.environ.get("SUPABASE_URL")
         # Backend ops must use the service-role key (intentionally bypasses RLS
         # for server-side reads/writes). Never fall back to the anon key: if
@@ -133,13 +134,16 @@ class SupabaseHelper:
             return None
         return self.client.table("orchestration_jobs").delete().gte("created_at", "1970-01-01").execute()
 
-    def check_schema(self):
+    def check_schema(self, force_refresh=False):
         """
         Polls the database to check if all necessary columns exist in the 'leads' table.
         Returns a list of missing columns.
         """
         if not self.client:
             return []
+
+        if not force_refresh and self._cached_missing_columns is not None:
+            return self._cached_missing_columns
 
         # Includes both core columns (written by /upload, /process-lead) and
         # enrichment columns (written by /hunt-lead, /process-all). The bug
@@ -165,6 +169,7 @@ class SupabaseHelper:
             # This handles the common case where all columns exist with only 1 query.
             try:
                 self.client.table("leads").select(",".join(required_cols)).limit(1).execute()
+                self._cached_missing_columns = []
                 return []
             except Exception as e:
                 # If selection fails, it's likely because one or more columns are missing
@@ -183,6 +188,7 @@ class SupabaseHelper:
                 except Exception as e:
                     if "column" in str(e) and "does not exist" in str(e):
                         missing.append(col)
+            self._cached_missing_columns = missing
             return missing
         except Exception as e:
             logger.error("Error checking schema: %s", e, exc_info=True)
@@ -224,4 +230,8 @@ class SupabaseHelper:
                     "exist yet — run the latest supabase_schema.sql): %s",
                     col, e,
                 )
+
+        if success_any:
+            self._cached_missing_columns = None
+
         return success_any
