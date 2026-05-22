@@ -179,66 +179,6 @@ def save_csv(df, filepath):
     sanitize_dataframe_for_csv(df).to_csv(filepath, index=False)
     logger.info("Data saved to '%s'.", filepath)
 
-def export_outreach_ready_csv(df, output_path):
-    """
-    Formats and exports the lead data specifically for outreach platforms (Instantly, Apollo, etc.)
-    Layout: email, website, category, first_name, location, pain_point
-    """
-    # Mapping table (source_column: target_column)
-    mapping = {
-        'email': 'email',
-        'Website': 'website',
-        'website': 'website',
-        'segment': 'category',
-        'first_name': 'first_name',
-        'location': 'location',
-        'Address': 'location',
-        'address': 'location'
-    }
-
-    # Identify available columns
-    available_cols = {}
-    for src, target in mapping.items():
-        if src in df.columns and target not in available_cols:
-            available_cols[target] = src
-
-    # Process pain points to a single descriptive string
-    pain_point_col = None
-    if 'pain_points' in df.columns:
-        pain_point_col = 'pain_points'
-    elif 'PAIN_POINTS' in df.columns:
-        pain_point_col = 'PAIN_POINTS'
-
-    # Create the outreach export dataframe
-    export_df = pd.DataFrame()
-
-    for target, src in available_cols.items():
-        export_df[target] = df[src]
-
-    if pain_point_col:
-        # Convert list/dict to string if necessary
-        export_df['pain_point'] = df[pain_point_col].apply(
-            lambda x: ", ".join(x) if isinstance(x, list) else str(x) if pd.notna(x) else ""
-        )
-    else:
-        export_df['pain_point'] = ""
-
-    # Ensure all required columns exist even if empty
-    required_cols = ['email', 'website', 'category', 'first_name', 'location', 'pain_point']
-    for col in required_cols:
-        if col not in export_df.columns:
-            export_df[col] = ""
-
-    # Reorder columns
-    export_df = export_df[required_cols]
-
-    # Drop rows without email as they are not outreach-ready
-    export_df = export_df[export_df['email'].notna() & (export_df['email'] != '')]
-
-    save_csv(export_df, output_path)
-    logger.info("Outreach ready export created with %d leads: %s", len(export_df), output_path)
-    return export_df
-
 def export_facebook_links(df: pd.DataFrame, output_path: str):
     """
     Extracts unique Facebook links from the DataFrame and saves them to a CSV.
