@@ -111,20 +111,20 @@ def _detect_tracking_and_tech(soup: BeautifulSoup, html_lower: str, results: dic
         results["red_flags"].append("Missing Viewport (Not Mobile Friendly)")
 
 
+CMS_REGEXES = {
+    "WordPress": re.compile(r'/wp-content/|/wp-includes/|wp-json|wordpress'),
+    "Shopify": re.compile(r'cdn\.shopify\.com|shopify\.shop|shopify-payment-button|shopify\.com', re.IGNORECASE),
+    "Wix": re.compile(r'wix\.com|_wix_|wix-static|wix-site-id'),
+    "Squarespace": re.compile(r'static1\.squarespace\.com|squarespace-config|squarespace\.com'),
+    "Webflow": re.compile(r'data-wf-page|webflow\.js|webflow\.com'),
+    "Joomla": re.compile(r'/media/system/js/|/components/com_|joomla'),
+    "Drupal": re.compile(r'drupal\.settings|/sites/default/files/|drupal', re.IGNORECASE)
+}
+
 def _detect_cms(html_lower: str, results: dict):
     """Detect CMS/platform from HTML patterns."""
-    cms_map = {
-        "WordPress": ["/wp-content/", "/wp-includes/", "wp-json", "wordpress"],
-        "Shopify": ["cdn.shopify.com", "Shopify.shop", "shopify-payment-button", "shopify.com"],
-        "Wix": ["wix.com", "_wix_", "wix-static", "wix-site-id"],
-        "Squarespace": ["static1.squarespace.com", "squarespace-config", "squarespace.com"],
-        "Webflow": ["data-wf-page", "webflow.js", "webflow.com"],
-        "Joomla": ["/media/system/js/", "/components/com_", "joomla"],
-        "Drupal": ["Drupal.settings", "/sites/default/files/", "drupal"]
-    }
-
-    for cms, patterns in cms_map.items():
-        if any(p in html_lower for p in patterns):
+    for cms, regex in CMS_REGEXES.items():
+        if regex.search(html_lower):
             results["cms"] = cms
             results["tech_stack"].append(cms)
             break
