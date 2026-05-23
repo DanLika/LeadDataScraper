@@ -115,6 +115,10 @@ function DashboardInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);
+  // DB-wide total from /stats, separate from the paginated `leads` array.
+  // Null until the first /stats response lands; StatsCards then displays it
+  // on the TOTAL LEADS card instead of the loaded-slice count.
+  const [totalLeads, setTotalLeads] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [outreachDraft, setOutreachDraft] = useState<{ text: string, leadName: string, subject?: string, leadEmail?: string } | null>(null);
   const [linkedinDraft, setLinkedinDraft] = useState<string>('');
@@ -216,6 +220,18 @@ function DashboardInner() {
   const [hasMore, setHasMore] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
 
+  const fetchStats = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/stats`, { signal });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (typeof data?.total_leads === 'number') setTotalLeads(data.total_leads);
+    } catch (err) {
+      if (signal?.aborted) return;
+      console.error('Stats fetch failed:', err);
+    }
+  }, []);
+
   const fetchLeads = useCallback(async (signal?: AbortSignal) => {
     try {
       // Refresh (not append): drop any cursor and request the first page.
@@ -289,6 +305,7 @@ function DashboardInner() {
     // surfaces the browser-cancelled request as `TypeError: Load failed`.
     const controller = new AbortController();
     fetchLeads(controller.signal);
+    fetchStats(controller.signal);
     fetchInsights(controller.signal);
 
     // Poll the backend for fresh leads instead of subscribing via the browser
@@ -296,13 +313,14 @@ function DashboardInner() {
     // which is intentionally disabled by RLS — backend is now the only reader.
     const interval = setInterval(() => {
       fetchLeads(controller.signal);
+      fetchStats(controller.signal);
     }, 15000);
 
     return () => {
       controller.abort();
       clearInterval(interval);
     };
-  }, [fetchLeads, fetchInsights]);
+  }, [fetchLeads, fetchStats, fetchInsights]);
 
   // Combined status monitoring for legacy endpoints
   useEffect(() => {
@@ -1215,7 +1233,7 @@ function DashboardInner() {
 
         <HealthChart leads={leads} />
 
-        <StatsCards leads={leads} />
+        <StatsCards leads={leads} totalLeads={totalLeads} />
 
         <div className="card card-no-hover" style={{ padding: '0', overflow: 'hidden' }}>
           <div className="table-container-wrapper" style={{ overflowX: 'auto', width: '100%' }}>

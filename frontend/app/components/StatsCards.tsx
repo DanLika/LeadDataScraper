@@ -16,9 +16,17 @@ interface Lead {
 
 interface StatsCardsProps {
   leads: Lead[];
+  // DB-wide total from `/stats`. With cursor pagination, `leads.length` is
+  // only the currently-loaded page (~50), so the TOTAL card would otherwise
+  // misrepresent the dataset until every page is fetched. Falls back to
+  // `leads.length` until the first /stats response lands. PENDING / HIGH
+  // RISK / HEALTHY still derive from the loaded slice — fixing those
+  // requires shipping bucket counts from the backend; see #226 follow-up.
+  totalLeads?: number | null;
 }
 
-export default function StatsCards({ leads }: StatsCardsProps) {
+export default function StatsCards({ leads, totalLeads }: StatsCardsProps) {
+  const total = typeof totalLeads === 'number' ? totalLeads : leads.length;
   return (
     <section className="grid-responsive-stats" style={{ marginBottom: '3.5rem' }}>
       <div className="card">
@@ -26,7 +34,7 @@ export default function StatsCards({ leads }: StatsCardsProps) {
            <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>TOTAL LEADS</span>
            <BarChart3 size={18} />
         </div>
-        <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>{leads.length}</div>
+        <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>{total}</div>
       </div>
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--primary-strong)', marginBottom: '1rem' }}>
