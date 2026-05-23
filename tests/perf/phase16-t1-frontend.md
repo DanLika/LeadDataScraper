@@ -240,3 +240,62 @@ Verified against this run; severity from Phase15:
 - `tests/perf/phase16-t1-frontend.md` — this file.
 - No new traces dumped this run; existing `phase15-*.gz` artifacts remain on the `chore/fix-p0-signout-prod-2026-05-23` branch tip.
 
+---
+
+## Addendum (2026-05-23) — Phase15 P0 #1 re-verified against clean `main` build
+
+**Result: RESOLVED on `main` HEAD `6488afb`.** Sign Out works.
+
+**Method:** `git worktree add /tmp/lds-main-signout main`, fresh
+`npm ci` (Turbopack refuses symlinked node_modules), `npm run build`,
+`PORT=3101 npm run start` to leave the contaminated `:3100` build
+untouched for whichever sibling session was investigating it.
+
+**Pre-click invariant — confirms build is clean.** `__reactProps.onClick.toString()`
+on the Sign Out button captures the plain on-disk source verbatim:
+
+```
+async()=>{try{await fetch("/api/auth/signout",{method:"POST"})}finally{B.replace("/login"),B.refresh()}}
+```
+
+- `has_signout_debug_log: false` ✓
+- `has_console_log: false` ✓
+- `has_data_testid: false` ✓
+
+These three negatives confirm the build is genuinely from main, NOT
+the same contaminated artifact tested in the body of this report.
+
+**Click outcome.** Single Playwright `page.click()` on the Sign Out
+button fires every step end-to-end:
+
+| Step | Evidence |
+| --- | --- |
+| Click handler fires | `POST http://localhost:3101/api/auth/signout => [200] OK` in network log |
+| Navigation commits | `url_after_signout: "/login"` |
+| Session cleared | Subsequent RSC prefetches return `GET /insights?_rsc=… => [307]` → `/login?next=%2Finsights` and `GET /?_rsc=… => [307]` → `/login?next=%2F` (middleware re-asserts auth gate) |
+| Cookies invalidated | `document.cookie` empty post-signout (HttpOnly so JS-invisible regardless; the 307 redirects above are the load-bearing proof) |
+
+**Conclusion.**
+
+1. **Phase15 P0 #1 — RESOLVED on main HEAD.** Operator should mark it
+   closed on whatever tracker carries it.
+2. **The contaminated `:3100` build's debug instrumentation comes from
+   somewhere ELSE — not from a "real fix carried only in the sibling
+   branch."** Main itself is already shipping the working sign-out.
+   The instrumentation on `:3100` was likely a debugger-leftover commit
+   that hadn't been cleaned up — investigating that sibling branch is
+   no longer Phase16 work.
+3. **My demoted "diagnostic-artifact" hypothesis (root-cause #2 in
+   T1.8) was not wrong but is now moot.** What Phase15 saw and what I
+   could not reproduce are both consistent with: a real timing/race
+   that was fixed in a commit between Phase15 (2026-05-23 morning) and
+   `main` HEAD `6488afb`. Whether that fix is `6488afb` itself (the
+   CLAUDE.md docs commit — unlikely to fix code) or sits in an earlier
+   commit on the chain isn't worth digging into now that the
+   user-visible bug is gone.
+
+**Cleanup.** Worktree `/tmp/lds-main-signout` + the `:3101` server
+left running for the operator to poke at; remove with
+`git worktree remove /tmp/lds-main-signout --force` and `kill $(lsof
+-ti :3101)` when done.
+
