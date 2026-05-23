@@ -330,10 +330,16 @@ function DashboardInner() {
   // progress instead of looking idle. Polls every 5s when this tab has no
   // job of its own; once adopted, the existing per-job poller (next
   // useEffect) takes over and this loop pauses until the job clears.
+  //
+  // Skips the tick when document.hidden so a backgrounded tab doesn't
+  // keep churning the backend (~18 calls / 30 s observed in Phase 15).
+  // Re-fires immediately on visibilitychange → visible so the operator
+  // sees fresh state the moment they refocus the tab.
   useEffect(() => {
     if (orchestratorJob) return;
     let cancelled = false;
     const tick = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
         const res = await apiFetch(`${API_BASE_URL}/orchestrator/active`);
         if (!res.ok) return;
@@ -348,9 +354,12 @@ function DashboardInner() {
     };
     void tick();
     const interval = setInterval(tick, 5000);
+    const onVisibility = () => { if (document.visibilityState === 'visible') void tick(); };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [orchestratorJob]);
 
