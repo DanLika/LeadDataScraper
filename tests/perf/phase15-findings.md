@@ -49,7 +49,7 @@ Perf-test rows (`lead_source='_perf_test_'`, 500 rows) cleaned up in 15.18.
 | 15.5 | OfflineBanner + WebVitalsReporter | ⚠ partial | OfflineBanner mounts on `offline` event, unmounts on `online` ✓. Vitals fire on visibility-change ✓. But pre-login vitals 307→`/login` (Sev-2) — see findings #4 |
 | 15.6 | Virtualized LeadTable (500+) | ✅ pass | 521 in DB, 350 loaded after 22 "Load more" clicks; virtualizer holds 27 DOM rows; CLS=0.00, no long-task insights flagged across 5 s programmatic scroll |
 | 15.7 | Filter + sort + URL sync | ⚠ partial | `?status=`, `?q=`, `?sort=` all sync ✓. Reload preserves ✓. **`Clear filters` clears internal state but does NOT strip URL** (Sev-2) — see finding #2 |
-| 15.8 | Multi-tab signout cascade | ❌ FAIL | Tab B authed via shared cookie ✓. **Sign Out button click NEVER fires POST `/api/auth/signout`** (verified via JS `.click()` AND MCP click on `uid=12_12`; `performance.getEntriesByType('resource')` shows 0 signout requests, 95 total entries). Endpoint exists (direct `fetch('/api/auth/signout', POST)` returns 200). Sev-1 — see finding #1 |
+| 15.8 | Multi-tab signout cascade | ✅ pass _(P0a retracted Phase 16)_ | Tab B authed via shared cookie ✓. Original 15.8 reported Sign Out as P0; **Phase 16 re-test on a fresh `npm run build` could not reproduce** — Sign Out works in 4/4 scenarios (`/`, `/` post-chat + dismissed plan, `/insights`, `/campaigns`). See Phase 16 update below for root cause |
 | 15.9 | AIChat plan card | ✅ pass | `"how many leads do I have"` → STATUS_CHECK auto-exec → `"521 leads total — 521 Pending."`. `"find 3 coffee shops in Austin Texas"` → plan card with Task=DISCOVERY_SEARCH, Params, Confirm & Execute + Dismiss buttons. Dismissed to avoid Playwright burn |
 | 15.10 | Drag-drop CSV | ⏭ skipped | No `data-testid="drop-overlay"` in current DOM; could not locate drop target via `[class*="drop"]` / `[aria-label*="drop"]`. Drop dispatched on `<body>` produced no upload — either selector contract drifted or feature not landed |
 | 15.11 | Faza 9 regression sweep | ✅ partial | 9.4 P3 a11y **resolved** (0 form fields without id/name/aria-label across `/`). 9.4 P2 search **resolved** (rapid type of `"pacific"` over 210 ms → `proxy_leads_delta = 0` — search is client-side filter). 9.5 scroll **resolved** at 350 rows. **9.4 P2 orchestrator/active polling STILL PRESENT** (18 calls in 30 s session — finding #7). **9.7 Inter font fallback STILL PRESENT** (`document.fonts.size === 0`). 9.4 P1 fetch-signal + 9.9 login spinner NOT exercised this run |
@@ -81,7 +81,7 @@ polish.
 
 | # | Sev | Title | Where | Repro | Recommended fix |
 | --- | --- | --- | --- | --- | --- |
-| 1 | **P0** | Sign-out button click does nothing | `frontend/app/components/Sidebar.tsx:211-226` Sign Out nav item | Sign in → click Sign Out (both JS `.click()` AND MCP `click` on `uid=12_12` "button 'Sign out'") → `performance.getEntriesByType('resource').filter(r => /signout/.test(r.name))` returns `[]`. URL stays `/`. Note the finally block (`router.replace('/login')`) ALSO does not run — confirming the `onClick` async handler never fires, not just the fetch inside it. **Source is wired correctly** per CLAUDE.md: lines 213–219 have `try { await fetch('/api/auth/signout', {method:'POST'}) } finally { router.replace('/login'); router.refresh() }`. Endpoint works on direct `fetch('/api/auth/signout', POST)` (returns 200) | Investigate why the handler isn't invoked: (a) hydration not complete on first interactive paint (the sidebar is inside a `'use client'` complementary nav), (b) overlay intercepting clicks (z-index on AI chat region `uid=12_284`), or (c) React tree state. Reproduce locally, attach DevTools listener panel to the button, see if `click` event bubbles. Operator currently cannot sign out via UI — workaround is clear cookies or close tab |
+| 1 | ~~P0~~ **RETRACTED Phase 16** | ~~Sign-out button click does nothing~~ | `Sidebar.tsx:211-226` — source unchanged since 2026-05-15 | **Could not reproduce on fresh `npm run build`.** 4/4 sign-out scenarios green: `/` clean, `/` after AIChat + dismissed plan card, `/insights`, `/campaigns`. Each fires `[SIGNOUT] click handler entered` / `fetch returned 200` / `finally: router.replace(/login)` (verified by temporary `console.log` instrumentation, removed before commit) and URL redirects to `/login`. **Root cause of original false positive:** Phase 15 setup ran `pkill -f "next start" -f "uvicorn backend"` (single command). On macOS, `pkill -f` honors only the LAST `-f` pattern — so the previous `next-server` (PID 59710 from 2026-05-22 18:53) was never killed and kept serving cached pre-build output. Sidebar handler was correct all along | None required. Lesson: when restarting servers, run separate `pkill` calls per pattern and verify with `pgrep` before claiming a fresh build is under test |
 | 2 | P2 | "Clear filters" clears state but does not strip URL params | `frontend/app/components/FilterBar.tsx` (or wherever Clear lives) | URL: `?status=Pending&q=pacific&sort=seo_score_desc` → click Clear filters → URL unchanged; reloading re-applies the stale filters | After internal state reset, call `router.replace('/')` (or similar) so URL becomes the source of truth on next reload |
 | 3 | P2 | `TOTAL LEADS` stat card shows page-loaded count, not DB total | Dashboard stats (`HealthChart` / `StatsCards`) | DB has 521 leads; AIChat STATUS_CHECK answers `"521 leads total"`; stat card shows `50` (initial page size). After "Load more"×22 the card creeps up to `350` matching loaded-rows. Insights endpoint hallucinated "180 records" the same render | Either (a) hit `/stats` (cached, src/utils/stats_cache.py) for the total, or (b) rename the card to "LOADED" so operators understand. The current text is misleading |
 | 4 | P2 | Pre-login WebVitalsReporter beacons 307→`/login`; vital data is lost AND auth gate churns | `frontend/app/components/WebVitalsReporter.tsx` (mounted in `app/layout.tsx`) | Cold-load `/login` → DevTools Network shows `POST /api/proxy/metrics` 307 → `POST /login?next=%2Fapi%2Fproxy%2Fmetrics` 200 (×3) | Either (a) don't mount `<WebVitalsReporter>` on `/login`, or (b) add `/api/proxy/metrics` to the public-path allowlist in `frontend/utils/supabase/middleware.ts` (rate-limit already exists at backend) |
@@ -93,7 +93,7 @@ polish.
 | 10 | P3 | Inter font silent fallback persists (Faza 9.7) | `frontend/app/globals.css` declares `--font-main: 'Inter'` but no `.woff*` shipped | `document.fonts.size === 0`; computed `body` font = `Inter, system-ui, -apple-system, sans-serif` falls through to `system-ui` | Either drop `'Inter'` from the stack OR wire `next/font/google` with `display: 'swap'` |
 | 11 | P3 | Missing browser headers vs BookBed-Website (Phase D backport) | `frontend/next.config.ts` static headers + `frontend/proxy.ts` per-request CSP | Inspect `Response Headers` on `/` — present: CSP, HSTS, XFO, X-CTO, Referrer-Policy, Permissions-Policy. **Absent:** `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `Cross-Origin-Embedder-Policy`, `X-Permitted-Cross-Domain-Policies` | Backport per CLAUDE.md "Cross-repo strategy" Phase D — these are no-cost wins (header stamps), 30 min |
 | 12 | P3 | Drag-drop drop target has no stable selector | unknown — `data-testid="drop-overlay"` not present | Construct `DataTransfer` + `File('phase15.csv')`, dispatch `dragenter`/`dragover`/`drop` on `<body>` → no upload fired | Add `data-testid="drop-overlay"` (or similar) to the drop overlay so this contract test can run in MCP and `tests/e2e/drag-drop.spec.ts` |
-| 13 | **P0 ops** | Prod (Render) unreachable | Both Render services | `curl https://lead-scraper-frontend.onrender.com/` → HTTP 404 `x-render-routing: no-server`. Backend connect-timeouts at 25 s | Confirm service status in the Render dashboard. Restart / redeploy / re-confirm DNS. Operator-action — not a code fix |
+| 13 | **P0 ops** | Prod (Render) unreachable + ALL recent CI on `main` failing | Both Render services + GitHub Actions runs `26328800835` / `26327154866` / `26327154878` / `26327154888` | `curl https://lead-scraper-frontend.onrender.com/` → HTTP 404 `x-render-routing: no-server`. Backend connect-timeouts at 25 s. **Phase 16 follow-up:** `gh run list --branch main --limit 8` shows EVERY workflow run since `2026-05-23 07:39 UTC` failed — every Security job (schema-drift, RLS, query-plans, JSONB, gitleaks, semgrep, pip-audit, npm-audit, …), Quality Ratchet, every main-matrix pytest (3.11/3.12/3.13), every npm test (node 20/22). Breadth + simultaneity suggests env-level failure (expired/missing CI secret, runner config, or a single broken `pip install`) rather than a code bug. Prod outage is likely a downstream consequence of the gated deploy chain not running | **Operator action — not a code fix.** (1) Open one failed run in the Actions UI and read step logs (`gh run view <id> --log-failed` only surfaces step names when failure is at job setup level). (2) Most likely culprit per CLAUDE.md is `SUPABASE_DATABASE_URL` (fail-closed in schema-drift) or a Sentry / Render API secret expiring. (3) Restore CI green, then investigate Render — `plan: starter` doesn't auto-suspend, so 404 `no-server` means the service was paused / re-provisioned / deleted manually |
 
 ---
 
@@ -129,17 +129,52 @@ polish.
 
 ---
 
-## Recommendation — next fix-sprint priority
+## Phase 16 update (2026-05-23, P0 follow-up)
+
+Spec asked: fix 2 P0s, surface root causes. Outcome:
+
+- **P0a Sign Out — RETRACTED.** False positive caused by Phase 15's
+  `pkill -f "next start" -f "uvicorn backend"` only honoring the last
+  `-f` on macOS — so the stale `next-server` (PID 59710 from
+  2026-05-22 18:53) kept serving cached pre-build output. After a
+  clean rebuild (with separate `pkill` calls and `pgrep` verification),
+  Sign Out works in 4/4 scenarios. Source `Sidebar.tsx:211-226` was
+  never broken.
+
+- **P0b Render prod — investigated, surfaced as operator action.**
+  `curl https://lead-scraper-{frontend,backend}.onrender.com/` still
+  returns 404 `no-server` / 25 s timeout after 5 wake attempts spaced
+  15 s apart. New signal from Phase 16: **every CI run on `main` since
+  2026-05-23 07:39 UTC has failed** (Security, Quality Ratchet, every
+  pytest matrix, every npm test). Breadth + simultaneity → env-level
+  failure (most-likely culprits: an expired/missing `SUPABASE_DATABASE_URL`,
+  Sentry, or Render API secret, or one broken `pip install`). Operator
+  must read the actual job logs in the Actions UI and restore the
+  secret / lockfile. Prod outage is likely downstream of the gated
+  deploy chain not running.
+
+## Recommendation — next fix-sprint priority (updated post-Phase-16)
 
 In order of operator-visible impact:
 
-1. **Fix Sign-Out button wiring (#1)** — Sev-1; operator literally cannot sign out via UI. ~30 min in `Sidebar.tsx`. Validate after fix with the multi-tab E2E test in `tests/e2e/`.
-2. **Resolve prod Render unreachability (#13)** — operator action, ~minutes once they hit the dashboard. Until this is back, none of `15.13–15.17` can be re-verified, alerts can't fire, customers (when any) can't sign in.
-3. **Stop the orchestrator-active polling storm (#7)** — 1-line `document.hidden` guard + `setInterval` exponential backoff. Saves continuous backend load and (in prod) Render compute minutes.
-4. **Either fix `Clear filters` URL strip (#2) OR rename the stat card (#3)** — both surface "stale state, fresh paint" confusion to the operator. Easy wins.
-5. **Pre-login vitals 307 (#4)** — one-line allowlist edit OR conditional `<WebVitalsReporter>` mount on auth pages.
-6. **AI Insights hallucinates totals (#6)** — pin `total_count` into the prompt as a fenced fact, or post-validate response numbers against the data array.
-7. **Polish set:** Inter font (#10), backport COOP/CORP/COEP (#11), drag-drop selector (#12), `ForcedReflow` follow-up (#8).
+1. **Restore CI green on `main` (#13 root cause)** — operator action.
+   Without this, no Render deploys can happen and no merges land safely.
+2. **Resolve prod Render unreachability (#13 consequence)** — once CI
+   is green, redeploy and verify. Until this is back, no Phase-15 prod
+   tier can be re-verified.
+3. **Stop the orchestrator-active polling storm (#7)** — 1-line
+   `document.hidden` guard + `setInterval` exponential backoff. Saves
+   continuous backend load and (in prod) Render compute minutes.
+4. **Either fix `Clear filters` URL strip (#2) OR rename the stat card
+   (#3)** — both surface "stale state, fresh paint" confusion to the
+   operator. Easy wins.
+5. **Pre-login vitals 307 (#4)** — one-line allowlist edit OR
+   conditional `<WebVitalsReporter>` mount on auth pages.
+6. **AI Insights hallucinates totals (#6)** — pin `total_count` into
+   the prompt as a fenced fact, or post-validate response numbers
+   against the data array.
+7. **Polish set:** Inter font (#10), backport COOP/CORP/COEP (#11),
+   drag-drop selector (#12), `ForcedReflow` follow-up (#8).
 
 ---
 
