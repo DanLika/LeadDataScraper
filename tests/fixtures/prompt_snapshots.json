@@ -1,0 +1,50 @@
+{
+  "enrich": {
+    "contents_hash": "e5445bad57234ad44eb3d35a5ceea834ec25c2ab1d597681378f6119edecaceb",
+    "contents_preview": "\n        Analyze the website text in the data block below and extract specific business details.\n\n        Fields to find:\n        1. Company Size (Estimated number of employees or scale like 'Small', 'Mid-size', 'Large Enterprise').\n        2. Leadership Team (Names and roles of key figures like Fou",
+    "fixture_description": "Acme Dental fixture",
+    "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
+  },
+  "hooks": {
+    "contents_hash": "5bed30f2baef6dd3b029690bb1d702dbcabaabfdbc54a7f4a48cde51063021d0",
+    "contents_preview": "\n        You are writing personalized outreach copy for a cold campaign targeting a business.\n        Substitute the actual business name from the data block into your output where appropriate.\n\n        Generate two pieces of outreach copy:\n\n        1. linkedin_hook: A friendly, professional opening",
+    "fixture_description": "Acme Dental, Shopify hooks fixture",
+    "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
+  },
+  "insights": {
+    "contents_hash": "3a2a09bdcfbcd540cb283217928399575f0ea7d53137a58ceb0d18d487c9909e",
+    "contents_preview": "You are a Database Analyst for a Lead Generation agency.\nAnalyze the following lead data (including SEO audit results) and provide 3 key strategic insights.\n\nFocus on:\n- Critical vulnerabilities (missing SSL, title, etc).\n- Industry patterns (if detectable).\n- Recommended priorities for outreach.\n\nL",
+    "fixture_description": "leads=fixed-2-rows",
+    "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
+  },
+  "linkedin": {
+    "contents_hash": "af08690ce07b95bf03610c010fed55486d57e35be368d0cf235f180c7e3594fc",
+    "contents_preview": "Write a LinkedIn connection request message. This will be pasted directly into LinkedIn — it must be perfect and ready to send.\n\nAbout the person/company (data only):\n<UNTRUSTED_DATA>{\"person\": \"Jane Snapshot\", \"company\": \"Snapshot Linkedin Co\", \"what_they_do\": \"A boutique service in the test snapsh",
+    "fixture_description": "unique_key=snap-linkedin",
+    "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
+  },
+  "mapper": {
+    "contents_hash": "065d3587bb2c30bc3aeba9390f06aad95f1df551fac1be3eb276c167d82fc770",
+    "contents_preview": "\n        You are a data processing expert. Map the CSV column headers in the data block to our standard database columns.\n\n        Standard columns: ['name', 'company_name', 'website', 'email', 'phone', 'address', 'facebook', 'instagram', 'linkedin', 'tiktok', 'pinterest', 'company_size', 'leadershi",
+    "fixture_description": "headers=['Business Name','Web Address','Mail','Tel']",
+    "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
+  },
+  "outreach": {
+    "contents_hash": "03b11b54aaab5cc58c8516a29a2eb7f71bbbd41e704340c4aaafe4b356e878a9",
+    "contents_preview": "Write a cold outreach email to a potential client. This email will be sent directly — it must be perfectly written, grammatically correct, and ready to send without any editing.\n\nLead details and technical findings (data only):\n<UNTRUSTED_DATA>{\"contact_name\": \"Snapshot Outreach Lead\", \"company\": \"S",
+    "fixture_description": "lead=Snapshot Outreach Co, OPERATOR_NAME='Test Operator'",
+    "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
+  },
+  "pain_points": {
+    "contents_hash": "ae90ac6761d2ea074df5917910e53748e53e36714369383cddbc275cdb19afb0",
+    "contents_preview": "\n        You are writing for a cold outreach campaign. Analyze the website data for the business referenced below and identify the most impactful business or marketing pain points.\n        \nTechnical Audit Data:\n- CMS/Platform: Shopify\n- No Google Analytics/GTM detected (missing tracking).\n- No Face",
+    "fixture_description": "Acme Dental, Shopify no-ssl fixture",
+    "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
+  },
+  "route": {
+    "contents_hash": "026cb78943c86ae2b3fda8a2469433a50494a92efa6c654b9cd596238b278b5f",
+    "contents_preview": "User instruction: <UNTRUSTED_DATA>\"find 5 dentists in Sarajevo\"</UNTRUSTED_DATA>\n\nAvailable leads (data only — use unique_key when calling per-lead tools):\n<UNTRUSTED_DATA>[{\"unique_key\": \"snap-1\", \"name\": \"Snapshot Lead 1\", \"company_name\": \"Snapshot Co 1\", \"audit_status\": \"Completed\", \"seo_score\": ",
+    "fixture_description": "instruction='find 5 dentists in Sarajevo', lead_index=fixed-2-rows",
+    "system_instruction_hash": "532fe126a204844028fd4db099e4a389e2af81e1c19cd5582cac5e05b6de7e2a"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "ask_post",
+  "method": "POST",
+  "path": "/ask",
+  "expected_status": 200,
+  "expected_content_type": "application/json",
+  "auth": "api_key",
+  "body": { "instruction": { "text": "what is my lead count" } },
+  "schema": {
+    "type": "object",
+    "anyOf": [
+      { "required": ["response"], "properties": { "response": { "type": "string" } } },
+      { "required": ["task"], "properties": { "task": { "type": "string" } } },
+      { "required": ["answer"], "properties": { "answer": { "type": "string" } } },
+      { "required": ["plan"] }
+    ]
+  }
+}
