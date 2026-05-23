@@ -180,14 +180,18 @@ test.describe('visual regression', () => {
     await mockDashboardPopulated(page)
     // Handler reads { draft, subject, lead_email } flat off the response —
     // NOT wrapped in { result: ... }. See page.tsx::handleDraftOutreach.
+    // `.first()` below picks the topmost rendered Mail button. The table
+    // sorts by created_at DESC, so the newest fixture lead (Fixture Co 19)
+    // wins. Mock content must reference Co 19, not Co 00, or the baseline
+    // shows a confusing title-vs-body mismatch.
     await page.route('**/api/proxy/draft-outreach', (r) =>
       r.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          draft: "Hi team at Fixture Co 00,\n\nI noticed your site could use an SEO boost. Let's chat.\n\nBest,\nYour Name",
-          subject: 'Quick win for Fixture Co 00 SEO',
-          lead_email: 'vis0@example.test',
+          draft: "Hi team at Fixture Co 19,\n\nI noticed your site could use an SEO boost. Let's chat.\n\nBest,\nYour Name",
+          subject: 'Quick win for Fixture Co 19 SEO',
+          lead_email: 'vis19@example.test',
         }),
       }),
     )
@@ -198,7 +202,7 @@ test.describe('visual regression', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          draft: 'Hi! Saw Fixture Co 00 could use an SEO boost — happy to share a quick teardown if useful.',
+          draft: 'Hi! Saw Fixture Co 19 could use an SEO boost — happy to share a quick teardown if useful.',
         }),
       }),
     )
