@@ -101,7 +101,10 @@ test project so the prod-mode hydration path is exercised in CI.
 
 ## Downstream blockers in this session
 
-The following queued tasks **cannot run** until this is fixed:
+> **As of 2026-05-23 (commit `d3a90ff` merged to `main`), these are
+> UNBLOCKED. Re-run pending operator pickup.**
+
+The following queued tasks could not run until this was fixed:
 
 - Lighthouse audit on `/`, `/insights`, `/campaigns` → login required, login
   is broken.
@@ -180,13 +183,73 @@ question. Not recommended.
 
 ## Recommended next steps
 
-1. File this finding as an issue.
-2. Implement (A) on a branch; verify `npm run build && npm run start`
-   reaches `/login` → form renders → submit → `/` dashboard renders.
+1. File this finding as an issue. *(Status: deferred — single-operator
+   project; this finding doc is itself the record.)*
+2. ~~Implement (A) on a branch; verify `npm run build && npm run start`
+   reaches `/login` → form renders → submit → `/` dashboard renders.~~
+   **DONE — merged in commit `d3a90ff` on 2026-05-23.** Local
+   `npm run build && PORT=3100 npm run start` + chrome-devtools smoke
+   confirmed nonces on every `__next_f.push` block, 0 console messages,
+   login form interactive.
 3. Add a `npm run start`-based smoke step to `preview-smoke.yml` (or a
    new `prod-smoke.yml`) that asserts `document.querySelectorAll('input').length > 0`
    on `/login` after a 5 s grace — catches future CSP regressions.
+   *(Status: `post-deploy-smoke.mjs` already checks CSP header presence
+   + 0 `pageerror` / `console.error` on `/login`; extending it with the
+   per-script nonce eval below is the remaining gap.)*
 4. Once (A) is in, re-run the queued live testing tasks:
    - Lighthouse on 3 routes
    - Web Vitals real-user-style (cold + throttled)
    - Network waterfall + warm-cache assertions
+
+   *(Status: unblocked; pending operator pickup.)*
+
+## Smoke verification recipe (post-deploy / local re-run)
+
+After any change touching CSP, `proxy.ts`, `app/layout.tsx`, or
+`utils/supabase/middleware.ts`, run this locally before pushing:
+
+```
+cd frontend
+npm run build && PORT=3100 npm run start
+```
+
+Then in a chrome-devtools-mcp / Playwright session navigated to
+`http://localhost:3100/login`, run this `evaluate_script`:
+
+```js
+() => {
+  const scripts = Array.from(document.querySelectorAll('script'));
+  const inline = scripts.filter(s => !s.src);
+  const noNonceInline = inline.filter(s => !s.nonce && !s.getAttribute('nonce'));
+  const nextFInline = inline.filter(s => (s.textContent || '').includes('__next_f.push'));
+  return {
+    totalScripts: scripts.length,
+    inlineWithoutNonce: noNonceInline.length,
+    inlineWithoutNonceSnippets: noNonceInline.map(s => (s.textContent || '').slice(0, 120)),
+    nextFInlineCount: nextFInline.length,
+    nextFAllNonced: nextFInline.every(s => s.nonce || s.getAttribute('nonce')),
+    bodyDataNonce: document.body.getAttribute('data-nonce'),
+  };
+}
+```
+
+**PASS criteria:**
+
+- `inlineWithoutNonce === 0` — every inline script carries a nonce.
+- `nextFInlineCount >= 1` AND `nextFAllNonced === true` — every RSC
+  bootstrap block carries a nonce.
+- `bodyDataNonce === '1'` — confirms the layout's
+  `headers().get('x-nonce')` fired and the request-time nonce reached
+  the renderer.
+- `list_console_messages` returns 0 errors (no CSP violations, no JS
+  errors).
+
+External script(s) without their own `nonce` attribute are allowed by
+`'strict-dynamic'` (any script loaded transitively by a nonced script
+inherits the trust). Not a regression.
+
+**CI gap:** `post-deploy-smoke.mjs` already checks CSP header presence
++ 0 `pageerror` / `console.error` on `/login`, but does not yet drill
+into per-script nonce attributes. Extending it with the above eval is
+the next CI hardening step.

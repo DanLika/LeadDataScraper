@@ -1535,6 +1535,53 @@ Installed via `npx skills add pbakaus/impeccable`. Use as slash commands:
 /harden, /delight, /clarify, /adapt, /onboard, /normalize, /extract,
 /teach-impeccable, /optimize, /overdrive, /arrange, /typeset, /frontend-design
 
+## Cross-repo strategy (BookBed.io)
+
+LDS is internal tooling — `OPERATOR_EMAIL` single-tenancy is deliberate
+(see [ADR-001](docs/adr/001-single-tenant-by-design.md)). The commercial
+SaaS lives in two sibling repos under `~/git/`:
+- `bookbed-website/` — Next.js 16 marketing site (Firebase App Hosting).
+  Already heavily hardened (CSP, JsonLd `</script>`-escape, iCal-checker
+  SSRF guard with double-resolve DNS-rebind protection). **Ahead of LDS**
+  on `object-src 'none'` / `base-uri 'self'` / `form-action 'self'
+  mailto:` / COOP / CORP / `X-Permitted-Cross-Domain-Policies`.
+- `bookbed/` — Flutter SaaS app + Firebase Cloud Functions (TypeScript).
+  Firestore + Stripe LIVE + Resend + `firebase_ai` Gemini chat (`gemini-
+  2.5-flash-lite` in `ai_chat_provider.dart`). The real revenue surface.
+
+[`docs/bookbed-crossover.md`](docs/bookbed-crossover.md) is the
+**gap-analysis** that decides which LDS hardening patterns get ported to
+which BookBed surface, which are already covered there, and which don't
+apply. Three buckets: lead-gen specific (scrapers, agentic router,
+outreach scoring — **never port**), cross-applicable security
+(per-pattern table), CI workflow set (LDS has 19, bookbed-website has 1,
+bookbed has 3 — biggest gap). Every ✅ row in the gap table is
+file-verified (spot-checks listed in the appendix). Rows marked ⚠️/`?`
+are hypothesis-only — re-verify before porting.
+
+Phased action plan in that doc: **A** bookbed-website CI hardening
+(~1 day — port LDS's `ci.yml` + `security.yml` + `workflow-drift.yml` +
+dependabot, all action SHAs pinned with `# vX.Y.Z`) → **B** bookbed CF
+email CRLF guards on Resend (~4h — recipient regex with explicit
+CRLF reject, subject/from_name CRLF assert before MIME write) → **C**
+bookbed Flutter Gemini `<UNTRUSTED_DATA>` fence around user chat input
+(~1 day — currently flows raw to `_chatSession.sendMessageStream`,
+only static KB system instruction) → **D** backport newer headers from
+bookbed-website back to LDS (~30min) → **E** long tail (cost report,
+cold-start monitor, synthetic monitor, Firestore orphan sweep).
+
+**Phase 13 of the LDS roadmap was scoped to a dogfood-only cut on
+2026-05-22**: ship 13.14 (this crossover doc, **DONE**), then 13.1
+hr-HR i18n via `next-intl`, 13.3 demo seed + `is_demo` column, 13.5
+DKIM/SPF/DMARC for the sending domain, 13.4 email dispatch wiring
+`email_sender.py`, 13.15 two-week dogfood with real Croatian leads.
+The commercial items (Stripe billing, usage metering, multi-tenancy
+migration, public landing, signup, feedback widget, Plausible
+analytics) belong in the BookBed repos — see "Later (3–6 months) >
+[BookBed.io] Commercialization track" in
+[`docs/roadmap.md`](docs/roadmap.md) and the Phase A→E actions in the
+crossover doc above.
+
 # context-mode — MANDATORY routing rules
 
 You have context-mode MCP tools available. These rules are NOT optional — they protect your context window from flooding. A single unrouted command can dump 56 KB into context and waste the entire session.
