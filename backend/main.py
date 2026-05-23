@@ -1,4 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends, Security, HTTPException, Request
+import asyncio
+import base64
+import csv
+import io
+import json
+import zipfile
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends, Query, Security, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,10 +13,9 @@ import uvicorn
 import os
 import secrets
 import uuid
-import pandas as pd
 import aiofiles
-from datetime import datetime
-from typing import Literal, Optional, List
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Literal, Optional, List
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, conlist, constr
 from postgrest.exceptions import APIError
@@ -19,15 +24,119 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from src.utils.supabase_helper import SupabaseHelper
-from src.core.agentic_router import AgenticRouter
-from src.core.parallel_auditor import ParallelAuditor
-from src.core.task_orchestrator import TaskOrchestrator
-from src.scripts.export_leads import export_leads
-from src.utils.logging_config import setup_logging, get_logger
+# Cold-start budget on Render's free tier is tight (process is killed after
+# inactivity; first request triggers a fresh `python backend.main` import).
+# Heavy chains — pandas (~300ms), google.genai via AgenticRouter (~210ms),
+# playwright via TaskOrchestrator (~150ms), aiohttp via ParallelAuditor
+# (~140ms) — are deferred to the first request that actually needs them.
+# Liveness probe `GET /` and auth-key validation don't pull any of these,
+# so the wake-up handshake returns in ~module-init-only time.
+#
+# `pandas` is referenced in CSV ingest + /stats build + campaign export.
+# TYPE_CHECKING import keeps the type annotations meaningful for IDE /
+# mypy without paying the runtime import cost; quoted annotations below
+# (`"pd.DataFrame"`) ensure no eager resolution at class-definition time.
+if TYPE_CHECKING:
+    import pandas as pd  # noqa: F401 — used only for type hints
+from src.utils.logging_config import (
+    setup_logging,
+    get_logger,
+    bind_request_context,
+    clear_request_context,
+)
+from src.utils.stats_cache import stats_cache
 from fastapi.responses import FileResponse
 
+
+# ---------------------------------------------------------------------------
+# Lazy module-level singletons.
+#
+# `db`, `router`, `auditor`, `orchestrator` used to be eager top-level
+# instances:
+#     db = SupabaseHelper(); router = AgenticRouter(); ...
+# That fired the import chains for supabase / google.genai / playwright at
+# `import backend.main` time, blocking uvicorn's bind. Now they're resolved
+# lazily through module __getattr__ on first attribute access — the chain
+# fires only when the matching route handler runs. Result is cached back
+# into module globals so subsequent lookups hit the normal dict path with
+# zero overhead.
+#
+# Trade-off: the FIRST request that hits a path touching these (e.g. the
+# first /ask call) pays the full per-singleton import cost. All later
+# requests get the cached instance. Cold-start liveness probe doesn't pay
+# any of them.
+# ---------------------------------------------------------------------------
+def __getattr__(name: str):
+    if name == "db":
+        from src.utils.supabase_helper import SupabaseHelper
+        instance = SupabaseHelper()
+        globals()["db"] = instance
+        return instance
+    if name == "router":
+        from src.core.agentic_router import AgenticRouter
+        instance = AgenticRouter()
+        globals()["router"] = instance
+        return instance
+    if name == "auditor":
+        from src.core.parallel_auditor import ParallelAuditor
+        instance = ParallelAuditor()
+        globals()["auditor"] = instance
+        return instance
+    if name == "orchestrator":
+        from src.core.task_orchestrator import TaskOrchestrator
+        instance = TaskOrchestrator()
+        globals()["orchestrator"] = instance
+        return instance
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 logger = get_logger(__name__)
+
+# --- Sentry init (errors @ 100%, traces @ 10%; skipped if SENTRY_DSN unset) ---
+# Runs at module import time so failures during FastAPI construction +
+# lifespan get captured. RELEASE_SHA is baked into the image at build
+# time (Dockerfile ARG/ENV + deploy-backend.yml build-args) — required
+# for source-map / commit resolution of stack traces in Sentry.
+#
+# `before_send` scrubs our custom auth headers (X-API-Key, X-Admin-Token)
+# — Sentry's default scrubber only knows about Authorization / Cookie —
+# and drops /upload bodies (CSV PII from operator file uploads).
+load_dotenv()  # idempotent; makes SENTRY_DSN visible in dev (uvicorn doesn't auto-load .env)
+_SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+if _SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    _SCRUB_HEADERS = frozenset({"x-api-key", "x-admin-token", "authorization", "cookie"})
+
+    def _scrub_sensitive(event, hint):  # pragma: no cover — Sentry-only path
+        req = event.get("request") or {}
+        headers = req.get("headers") or {}
+        for k in list(headers.keys()):
+            if k.lower() in _SCRUB_HEADERS:
+                headers[k] = "[scrubbed]"
+        # /upload body is CSV — likely contains lead PII. Drop entirely.
+        if (req.get("url") or "").endswith("/upload"):
+            req.pop("data", None)
+        return event
+
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+        release=os.getenv("RELEASE_SHA", "unknown"),
+        sample_rate=1.0,         # capture every error
+        traces_sample_rate=0.1,  # 10% transaction sampling for perf
+        send_default_pii=False,
+        max_breadcrumbs=50,
+        before_send=_scrub_sensitive,
+        integrations=[StarletteIntegration(), FastApiIntegration()],
+    )
+    logger.info(
+        "Sentry initialized (release=%s, env=%s)",
+        os.getenv("RELEASE_SHA", "unknown"),
+        os.getenv("SENTRY_ENVIRONMENT", "production"),
+    )
+# --- end Sentry init ---
 
 # --- API Key Authentication ---
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -233,19 +342,46 @@ def _assert_single_tenant_if_enforced() -> None:
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Lead Data Scraper Backend Starting...")
+    # asyncio debug + slow_callback_duration was considered for catching
+    # blocked-loop callbacks at the kernel level. Rejected because it
+    # requires loop.set_debug(True), which has measurable runtime
+    # overhead in production. Use the per-handler timing middleware
+    # below (`_block_logger_middleware`) — same signal at the HTTP layer
+    # without the loop-wide debug penalty. Enable kernel-level debug
+    # only in dev via `PYTHONASYNCIODEBUG=1`.
     _assert_single_tenant_if_enforced()
+    # Prime the lazy `db` / `router` / `auditor` / `orchestrator` singletons
+    # by going through the module object (which triggers PEP 562
+    # `__getattr__` and caches the instances into `globals()`). Bare-name
+    # references inside functions use LOAD_GLOBAL bytecode, which does NOT
+    # consult module-level `__getattr__` — so without this priming step,
+    # every route handler's bare `db.client` / `router.execute_task` /
+    # etc. reference raises `NameError`, the global exception handler
+    # turns that into HTTP 500, and the dashboard's eager fetch-on-mount
+    # calls (leads / insights / orchestrator/active) all 5xx. Once these
+    # names land in globals here, subsequent handler references resolve
+    # via the normal globals lookup at zero cost. Each prime is wrapped
+    # so a partially-configured env (e.g. missing GEMINI_API_KEY) only
+    # disables the affected feature instead of bricking the whole API.
+    import sys as _sys
+    _self = _sys.modules[__name__]
+    for _lazy_name in ("db", "router", "auditor", "orchestrator"):
+        try:
+            getattr(_self, _lazy_name)
+        except Exception as exc:
+            logger.warning("Lazy global %s could not initialize: %s", _lazy_name, exc)
     try:
-        missing = db.check_schema()
+        missing = _self.db.check_schema()
         if missing:
             logger.warning("DATABASE SCHEMA MISMATCH: Missing columns: %s", missing)
             logger.warning("Attempting automatic migration...")
-            migrated = db.auto_migrate(missing)
+            migrated = _self.db.auto_migrate(missing)
             if migrated:
                 logger.info("Migration successful - columns added.")
             else:
                 logger.warning("Auto-migration failed. Run this SQL manually in Supabase SQL Editor:")
                 logger.warning("   ALTER TABLE leads %s;", ', '.join([f'ADD COLUMN IF NOT EXISTS {col} TEXT' for col in missing]))
-        await orchestrator.recover_interrupted_jobs()
+        await _self.orchestrator.recover_interrupted_jobs()
         if not missing:
             logger.info("Database schema is up to date.")
     except Exception as e:
@@ -260,10 +396,9 @@ app = FastAPI(
     redoc_url="/redoc" if _docs_enabled else None,
     openapi_url="/openapi.json" if _docs_enabled else None,
 )
-db = SupabaseHelper()
-router = AgenticRouter()
-auditor = ParallelAuditor()
-orchestrator = TaskOrchestrator()
+# `db`, `router`, `auditor`, `orchestrator` resolved lazily via module
+# __getattr__ above. Don't re-introduce eager construction here — it
+# silently re-enables the cold-start import storm.
 
 # --- Rate limiting ---
 # Trust X-Forwarded-For only when the request carries a valid API key. The Next.js
@@ -292,6 +427,20 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.exception_handler(Exception)
 async def _json_exception_handler(request: Request, exc: Exception):
     """Ensure all uncaught exceptions return JSON, not plain-text 500 (browser clients call .json())."""
+    # `RecursionError` fires when an attacker posts a JSON body with
+    # deeper nesting than Python's recursion limit (~1000). That's a
+    # parser-level DoS, not a server fault — surface as 413 so the
+    # operator can distinguish it in logs from a genuine handler crash.
+    # tests/test_json_pollution.py::TestDeeplyNestedJSON locks this in.
+    if isinstance(exc, RecursionError):
+        logger.warning(
+            "Recursion limit hit on %s %s — likely deep-JSON payload",
+            request.method, request.url.path,
+        )
+        return JSONResponse(
+            content={"error": "Payload nesting too deep"},
+            status_code=413,
+        )
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(content={"error": "Internal server error"}, status_code=500)
 
@@ -313,7 +462,30 @@ async def _validation_with_authz_check(request: Request, exc: RequestValidationE
     provided = request.headers.get("x-api-key") or ""
     if not expected or not provided or not secrets.compare_digest(provided, expected):
         return JSONResponse({"detail": "Invalid or missing API key"}, status_code=403)
-    return JSONResponse({"detail": exc.errors()}, status_code=422)
+    # `exc.errors()` embeds the offending value under `input`. Two
+    # failure modes the test suite catches:
+    #   (a) `NaN` / `Infinity` floats — stdlib `json.loads` accepts them
+    #       but `json.dumps` rejects, crashing the 422 handler → 500.
+    #   (b) Deep nested payloads — a recursive walk to scrub bad floats
+    #       blows Python's recursion limit on the same input that
+    #       triggered the validation error.
+    # Stringify `input` (with length cap) instead of walking it.
+    # `default=str` covers NaN/Inf; `allow_nan=False` keeps strict JSON.
+    safe_errors = []
+    for err in exc.errors():
+        out = dict(err)
+        if "input" in out:
+            try:
+                rendered = json.dumps(
+                    out["input"], default=str, allow_nan=False,
+                )
+            except (ValueError, TypeError, RecursionError):
+                rendered = "<unserializable>"
+            # Bound the echo so a 1000-deep payload doesn't roundtrip
+            # back to the client in the error response.
+            out["input"] = rendered[:512]
+        safe_errors.append(out)
+    return JSONResponse({"detail": safe_errors}, status_code=422)
 
 # Configure CORS — explicit origins only. Wildcards are rejected.
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
@@ -340,21 +512,264 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Admin-Token"],
 )
 
+
+# Per-request context middleware: generates (or honours) X-Request-ID
+# for every request, binds it (plus user + route) to the logging
+# contextvars so every log line within the handler carries the same
+# ID, and propagates the ID on the response for downstream correlation.
+#
+# Inbound `X-Request-ID` is HONOURED when alphanumeric + `-` / `_`,
+# 1-64 chars. Anything else (missing, oversized, with control chars)
+# is replaced with a fresh `uuid.uuid4().hex` — 32 hex chars, no
+# dashes for shorter grep lines.
+#
+# `X-Operator-Email` is read if the proxy ever populates it. The Next.js
+# proxy validates the Supabase Auth session and could forward the
+# operator email; today it doesn't, so `user_id` in the log envelope
+# stays null. Wiring the forward is a future patch — when it lands,
+# this middleware picks it up automatically.
+#
+# Sentry tag: when Sentry is initialized (`_SENTRY_DSN` truthy),
+# `request_id` and `user.email` are pinned on the per-request Sentry
+# scope. Events captured during the request are filterable in Sentry's
+# UI by `tag:request_id:<rid>`.
+#
+# Declared BEFORE `_block_logger_middleware` so it runs FIRST on inbound
+# (Starlette's middleware stack: first-registered = outermost). The
+# block logger's slow-handler log line then includes request_id +
+# duration_ms as structured fields.
+#
+# ContextVar lifetime note: we DO NOT call clear_request_context() in a
+# finally here. Each request runs in its own asyncio Task (uvicorn spawns
+# one per HTTP connection), and ContextVar bindings are scoped to the
+# task's Context — they're GC'd cleanly when the task ends. Clearing
+# eagerly would break StreamingResponse: `call_next` returns when the
+# response *object* is built; the body iterator runs *later* in the same
+# task, so any log line emitted inside `_stream_leads_csv` would lose
+# request_id if we'd already reset. The bind_request_context /
+# clear_request_context pair remains exported for background tasks where
+# the caller controls lifetime (e.g. orchestrator chunks rotating
+# through synthetic job_id-derived IDs).
+@app.middleware("http")
+async def _request_context_middleware(request: Request, call_next):
+    incoming = request.headers.get("x-request-id", "")
+    if 1 <= len(incoming) <= 64 and all(
+        c.isalnum() or c in "-_" for c in incoming
+    ):
+        rid = incoming
+    else:
+        rid = uuid.uuid4().hex  # 32 hex chars; no dashes for tighter grep
+    operator_email = request.headers.get("x-operator-email") or None
+    route_path = request.url.path
+
+    bind_request_context(rid, operator_email, route_path)
+    if _SENTRY_DSN:
+        # `sentry_sdk` is imported at module load inside the
+        # `if _SENTRY_DSN:` init block, so the name is bound here.
+        # FastApiIntegration creates a per-request scope; set_tag /
+        # set_user attach to it for any event captured this request.
+        sentry_sdk.set_tag("request_id", rid)
+        if operator_email:
+            sentry_sdk.set_user({"email": operator_email})
+    response = await call_next(request)
+    response.headers["x-request-id"] = rid
+    return response
+
+
+# Block-detector middleware: times every request and logs WARN when a
+# single handler holds the loop for > SLOW_HANDLER_THRESHOLD_MS. Catches
+# sync calls sneaking into async paths — same class of bug Locust 4.1
+# surfaced (sync supabase-py underneath an async def stalls the loop).
+# Threshold defaults to 100 ms; override per-deployment via env var.
+#
+# `time.perf_counter()` is monotonic and not subject to NTP correction;
+# safe for short-interval wall-clock measurement. The middleware runs
+# inside the same task as the handler — total includes the handler's
+# `await` time, NOT just the synchronous CPU it spent. That's the right
+# signal for "did this request block the loop": if a coroutine spends
+# 500 ms awaiting Gemini, that doesn't block the loop (other tasks
+# interleave) and the log is informational; if it spends 500 ms on a
+# sync .execute(), the loop is wedged and the log is the bug report.
+#
+# Storage: log only. A future iteration could collect into an in-process
+# top-K (e.g. heapq of slowest path:duration) so /metrics can emit a
+# rolling summary; out of scope here.
+import time as _time
+
+SLOW_HANDLER_THRESHOLD_MS = float(os.getenv("SLOW_HANDLER_THRESHOLD_MS", "100"))
+
+
+@app.middleware("http")
+async def _block_logger_middleware(request: Request, call_next):
+    start = _time.perf_counter()
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        elapsed_ms = (_time.perf_counter() - start) * 1000.0
+        if elapsed_ms >= SLOW_HANDLER_THRESHOLD_MS:
+            # Structured extras so JsonFormatter writes duration_ms +
+            # method + path as top-level envelope fields — greppable
+            # and queryable in Logtail/Loki. Path only — query string
+            # may contain user input we don't want in logs (filter
+            # values, cursor tokens, etc.). request_id + route ride
+            # along via the contextvars set by
+            # `_request_context_middleware`.
+            logger.warning(
+                "slow handler",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "duration_ms": round(elapsed_ms, 2),
+                    "threshold_ms": SLOW_HANDLER_THRESHOLD_MS,
+                },
+            )
+
+
 @app.get("/")
 async def root():
     """Unauthenticated liveness probe. Intentionally returns no product /
     version metadata — anything richer is a free fingerprint for attackers."""
     return {"status": "ok"}
 
+
+# --- Sentry verification endpoint ---
+# Hidden behind SENTRY_TEST_ENABLED=1; returns 404 otherwise so the path
+# isn't a useful DoS surface in normal operation. Operator workflow:
+#   1. Set SENTRY_TEST_ENABLED=1 in Render env, redeploy (or set locally
+#      and restart uvicorn).
+#   2. Curl `POST /_sentry/test` with X-API-Key.
+#   3. Confirm the error lands in Sentry within ~60s.
+#   4. Unset SENTRY_TEST_ENABLED and redeploy.
+@app.post("/_sentry/test", dependencies=[Depends(verify_api_key)])
+@limiter.limit("5/minute")
+async def sentry_test(request: Request):
+    if os.getenv("SENTRY_TEST_ENABLED", "").lower() not in ("1", "true", "yes"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    raise RuntimeError(
+        "Sentry verification test triggered — if you see this in Sentry, "
+        "the integration works."
+    )
+
+
+# Real User Monitoring (web-vitals) ingestion. The browser ships per-page
+# CLS / INP / LCP / TTFB via navigator.sendBeacon to /api/proxy/metrics →
+# (proxy) → this endpoint. Logged as structured WARN/INFO lines so a
+# downstream log aggregator can compute p50/p75/p95 without us building
+# a TSDB. No DB write — keeps the request path cheap and avoids polluting
+# the leads schema. Rate-limited heavily because beacons are public-ish
+# (the only auth gate is the in-app session, but the proxy validates that).
+class WebVitalsMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # web-vitals v3 reports name in {CLS, INP, LCP, FID, FCP, TTFB}.
+    name: Literal["CLS", "INP", "LCP", "FID", "FCP", "TTFB"]
+    # Value is unitless in CLS, ms in others. Bound generously to reject
+    # clearly-garbage submissions while still catching 30s LCP outliers.
+    value: float = Field(ge=0.0, le=600_000.0)
+    # Rating is web-vitals' own qualitative bucket.
+    rating: Literal["good", "needs-improvement", "poor"]
+    # Page route the measurement was taken on. Bounded so a hostile beacon
+    # can't dump 1 MB into the log. Stripped of query/hash on the client.
+    path: constr(min_length=1, max_length=200)
+    # Client-generated unique id per page-load — useful for stitching
+    # multiple beacons from the same nav into one trace. 64 chars max.
+    id: constr(min_length=1, max_length=64)
+
+
+@app.post("/metrics", dependencies=[Depends(verify_api_key)])
+@limiter.limit("60/minute")
+async def submit_web_vitals(request: Request, metric: WebVitalsMetric):
+    """Web-vitals beacon sink. Logs structured per-metric lines.
+
+    Logged at INFO for "good" ratings, WARN for "needs-improvement" /
+    "poor" so a grep over the log file (or any log aggregator) surfaces
+    real user regressions without per-metric thresholds in code. Hourly
+    p50/p75/p95 lives in the log aggregator, not here.
+    """
+    level = logger.info if metric.rating == "good" else logger.warning
+    level(
+        "web-vital %s=%.1f rating=%s path=%s id=%s",
+        metric.name,
+        metric.value,
+        metric.rating,
+        metric.path,
+        metric.id,
+    )
+    return {"ok": True}
+
+# Opaque cursor for /leads keyset pagination. Encodes the page-boundary
+# (created_at, unique_key) tuple so successive pages keyset-scan rather
+# than OFFSET — required to keep p95 flat as the table grows. Tie-break on
+# unique_key is rare in practice (microsecond created_at) but eliminates
+# the off-by-one on identical timestamps that pure created_at cursors
+# silently lose.
+_CURSOR_KEY_MAX = 128  # match leads.unique_key column bound
+
+
+def _encode_lead_cursor(created_at: str, unique_key: str) -> str:
+    payload = json.dumps({"c": created_at, "k": unique_key}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def _decode_lead_cursor(cursor: str) -> Optional[dict]:
+    """Decode an opaque cursor. Returns None on any malformed input —
+    callers MUST treat a None decode as 'start from first page' and not
+    leak the parse error to clients. Bounds the decoded payload so a
+    hostile cursor can't feed a 10 MB string into a PostgREST filter."""
+    try:
+        # Reject obviously huge cursors before base64 decoding to bound CPU.
+        if not cursor or len(cursor) > 512:
+            return None
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        if len(raw) > 512:
+            return None
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return None
+        c = data.get("c")
+        k = data.get("k")
+        if not isinstance(c, str) or not isinstance(k, str):
+            return None
+        if len(c) > 64 or len(k) > _CURSOR_KEY_MAX:
+            return None
+        # ISO timestamp sanity check — parse will reject garbage.
+        datetime.fromisoformat(c.replace("Z", "+00:00"))
+        return {"c": c, "k": k}
+    except Exception:  # noqa: BLE001 — any failure means malformed input
+        return None
+
+
 @app.get("/leads", dependencies=[Depends(verify_api_key)])
 @limiter.limit("30/minute")
-async def list_leads(request: Request):
-    """Retrieve all leads from the database ordered by creation date."""
+async def list_leads(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200, description="Page size, 1..200"),
+    cursor: Optional[str] = Query(default=None, max_length=512, description="Opaque cursor from previous page's next_cursor"),
+):
+    """Retrieve a page of leads ordered by created_at DESC.
+
+    Backwards-compatible default: no params → first page (50 rows).
+    Returns {leads, next_cursor, has_more}; next_cursor is null on the
+    final page. has_more is the authoritative end-of-stream signal —
+    next_cursor==null is sufficient but the dedicated boolean avoids
+    clients re-querying just to confirm.
+    """
     try:
         if not db.client:
             return error_response("Database not connected", status_code=503)
-        response = db.client.table("leads").select("*").order("created_at", desc=True).limit(200).execute()
-        return {"leads": response.data}
+        decoded = _decode_lead_cursor(cursor) if cursor else None
+        # Fetch limit+1 to detect has_more without an extra round-trip.
+        rows = await db.list_leads_recent(limit=limit + 1, cursor=decoded)
+        has_more = len(rows) > limit
+        page = rows[:limit]
+        next_cursor = None
+        if has_more and page:
+            tail = page[-1]
+            ts = tail.get("created_at")
+            uk = tail.get("unique_key")
+            if isinstance(ts, str) and isinstance(uk, str):
+                next_cursor = _encode_lead_cursor(ts, uk)
+        return {"leads": page, "next_cursor": next_cursor, "has_more": has_more}
     except APIError as e:
         logger.error("Database API Error fetching leads: %s", e, exc_info=True)
         return error_response("Failed to fetch leads from database", status_code=502)
@@ -417,13 +832,13 @@ async def upload_leads(request: Request, background_tasks: BackgroundTasks, file
     return {"filename": file.filename, "status": "processing", "message": "Leads are being imported in the background."}
 
 
-def _load_and_standardize_csv(temp_path: str) -> pd.DataFrame:
+def _load_and_standardize_csv(temp_path: str) -> "pd.DataFrame":
     from src.utils.csv_helper import load_csv_with_unique_key
     df = load_csv_with_unique_key(temp_path)
     df.columns = [col.lower().replace(" ", "_") for col in df.columns]
     return df
 
-def _apply_ai_mapping(df: pd.DataFrame) -> pd.DataFrame:
+def _apply_ai_mapping(df: "pd.DataFrame") -> "pd.DataFrame":
     """Rename CSV columns to the canonical lead schema using GeminiMapper.
 
     Guards against two failure modes that the BUGS.md Round 4 E2E surfaced:
@@ -455,11 +870,12 @@ def _apply_ai_mapping(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _coalesce_duplicate_columns(df: "pd.DataFrame") -> "pd.DataFrame":
     """For each duplicate column name, merge the columns by taking the
     first non-null value per row (left-to-right via `bfill` across the
     duplicate group). Returns a frame with unique column names. Logs the
     coalesced names for observability."""
+    import pandas as pd
     if not df.columns.duplicated().any():
         return df
     dup_names = df.columns[df.columns.duplicated()].unique().tolist()
@@ -478,7 +894,7 @@ def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
             result[name] = block.bfill(axis=1).iloc[:, 0]
     return pd.DataFrame(result)
 
-def _filter_valid_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _filter_valid_columns(df: "pd.DataFrame") -> "pd.DataFrame":
     valid_cols = [
         "unique_key", "name", "company_name", "website", "email", "phone", "address",
         "rating", "reviews", "lead_source", "audit_status", "audit_results",
@@ -490,7 +906,7 @@ def _filter_valid_columns(df: pd.DataFrame) -> pd.DataFrame:
     ]
     return df[[col for col in df.columns if col in valid_cols]]
 
-def _upsert_leads_to_db(df: pd.DataFrame) -> int:
+def _upsert_leads_to_db(df: "pd.DataFrame") -> int:
     """Upsert the dataframe; returns the actual row count Postgres acknowledged.
 
     The previous implementation returned `len(leads_dict)` regardless of
@@ -498,6 +914,7 @@ def _upsert_leads_to_db(df: pd.DataFrame) -> int:
     swallowed inside `upsert_leads` looked identical to a successful insert
     in the upload-handler log. Inspect the return value here instead.
     """
+    import pandas as pd
     leads_dict = df.to_dict('records')
     # Clean up NaN for JSON serialization
     leads_dict = [{k: (None if pd.isna(v) else v) for k, v in lead.items()} for lead in leads_dict]
@@ -530,6 +947,9 @@ def process_csv_background(temp_path: str):
             )
         else:
             logger.info("Successfully processed and upserted %d leads.", upserted_count)
+            # Lead counts and source mix just changed — drop the cached
+            # /stats payload so the next request sees the new totals.
+            stats_cache.invalidate()
     except Exception as e:
         logger.error("Error processing upload: %s", e, exc_info=True)
     finally:
@@ -594,6 +1014,7 @@ async def health_schema(request: Request):
     missing = db.check_schema()
     return {
         "status": "healthy" if not missing else "degraded",
+        "drift": bool(missing),
         "missing_columns_count": len(missing),
     }
 
@@ -657,50 +1078,67 @@ async def get_insights(request: Request):
         logger.error("Error getting insights: %s", e, exc_info=True)
         return error_response("Insights currently unavailable")
 
+async def _compute_stats() -> dict:
+    """Build the /stats response from scratch.
+
+    Pulled out of the handler so `stats_cache.get(_compute_stats)` can
+    memoize the result and skip the pandas DataFrame allocation on
+    cache-hit requests. Returns the same dict shape /stats returns;
+    callers must NOT mutate the result (it may be shared across
+    in-flight requests via the cache).
+    """
+    import pandas as pd
+    leads = await db.get_stats_rows()
+
+    if not leads:
+        return {
+            "total_leads": 0,
+            "audit_status_distribution": [],
+            "seo_score_ranges": [],
+            "source_distribution": [],
+        }
+
+    df = pd.DataFrame(leads)
+
+    # 1. Audit Status Distribution
+    status_dist = df['audit_status'].value_counts().to_dict()
+    status_list = [{"name": k, "value": int(v)} for k, v in status_dist.items()]
+
+    # 2. SEO Score Ranges (None/NaN coerced + dropped)
+    scores = pd.to_numeric(df['seo_score'], errors='coerce').dropna()
+    score_bins = [0, 20, 40, 60, 80, 100]
+    score_labels = ["0-20", "21-40", "41-60", "61-80", "81-100"]
+    score_ranges = pd.cut(scores, bins=score_bins, labels=score_labels).value_counts().to_dict()
+    score_list = [{"range": k, "count": int(v)} for k, v in score_ranges.items()]
+
+    # 3. Source Distribution (top 5)
+    source_dist = df['lead_source'].fillna('Unknown').value_counts().head(5).to_dict()
+    source_list = [{"name": k, "value": int(v)} for k, v in source_dist.items()]
+
+    return {
+        "total_leads": len(df),
+        "audit_status_distribution": status_list,
+        "seo_score_ranges": score_list,
+        "source_distribution": source_list,
+    }
+
+
 @app.get("/stats", dependencies=[Depends(verify_api_key)])
 @limiter.limit("30/minute")
 async def get_stats(request: Request):
-    """Retrieve structured statistics about leads for charting."""
+    """Retrieve structured statistics about leads for charting.
+
+    Result is memoized for `stats_cache.ttl_seconds` (default 60s).
+    Write paths (/upload completion, orchestrator job finish) call
+    `stats_cache.invalidate()` so the next /stats sees fresh numbers.
+    A stampede lock inside `stats_cache.get` guarantees N concurrent
+    /stats at expiry only run the DataFrame build once.
+    """
     try:
         if not db.client:
             return error_response("Database not connected", status_code=503)
-
-        # 1. Fetch relevant columns for all leads (limit to 1000 for stats)
-        response = db.client.table("leads").select("audit_status", "audit_results", "seo_score", "lead_source").execute()
-        leads = response.data
-
-        if not leads:
-            return {
-                "total_leads": 0,
-                "audit_status_distribution": [],
-                "seo_score_ranges": [],
-                "source_distribution": []
-            }
-
-        df = pd.DataFrame(leads)
-
-        # 2. Audit Status Distribution
-        status_dist = df['audit_status'].value_counts().to_dict()
-        status_list = [{"name": k, "value": int(v)} for k, v in status_dist.items()]
-
-        # 3. SEO Score Ranges
-        # Handle potential None/NaN in seo_score
-        scores = pd.to_numeric(df['seo_score'], errors='coerce').dropna()
-        score_bins = [0, 20, 40, 60, 80, 100]
-        score_labels = ["0-20", "21-40", "41-60", "61-80", "81-100"]
-        score_ranges = pd.cut(scores, bins=score_bins, labels=score_labels).value_counts().to_dict()
-        score_list = [{"range": k, "count": int(v)} for k, v in score_ranges.items()]
-
-        # 4. Source Distribution
-        source_dist = df['lead_source'].fillna('Unknown').value_counts().head(5).to_dict()
-        source_list = [{"name": k, "value": int(v)} for k, v in source_dist.items()]
-
-        return {
-            "total_leads": len(df),
-            "audit_status_distribution": status_list,
-            "seo_score_ranges": score_list,
-            "source_distribution": source_list
-        }
+        payload = await stats_cache.get(_compute_stats)
+        return payload
     except Exception as e:
         logger.error("Error fetching stats: %s", e, exc_info=True)
         return error_response("Failed to fetch stats")
@@ -781,6 +1219,145 @@ async def clear_leads(request: Request):
     logger.warning("DESTRUCTIVE: /leads/clear invoked — all leads + jobs wiped.")
     return {"status": "cleared", "message": "All leads and jobs have been deleted."}
 
+
+# -----------------------------------------------------------------------------
+# GDPR Article 17 (right to erasure).
+#
+# DELETE /operator/account wipes the entire dataset tied to the operator's
+# account. Defense gating, top to bottom:
+#   1. X-API-Key                 (every authed endpoint)
+#   2. X-Admin-Token             (same gate as /leads/clear)
+#   3. Pydantic Literal confirm  (exact "DELETE MY ACCOUNT" phrase — wrong
+#                                  value = 422 BEFORE the handler runs)
+#   4. Rate limit                (1/hour, peer-IP keyed; XFF spoof can't
+#                                  unlock unlimited deletes)
+#
+# Audit row is written to `account_deletions` BEFORE the destructive
+# operation — partial-failure paths still leave a trace. 30-day retention
+# for fraud / contested-deletion windows; purged by
+# `src/scripts/purge_expired_audit_log.py` (wired in security.yml daily).
+#
+# Documented in docs/legal/privacy-policy.md §retention.
+# -----------------------------------------------------------------------------
+class AccountDeletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Literal pins the exact confirmation phrase. Any other value (typo,
+    # different casing, attempted bypass) returns 422 via Pydantic
+    # before the handler executes — the destructive step never runs.
+    confirmation: Literal["DELETE MY ACCOUNT"]
+
+
+# Sentinels used to filter "delete every row" — PostgREST requires a
+# WHERE clause on DELETE for safety. A UUID that never appears in
+# practice + a string that never appears in `unique_key` keep the
+# filter trivially true for every real row.
+#
+# Footgun caveat: a row whose `id` IS the all-zero UUID (or a lead whose
+# `unique_key` matches the sentinel string) would escape the wipe.
+# `gen_random_uuid()` produces all-zero with probability ~2^-122 — so
+# astronomically unlikely in normal operation, but a test fixture that
+# explicitly seeds the sentinel value could trip it. If we ever need
+# a stronger guarantee (e.g. compliance attestation that DELETE truly
+# touches every row), swap to `.gte("created_at", "1970-01-01")` — a
+# predicate that matches every row whose timestamp is sane.
+_NEVER_UUID = "00000000-0000-0000-0000-000000000000"
+_NEVER_UNIQUE_KEY = "__sentinel_never_a_real_unique_key__"
+
+
+@app.delete(
+    "/operator/account",
+    dependencies=[Depends(verify_api_key), Depends(verify_admin_token)],
+)
+@limiter.limit("1/hour", key_func=get_remote_address)
+async def delete_operator_account(request: Request, payload: AccountDeletionRequest):
+    """GDPR Article 17 (right to erasure). Hard-deletes every row tied to
+    the operator's account: `leads`, `campaigns`, `campaign_messages`,
+    `orchestration_jobs`. Single-operator semantics (ADR-001) — the
+    entire dataset belongs to the operator, so the wipe is unconditional.
+
+    Pre-deletion row counts are snapshotted into an `account_deletions`
+    audit row (30-day retention, then purged) so a contested deletion
+    can be traced to: when, by whom (`OPERATOR_EMAIL` env), from where
+    (`remote_ip`), and what was wiped.
+
+    Response payload includes the `audit_id` + `audit_expires_at` so the
+    operator can reference the audit row during the 30-day window.
+    """
+    if not db.client:
+        return error_response("Database unavailable.", 503)
+
+    operator_email = (os.getenv("OPERATOR_EMAIL", "") or "").strip() or None
+    now = datetime.now(timezone.utc)
+
+    def _iso(dt: datetime) -> str:
+        return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    def _count(table_name: str, key_col: str) -> int:
+        try:
+            r = db.client.table(table_name).select(key_col, count="exact").execute()
+            return int(getattr(r, "count", None) or 0)
+        except Exception as e:
+            # Counts are best-effort context for the audit log; a partial
+            # count is better than failing the whole flow on a transient
+            # error. The actual deletion still runs.
+            logger.warning("Could not count %s: %s", table_name, e)
+            return 0
+
+    row_counts = {
+        "leads": await asyncio.to_thread(_count, "leads", "unique_key"),
+        "campaigns": await asyncio.to_thread(_count, "campaigns", "id"),
+        "campaign_messages": await asyncio.to_thread(_count, "campaign_messages", "id"),
+        "orchestration_jobs": await asyncio.to_thread(_count, "orchestration_jobs", "id"),
+    }
+
+    audit_id = str(uuid.uuid4())
+    audit_entry = {
+        "id": audit_id,
+        "deleted_at": _iso(now),
+        "operator_email": operator_email,
+        "remote_ip": get_remote_address(request),
+        "row_counts": row_counts,
+        "expires_at": _iso(now + timedelta(days=30)),
+    }
+
+    def _write_audit() -> None:
+        db.client.table("account_deletions").insert(audit_entry).execute()
+
+    try:
+        await asyncio.to_thread(_write_audit)
+    except Exception as e:
+        logger.error("Account deletion ABORTED — audit log write failed: %s", e)
+        return error_response(
+            "Audit log write failed; deletion aborted (no rows removed).",
+            503,
+        )
+
+    # Delete in FK dependency order. campaign_messages → campaigns avoids
+    # CASCADE rollback surprises; orchestration_jobs has no FK out;
+    # leads is last (lead_unique_key in campaign_messages already gone
+    # by the time we touch leads).
+    def _delete_all(table_name: str, key_col: str, sentinel: str) -> None:
+        db.client.table(table_name).delete().neq(key_col, sentinel).execute()
+
+    await asyncio.to_thread(_delete_all, "campaign_messages", "id", _NEVER_UUID)
+    await asyncio.to_thread(_delete_all, "campaigns", "id", _NEVER_UUID)
+    await asyncio.to_thread(_delete_all, "orchestration_jobs", "id", _NEVER_UUID)
+    await asyncio.to_thread(_delete_all, "leads", "unique_key", _NEVER_UNIQUE_KEY)
+
+    logger.warning(
+        "DESTRUCTIVE: /operator/account invoked — full wipe. "
+        "audit_id=%s row_counts=%s remote_ip=%s operator=%s",
+        audit_id, row_counts, audit_entry["remote_ip"], operator_email,
+    )
+
+    return {
+        "status": "deleted",
+        "audit_id": audit_id,
+        "row_counts_deleted": row_counts,
+        "audit_retention_days": 30,
+        "audit_expires_at": audit_entry["expires_at"],
+    }
+
 @app.post("/orchestrator/start", dependencies=[Depends(verify_api_key)])
 @limiter.limit("3/minute")
 async def start_massive_pipeline(request: Request, payload: PipelineRequest):
@@ -797,6 +1374,188 @@ async def get_job_status(request: Request, job_id: str):
     status = await orchestrator.get_job_status(job_id)
     return status
 
+@app.get("/orchestrator/active", dependencies=[Depends(verify_api_key)])
+@limiter.limit("60/minute")
+async def get_active_job(request: Request):
+    """Return the most recent running/starting orchestration job, or null.
+    Lets a second tab see a job started by another tab — process-local
+    state in ParallelAuditor is not shared across workers, so the
+    authoritative signal is the orchestration_jobs row."""
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
+    resp = (
+        db.client.table("orchestration_jobs")
+        .select("*")
+        .in_("status", ["starting", "running"])
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return {"job": resp.data[0] if resp.data else None}
+
+def _rows_to_sanitized_csv(rows: list) -> str:
+    """Convert a list of dict rows to a CSV string. Uses csv.DictWriter
+    with QUOTE_MINIMAL (auto-quotes cells with delimiter / quote / CR /
+    LF so embedded newlines in a lead name don't corrupt the row).
+    Applies the same CSV-injection guard as every other export site —
+    `sanitize_csv_cell` prefixes formula-trigger chars (`= @ + - \\t \\r`)
+    with `'`. JSON / dict cells are flattened via `json.dumps` first so
+    they don't end up as Python `repr` blobs in the CSV.
+
+    Column order is the union of all keys in insertion order of first
+    occurrence — but downstream tooling SHOULD consume by header name,
+    not column index, because schema drift across rows is possible and
+    the column ordering is an implementation detail, not a contract.
+
+    Empty rows list → empty string (zero-byte CSV file in the ZIP).
+    The authoritative "table was empty vs export was corrupted" marker
+    is ``audit_log.json``'s ``row_counts`` field — a zero-byte CSV
+    paired with ``row_counts.leads == 0`` is a healthy empty-table
+    export; a zero-byte CSV paired with a non-zero row count is a
+    corruption signal."""
+    if not rows:
+        return ""
+    from src.utils.csv_helper import sanitize_csv_cell
+
+    columns: list = []
+    seen: set = set()
+    for r in rows:
+        for k in r.keys():
+            if k not in seen:
+                columns.append(k)
+                seen.add(k)
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        out_row = {}
+        for col in columns:
+            v = r.get(col)
+            if isinstance(v, (dict, list)):
+                v = json.dumps(v, default=str, ensure_ascii=False)
+            out_row[col] = sanitize_csv_cell(v)
+        writer.writerow(out_row)
+    return buf.getvalue()
+
+
+@app.get("/operator/data-export", dependencies=[Depends(verify_api_key)])
+# 1/day is the operator's data-loss-prevention budget (GDPR DSAR is a
+# per-day event). Pinning the rate-limit key to the TCP peer IP (NOT
+# the XFF-honoring `_rate_limit_key` used elsewhere) closes a
+# theoretical bypass: a caller with the API key could otherwise rotate
+# `X-Forwarded-For` per request to unlock unlimited exports if the
+# Render backend's public URL is reachable directly. `get_remote_address`
+# returns the immediate-peer IP, which only the proxy (or whoever is
+# directly hitting Render) can vary by establishing a new TCP
+# connection from a different source — much harder than rotating a
+# header on the same socket.
+@limiter.limit("1/day", key_func=get_remote_address)
+async def operator_data_export(request: Request):
+    """GDPR Article 20 (data portability) + Article 15 (right of access).
+
+    Returns a ZIP archive of every row tied to the operator's account:
+
+      - ``leads.csv``           — full `leads` table dump
+      - ``campaigns.csv``       — full `campaigns` table dump
+      - ``messages.csv``        — full `campaign_messages` table dump
+      - ``audit_log.json``      — `orchestration_jobs` history wrapped
+                                  with export metadata (timestamp,
+                                  operator email from ``OPERATOR_EMAIL``,
+                                  schema version, row counts)
+
+    Single-operator semantics (`ADR-001 <docs/adr/001-single-tenant-by-design.md>`):
+    the entire dataset belongs to the operator, so the export is
+    unconditional — no ``owner_user_id`` filter applies. The
+    OPERATOR_EMAIL env var (when set) is stamped into the audit_log
+    metadata as the data subject identifier.
+
+    Every string cell across the 3 CSV files goes through
+    ``sanitize_csv_cell`` (formula-injection guard) — defense in depth
+    even though this export is the operator opening their own data, not
+    sharing with attackers.
+
+    Rate limit: **1 per day per rate-limit-key** (the proxy's trusted
+    X-Forwarded-For, falling back to peer IP when X-API-Key absent).
+    Crossed because a GDPR DSAR is a per-day action, not a per-hour one;
+    1/day prevents accidental loop-script abuse while staying generous
+    enough that a stuck download can be retried within minutes (the
+    `_reset_rate_limiter` test fixture clears state between tests so
+    the suite isn't artificially throttled).
+
+    Memory: in-process BytesIO ZIP. Bounded by total DB size; the
+    single-operator scale (1000s of leads, 100s of campaigns) fits
+    comfortably. If volume crosses ~50 MB, swap to ``zipstream-ng`` for
+    streaming-mode ZIP generation — same endpoint shape, different
+    body iterator.
+    """
+    if not db.client:
+        return error_response("Database unavailable.", 503)
+
+    # Local import matches existing /export/download + /export/outreach
+    # pattern — keeps StreamingResponse out of the module-init cost.
+    from fastapi.responses import StreamingResponse
+
+    operator_email = (os.getenv("OPERATOR_EMAIL", "") or "").strip() or None
+
+    # Fetch all four tables. Sync supabase-py calls hop to a thread so
+    # the event loop stays unblocked while ZIP construction runs.
+    def _fetch_all(table_name: str) -> list:
+        result = db.client.table(table_name).select("*").order("created_at").execute()
+        return list(getattr(result, "data", None) or [])
+
+    leads_rows = await asyncio.to_thread(_fetch_all, "leads")
+    campaigns_rows = await asyncio.to_thread(_fetch_all, "campaigns")
+    messages_rows = await asyncio.to_thread(_fetch_all, "campaign_messages")
+    jobs_rows = await asyncio.to_thread(_fetch_all, "orchestration_jobs")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("leads.csv", _rows_to_sanitized_csv(leads_rows))
+        zf.writestr("campaigns.csv", _rows_to_sanitized_csv(campaigns_rows))
+        zf.writestr("messages.csv", _rows_to_sanitized_csv(messages_rows))
+
+        # `orchestration_jobs` IS the operator-action audit trail — every
+        # audit / hunt / discovery / enrich / pipeline run wrote a row.
+        # Wrap with metadata so the exported ZIP is self-describing
+        # (operator email, schema version for forward-compat, row
+        # counts so an import-side tool can sanity-check the parse).
+        audit_payload = {
+            "export_timestamp": datetime.now(timezone.utc)
+                .isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "operator_email": operator_email,
+            "schema_version": "1.0",
+            "row_counts": {
+                "leads": len(leads_rows),
+                "campaigns": len(campaigns_rows),
+                "campaign_messages": len(messages_rows),
+                "orchestration_jobs": len(jobs_rows),
+            },
+            "orchestration_jobs": jobs_rows,
+        }
+        zf.writestr(
+            "audit_log.json",
+            json.dumps(audit_payload, default=str, ensure_ascii=False, indent=2),
+        )
+
+    buffer.seek(0)
+    payload_bytes = buffer.getvalue()
+    filename = (
+        "leadscraper-export-"
+        + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        + ".zip"
+    )
+    return StreamingResponse(
+        iter([payload_bytes]),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "Content-Length": str(len(payload_bytes)),
+        },
+    )
+
+
 @app.post("/orchestrator/stop/{job_id}", dependencies=[Depends(verify_api_key)])
 @limiter.limit("10/minute")
 async def stop_job(request: Request, job_id: str):
@@ -805,65 +1564,209 @@ async def stop_job(request: Request, job_id: str):
     result = await orchestrator.stop_job(job_id)
     return result
 
+# ============================================================
+# Streaming CSV exports — bounded memory regardless of lead count.
+#
+# Previous flow loaded all leads into a pandas DataFrame, wrote 4 CSV
+# files to disk, then FileResponse'd one of them. The DataFrame is
+# O(rows × cols) RAM. At 10k+ leads on a 512 MB Render dyno that's an
+# OOM. Streaming pages through the DB via the existing keyset cursor
+# and yields each row as it's serialized — backend RSS stays flat
+# regardless of result size. The csv module's QUOTE_MINIMAL with the
+# csv_helper sanitiser still applies (Excel formula-injection guard).
+# ============================================================
+
+# Column order locked in code (not derived from the first row) so a row
+# missing a key doesn't shift downstream columns mid-export.
+_EXPORT_FULL_COLUMNS = (
+    "unique_key", "name", "company_name", "first_name", "email", "phone",
+    "website", "address", "lead_source", "audit_status", "seo_score",
+    "high_risk_flag", "outreach_score", "segment", "enrichment_status",
+    "company_size", "leadership_team", "key_offerings", "contact_details",
+    "business_details", "target_clients", "pain_points",
+    "email_hook", "linkedin_hook",
+    "facebook", "instagram", "linkedin", "tiktok", "pinterest",
+    "created_at", "updated_at",
+)
+
+# Outreach export schema mirrors Instantly's expected fields + custom vars.
+_EXPORT_OUTREACH_COLUMNS = (
+    "email", "first_name", "last_name", "company_name", "website", "phone",
+    "email_hook", "linkedin_hook", "pain_points", "linkedin", "segment",
+    "business_details", "company_size",
+)
+
+
+def _csv_cell(value) -> str:
+    """Cell-level CSV-injection guard mirroring csv_helper.sanitize_dataframe_for_csv.
+
+    Prefixes a leading `'` when the value starts with =, @, +, -, \\t, \\r.
+    Excel/Numbers/Sheets render the cell as literal text instead of executing
+    =HYPERLINK() / =SUM() on operator open. Identical to the existing batch
+    sanitiser; duplicated here because the streaming path doesn't have a
+    DataFrame to feed into the helper.
+    """
+    if value is None:
+        return ""
+    s = str(value)
+    if s and s[0] in ("=", "@", "+", "-", "\t", "\r"):
+        return "'" + s
+    return s
+
+
+def _outreach_extract_names(leadership_team: Optional[str]):
+    if leadership_team and leadership_team != "Unknown":
+        parts = leadership_team.replace(",", " ").split()
+        if len(parts) >= 2:
+            return parts[0], " ".join(parts[1:])
+        if len(parts) == 1:
+            return parts[0], ""
+    return "Business", "Owner"
+
+
+async def _stream_leads_csv(filter_fn=None, columns=_EXPORT_FULL_COLUMNS, row_transform=None):
+    """Page leads via the keyset helper, yield CSV bytes per chunk.
+
+    `filter_fn(row) -> bool` — optional in-Python row filter (used by
+    /export/outreach for the has-contact + score threshold). The DB-level
+    filter could be a future optimization; for now we paginate over all
+    rows and skip in-Python because the existing logic depends on
+    `audit_results` JSONB key parsing.
+
+    `row_transform(row) -> dict` — optional projection. Outreach mode
+    uses this to split leadership_team into first/last name fields.
+    """
+    import csv
+    import io
+
+    # Header row first.
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(columns)
+    yield buf.getvalue().encode("utf-8")
+
+    # Page through with the existing cursor helper — same query path
+    # as the dashboard's /leads pagination. PAGE_SIZE balances DB
+    # round-trips against per-batch memory. 200 rows × ~30 cols ≈ 60 KB
+    # peak per batch.
+    PAGE_SIZE = 200
+    cursor = None
+    while True:
+        rows = await db.list_leads_recent(limit=PAGE_SIZE + 1, cursor=cursor)
+        if not rows:
+            break
+        has_more = len(rows) > PAGE_SIZE
+        page = rows[:PAGE_SIZE]
+        cursor = None
+        if has_more and page:
+            tail = page[-1]
+            cursor = {"c": tail.get("created_at"), "k": tail.get("unique_key")}
+
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")
+        for row in page:
+            if filter_fn and not filter_fn(row):
+                continue
+            data = row_transform(row) if row_transform else row
+            writer.writerow([_csv_cell(data.get(c, "")) for c in columns])
+        chunk = buf.getvalue()
+        if chunk:
+            yield chunk.encode("utf-8")
+
+        if not has_more:
+            break
+
+
+def _outreach_filter(row: dict) -> bool:
+    """Match src/scripts/export_leads.is_outreach_ready exactly:
+    has_contact AND outreach_score > 30 AND a real email string."""
+    has_contact = bool(row.get("email")) or bool(row.get("phone"))
+    score = row.get("outreach_score") or 0
+    try:
+        score = float(score)
+    except (TypeError, ValueError):
+        score = 0
+    if not (has_contact and score > 30):
+        return False
+    email = (row.get("email") or "").strip()
+    return bool(email)
+
+
+def _outreach_transform(row: dict) -> dict:
+    first, last = _outreach_extract_names(row.get("leadership_team"))
+    return {
+        "email": row.get("email", ""),
+        "first_name": first,
+        "last_name": last,
+        "company_name": row.get("company_name") or row.get("name") or "",
+        "website": row.get("website", ""),
+        "phone": row.get("phone", ""),
+        "email_hook": row.get("email_hook", ""),
+        "linkedin_hook": row.get("linkedin_hook", ""),
+        "pain_points": row.get("pain_points", ""),
+        "linkedin": row.get("linkedin", ""),
+        "segment": row.get("segment", ""),
+        "business_details": row.get("business_details", ""),
+        "company_size": row.get("company_size", ""),
+    }
+
+
 @app.get("/export", dependencies=[Depends(verify_api_key)])
 @limiter.limit("6/hour")
 async def trigger_export(request: Request):
+    """Legacy disk-write entry point — kept for CRM workflows that scrape
+    files off the `exports/` directory directly. Memory-bound by design;
+    do NOT call from automation that doesn't already tolerate the bound.
+    Prefer the streaming /export/download or /export/outreach endpoints."""
     try:
+        from src.scripts.export_leads import export_leads
         export_leads()
         return {"message": "Exports generated successfully in the 'exports' directory."}
     except Exception as e:
         logger.error("Export error: %s", e, exc_info=True)
         return error_response("Export failed")
 
+
 @app.get("/export/download", dependencies=[Depends(verify_api_key)])
 @limiter.limit("6/hour")
 async def download_full_export(request: Request):
-    try:
-        # 1. Always regenerate for fresh data
-        export_leads()
+    """Stream all leads as CSV. Memory bound is O(PAGE_SIZE) per chunk."""
+    from fastapi.responses import StreamingResponse
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
+    filename = f"leads_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        _stream_leads_csv(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            # Transfer-Encoding: chunked is implied by absence of Content-Length,
+            # but stating Cache-Control prevents the proxy/edge from buffering.
+            "Cache-Control": "no-store",
+        },
+    )
 
-        # 2. Find the latest full export
-        export_dir = "exports"
-        if not os.path.exists(export_dir):
-            return error_response("Exports directory not found after generation.", status_code=404)
-
-        files = [f for f in os.listdir(export_dir) if f.startswith("full_leads_all_data_")]
-        if not files:
-            return error_response("No full export files found after generation.", status_code=404)
-
-        latest_file = sorted(files)[-1]
-        file_path = os.path.join(export_dir, latest_file)
-
-        return FileResponse(
-            path=file_path,
-            filename=f"leads_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            media_type="text/csv"
-        )
-    except Exception as e:
-        logger.error("Export download error: %s", e, exc_info=True)
-        return error_response("Export download failed")
 
 @app.get("/export/outreach", dependencies=[Depends(verify_api_key)])
 @limiter.limit("6/hour")
 async def download_outreach_export(request: Request):
-    try:
-        export_leads()
-        export_dir = "exports"
-        files = [f for f in os.listdir(export_dir) if f.startswith("outreach_ready_leads_")]
-        if not files:
-            return error_response("No outreach export files found.", status_code=404)
-
-        latest_file = sorted(files)[-1]
-        file_path = os.path.join(export_dir, latest_file)
-
-        return FileResponse(
-            path=file_path,
-            filename=f"crm_outreach_ready_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            media_type="text/csv"
-        )
-    except Exception as e:
-        logger.error("Outreach export error: %s", e, exc_info=True)
-        return error_response("Outreach export failed")
+    """Stream the outreach-ready subset (has email/phone AND score > 30)."""
+    from fastapi.responses import StreamingResponse
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
+    filename = f"crm_outreach_ready_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        _stream_leads_csv(
+            filter_fn=_outreach_filter,
+            columns=_EXPORT_OUTREACH_COLUMNS,
+            row_transform=_outreach_transform,
+        ),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # ============================================================
@@ -1080,6 +1983,7 @@ async def export_campaign_messages(request: Request, campaign_id: str):
     if not db.client:
         return error_response("Database not connected", status_code=503)
     try:
+        import pandas as pd
         messages = db.client.table("campaign_messages").select(
             "lead_unique_key, channel, subject, body, status"
         ).eq("campaign_id", campaign_id).execute()

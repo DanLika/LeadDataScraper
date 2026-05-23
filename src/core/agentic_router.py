@@ -432,7 +432,16 @@ class AgenticRouter:
             raw = (draft_response.text or "").strip()
             subject = ""
             body = raw
-            m = re.match(r"^\s*Subject\s*:\s*(.+?)\s*\n+", raw, flags=re.IGNORECASE)
+            # Atomic groups + bounded character class prevent ReDoS on
+            # adversarial inputs (e.g., model output with thousands of
+            # trailing spaces and no newline). Previous pattern was
+            # `^\s*Subject\s*:\s*(.+?)\s*\n+` — `(.+?)\s*\n+` is O(n²)
+            # when no terminating newline exists.
+            # tests/test_redos.py locks the linear bound in.
+            m = re.match(
+                r"^(?>\s*)Subject(?>[ \t]*):(?>[ \t]*)([^\r\n]*)\r?\n",
+                raw, flags=re.IGNORECASE,
+            )
             if m:
                 subject = m.group(1).strip().strip('"').strip("'")
                 body = raw[m.end():].lstrip()
@@ -623,28 +632,37 @@ class AgenticRouter:
         engine = EnrichmentEngine()
         hunter = LeadHunter()
 
-        enriched_lead = await engine.enrich_lead(leads[0])
+        try:
+            enriched_lead = await engine.enrich_lead(leads[0])
 
-        # Calculate outreach score
-        enriched_lead["outreach_score"] = hunter.calculate_outreach_score(enriched_lead)
+            # Calculate outreach score
+            enriched_lead["outreach_score"] = hunter.calculate_outreach_score(enriched_lead)
 
-        # Phase 10: Segmentation & Outreach Hooks
-        enriched_lead["segment"] = hunter.segment_lead(enriched_lead)
-        if enriched_lead.get("pain_points") and enriched_lead["pain_points"] != "Could not analyze pain points.":
-            hooks = await hunter.generate_outreach_hooks_async(
-                enriched_lead["pain_points"],
-                enriched_lead.get("company_name") or enriched_lead.get("name") or "Prospect"
-            )
-            enriched_lead["linkedin_hook"] = hooks.get("linkedin_hook", "")
-            enriched_lead["email_hook"] = hooks.get("email_hook", "")
+            # Phase 10: Segmentation & Outreach Hooks
+            enriched_lead["segment"] = hunter.segment_lead(enriched_lead)
+            if enriched_lead.get("pain_points") and enriched_lead["pain_points"] != "Could not analyze pain points.":
+                hooks = await hunter.generate_outreach_hooks_async(
+                    enriched_lead["pain_points"],
+                    enriched_lead.get("company_name") or enriched_lead.get("name") or "Prospect"
+                )
+                enriched_lead["linkedin_hook"] = hooks.get("linkedin_hook", "")
+                enriched_lead["email_hook"] = hooks.get("email_hook", "")
 
-        # Upsert the enriched lead back to DB
-        self.db.upsert_leads([enriched_lead])
+            # Upsert the enriched lead back to DB
+            self.db.upsert_leads([enriched_lead])
 
-        return {
-            "message": "Deep Enrichment completed.",
-            "lead": enriched_lead
-        }
+            return {
+                "message": "Deep Enrichment completed.",
+                "lead": enriched_lead
+            }
+        finally:
+            # EnrichmentEngine now holds a long-lived Chromium process; the
+            # per-instance teardown must run even when the upstream call
+            # raises, or each /execute DEEP_ENRICHMENT leaks a browser.
+            try:
+                await engine.aclose()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("EnrichmentEngine.aclose raised: %s", exc)
 
     async def _execute_massive_pipeline(self, params: dict):
         """
