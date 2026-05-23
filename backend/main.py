@@ -189,36 +189,62 @@ _PIPELINE_FILTER_KEYS = frozenset({
 
 
 class CampaignCreate(BaseModel):
+    """Body for `POST /campaigns` — create a new outreach campaign.
+
+    `channel` must be one of `CampaignChannel` (`email` / `linkedin`
+    / `multi`); `segment_filter` is optional and bounds the lead
+    audience by `segment` value when the campaign generates messages.
+    `extra='forbid'` rejects any unknown field with a 422.
+    """
     model_config = ConfigDict(extra="forbid")
     name: constr(min_length=1, max_length=200)
     channel: CampaignChannel
     segment_filter: Optional[constr(max_length=200)] = None
 
 class CampaignUpdate(BaseModel):
+    """Body for partial campaign updates. Only `name` and `status` are
+    mutable post-creation; channel + segment_filter are pinned at
+    create time to keep the audience stable across runs."""
     model_config = ConfigDict(extra="forbid")
     name: Optional[constr(min_length=1, max_length=200)] = None
     status: Optional[CampaignStatus] = None
 
 class LeadProcessRequest(BaseModel):
+    """Body for per-lead processing endpoints (`/process-lead`,
+    `/draft-outreach`, `/draft-linkedin`). The `unique_key` is the
+    lead's primary identifier — opaque to the API consumer, derived
+    by the discovery / hunt path."""
     model_config = ConfigDict(extra="forbid")
     unique_key: constr(min_length=1, max_length=128)
 
 class AskInstruction(BaseModel):
+    """Inner payload for `/ask`. The 4000-char cap on `text` bounds
+    per-request Gemini billing AND prevents raw prompt-injection blobs
+    from being forwarded into the model context."""
     model_config = ConfigDict(extra="forbid")
-    # Cap the prompt that flows into Gemini to bound billing per request and
-    # keep raw prompt-injection blobs from being forwarded.
     text: constr(min_length=1, max_length=4000)
 
 class AskRequest(BaseModel):
+    """Outer body for `/ask` — wraps `AskInstruction` so the request
+    shape mirrors the agent's `{instruction: {text: "..."}}`
+    invocation contract."""
     model_config = ConfigDict(extra="forbid")
     instruction: AskInstruction
 
 class DiscoveryRequest(BaseModel):
+    """Body for `/start-discovery` — Google Maps lead discovery.
+    `location` defaults to empty (means "no city filter"); `query` is
+    the search term (e.g. "dentists" or "law firms")."""
     model_config = ConfigDict(extra="forbid")
     query: constr(min_length=1, max_length=500)
     location: Optional[constr(max_length=200)] = ""
 
 class PipelineRequest(BaseModel):
+    """Body for `/start-pipeline` — the multi-stage audit/enrich/score
+    pipeline. Either pass `filters` (a server-side allowlisted dict)
+    to select leads by attribute, or pass `lead_ids` for an explicit
+    list. `tasks` selects which stages to run; defaults to the full
+    pipeline when absent."""
     model_config = ConfigDict(extra="forbid")
     filters: Optional[dict] = None
     lead_ids: Optional[conlist(constr(min_length=1, max_length=128), max_length=10_000)] = None
@@ -245,18 +271,29 @@ ExecutableTask = Literal[
 ]
 
 class ExecutePlanParams(BaseModel):
+    """Allowlisted parameter shape for `/execute`.
+
+    Every key here is read by at least one `AgenticRouter.execute_task`
+    handler. Untyped `params: dict` was removed deliberately so authed
+    callers cannot bypass the natural-language → tool gating with a
+    hand-crafted plan; the bounded `constr` per key enforces the cap
+    server-side. `query_text` is the operator's natural-language
+    sub-question — fenced as UNTRUSTED_DATA before reaching Gemini.
+    `filters` is a free-form bucket label (e.g. "high-risk"; anything
+    else is treated as "default").
+    """
     model_config = ConfigDict(extra="forbid")
     unique_key: Optional[constr(min_length=1, max_length=128)] = None
     query: Optional[constr(min_length=1, max_length=500)] = None
     location: Optional[constr(max_length=200)] = None
-    # Natural-language sub-question fenced as UNTRUSTED_DATA by the handler.
     query_text: Optional[constr(max_length=4000)] = None
-    # Free-form bucket label ("high-risk" etc.). Handler treats anything other
-    # than "high-risk" as "default" — bounded string is enough.
     filters: Optional[constr(max_length=64)] = None
     type: Optional[constr(max_length=64)] = None
 
 class ExecutePlanRequest(BaseModel):
+    """Body for `/execute` — the AI router's "execute the proposed plan"
+    surface. `task` is locked to the `ExecutableTask` Literal allowlist
+    (the AgenticRouter handler vocabulary); `params` is `ExecutePlanParams`."""
     model_config = ConfigDict(extra="forbid")
     task: ExecutableTask
     params: Optional[ExecutePlanParams] = None
