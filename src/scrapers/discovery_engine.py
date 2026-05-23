@@ -163,7 +163,9 @@ class DiscoveryEngine:
 
         # e. Extract Phone
         phone = None
-        all_text = await container.inner_text()
+        # Cap input to bound regex CPU even on pathological injected text —
+        # real Maps card text is far under 5 KB; this is belt-and-braces.
+        all_text = (await container.inner_text())[:5000]
         phone_match = re.search(r'(\+?\d{1,4}[\s.-]?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}', all_text)
         if phone_match:
             phone = phone_match.group()
