@@ -21,9 +21,15 @@ interface StatsCardsProps {
 export default function StatsCards({ leads }: StatsCardsProps) {
   return (
     <section className="grid-responsive-stats" style={{ marginBottom: '3.5rem' }}>
-      <div className="card">
+      {/* `leads.length` is the loaded-page count (cursor pagination, 50 per
+          page). Calling it "TOTAL LEADS" misled operators when only the
+          first page was loaded — DB had 521 rows but the card showed 50
+          (Phase 15 finding #3). Rename to "LOADED" so the value matches
+          the label honestly. The AI Assistant ("how many leads do I have")
+          surfaces the true DB total via STATUS_CHECK / backend /stats. */}
+      <div className="card" title="Currently loaded in the table (cursor pagination, 50 per page). Ask the AI Assistant for the full DB total.">
         <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-           <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>TOTAL LEADS</span>
+           <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>LOADED</span>
            <BarChart3 size={18} />
         </div>
         <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>{leads.length}</div>
