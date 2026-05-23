@@ -2050,22 +2050,46 @@ doesn't repeat)
   simultaneously (signal for env-level breakage: expired secret, broken
   `pip install`, runner config).
 
-## Auto-branch hook caveat
+## Parallel-agent contention caveat (corrected diagnosis)
 
-Multiple auto-agents ran during this session on parallel branches
-(`chore/phase16-t*`, `chore/backend-security-headers-*`,
-`chore/i18n-scaffold-13.1`, `docs/claude-md-dogfood-prep-*`,
-`docs/crossover-verification-*`, etc.). The branch-switching hook
-silently moved `HEAD` between branches mid-tool-call, occasionally
-injecting unrelated diffs (e.g. a `backend/main.py` security-headers
-middleware addition) into the working tree of a separate fix PR.
+Earlier drafts of this section blamed an "auto-branch hook" for
+mid-tool-call HEAD switches. **Audit on 2026-05-23 (`ps aux | grep
+claude`) shows the real cause:** 8 concurrent
+`claude --dangerously-skip-permissions` sessions were running in the
+same git worktree (`/Users/duskolicanin/git/LeadDataScraper`),
+each picking up different Phase 13 / 15 / 16 tasks. The hooks
+configured at `~/.claude/settings.json` do NOT touch branches —
+only `.env`-access denial + Dart/Flutter formatters that target the
+sibling `bookbed` project. Branch churn came from the parallel
+sessions racing to commit on the same workspace.
 
-**Defensive pattern when this happens:** stage + commit + push in a
-single Bash heredoc with all edits done inline (e.g. via `python3
-<<PY ... PY`) so no PostToolUse hook fires between Edit and commit.
-The `docs(phase15-findings)` post-session snapshot commit (PR #227,
-`f1f428e`) was added this way after the same hook reverted three
-earlier Edit attempts.
+Branches created by parallel agents observed during this session
+(non-exhaustive): `chore/phase16-t*`,
+`chore/backend-security-headers-A7-opus47*`,
+`chore/i18n-scaffold-13.1`, `chore/demo-data-seed-13.3`,
+`chore/orchestrator-backoff-A3followup-opus47-v2`,
+`chore/revoke-trigger-fn-grants-A10-opus47-v2`,
+`chore/slow-handler-ctxvar-A6-opus47-v2`,
+`docs/claude-md-dogfood-prep-2026-05-23`,
+`docs/claude-md-drain-2026-05-23-opus47-v2`,
+`docs/crossover-verification-2026-05-23`,
+`chore/mutation-test-baseline-2026-05-23`. The session also has two
+dedicated worktrees: `/private/tmp/lds-drain-opus47` and
+`/private/tmp/lds-main-signout` (created for the sign-out work).
+
+**Defensive pattern when running parallel agents in shared workspace:**
+stage + commit + push in a single Bash heredoc with all edits done
+inline (e.g. via `python3 <<PY ... PY`) so no other session can
+switch the HEAD between your Edit and your commit. The
+`docs(phase15-findings)` post-session snapshot commit (PR #227,
+`f1f428e`) and this CLAUDE.md update both use that pattern.
+
+**Operator follow-up:** if running multiple Claude sessions on the
+same repo is intentional, isolate each via `git worktree add` (the
+two `/private/tmp/lds-*` paths already follow this pattern). If
+parallelism is unintentional, kill the extra `claude` processes —
+they share the SUPABASE/Render budget too, so the cost shows up in
+the next billing cycle.
 
 ## Outstanding for the operator
 
