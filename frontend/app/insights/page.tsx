@@ -4,16 +4,21 @@ import { useCallback, useState, useEffect } from 'react';
 import {
   TrendingUp, Shield, Users, Target, Zap, ArrowLeft, Loader2, Menu
 } from 'lucide-react';
-import {
-  Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, PieChart, Pie, Legend, BarChart
-} from 'recharts';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Sidebar from '../components/Sidebar';
-import AIChat from '../components/AIChat';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
+
+// Recharts is ~80kb gzipped. Defer it to a separate chunk so the
+// /insights route shell hits the wire fast; charts render after the
+// hydration tick. Same trick for the AI chat island.
+const InsightsCharts = dynamic(() => import('../components/InsightsCharts'), {
+  ssr: false,
+  loading: () => <div className="grid-responsive-2" style={{ marginBottom: '2rem', minHeight: 340 }} aria-hidden="true" />,
+});
+const AIChat = dynamic(() => import('../components/AIChat'), { ssr: false });
 
 interface Stats {
   total_leads: number;
@@ -45,7 +50,12 @@ export default function InsightsPage() {
 
   const fetchLeads = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await apiFetch(`${API_BASE_URL}/leads`, { signal });
+      // Insights needs the lead set for client-side aggregations (high-risk
+      // count, outreach-score buckets). Request the max page size so the
+      // counts match what the dashboard shows. Beyond 200 leads we should
+      // fold the aggregation into a dedicated /stats-style endpoint
+      // rather than paginate-all on the client.
+      const response = await apiFetch(`${API_BASE_URL}/leads?limit=200`, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setLeads(data.leads || []);
@@ -203,74 +213,8 @@ export default function InsightsPage() {
             </Link>
           </section>
 
-          {/* Charts Row 1 */}
-          <div className="grid-responsive-2" style={{ marginBottom: '2rem' }}>
-            <div className="card">
-              <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>Audit Status Breakdown</h2>
-              <div
-                style={{ width: '100%' }}
-                role="img"
-                aria-label={
-                  stats?.audit_status_distribution?.length
-                    ? `Audit status distribution: ${stats.audit_status_distribution.map(d => `${d.value} ${d.name}`).join(', ')}.`
-                    : 'Audit status distribution chart — no data yet'
-                }
-              >
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={(stats?.audit_status_distribution || []).map((d, i) => ({ ...d, fill: COLORS[i % COLORS.length] }))}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
-                      dataKey="value"
-                    />
-                    <RechartsTooltip
-                      contentStyle={{ background: 'var(--surface-tooltip)', border: '1px solid var(--border-tooltip)', borderRadius: '8px' }}
-                    />
-                    <Legend verticalAlign="bottom" height={36}/>
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            <div className="card">
-              <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>SEO Score Distribution</h2>
-              <div
-                style={{ width: '100%' }}
-                role="img"
-                aria-label={
-                  stats?.seo_score_ranges?.length
-                    ? `SEO score distribution: ${stats.seo_score_ranges.map(r => `${r.count} leads in ${r.range}`).join(', ')}.`
-                    : 'SEO score distribution chart — no data yet'
-                }
-              >
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={stats?.seo_score_ranges || []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-muted)" vertical={false} />
-                    <XAxis 
-                      dataKey="range" 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                    />
-                    <YAxis
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                    />
-                    <RechartsTooltip
-                      cursor={{ fill: 'var(--surface-muted)' }}
-                      contentStyle={{ background: 'var(--surface-tooltip)', border: '1px solid var(--border-tooltip)', borderRadius: '8px' }}
-                    />
-                    <Bar dataKey="count" fill="var(--primary)" radius={[4, 4, 0, 0]} barSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
+          {/* Charts Row 1 — lazy-loaded (recharts is a ~80kb gzipped chunk) */}
+          <InsightsCharts stats={stats} colors={COLORS} />
 
           {/* Strategic Analysis Section */}
           <section className="card" style={{ marginBottom: '2rem' }}>

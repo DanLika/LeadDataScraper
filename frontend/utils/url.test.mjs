@@ -124,6 +124,8 @@ for (const evil of [
   'https://evil.com',                 // absolute — no leading '/'
   'http://evil.com',
   'javascript:alert(1)',              // scheme — no leading '/'
+  'JAVASCRIPT:alert(1)',              // case variant
+  'data:text/html,<script>alert(1)</script>', // data: URI
   '/\t//evil.com',                    // control char → parser strips → //evil
   '/\n//evil.com',
   '/\r//evil.com',
@@ -132,8 +134,56 @@ for (const evil of [
   '/path:8080',                       // ':' excluded from allowlist
   'relative-no-slash',                // must start with '/'
   '/ space',                          // raw space not allowed
+
+  // ── percent-encoded host-swap / traversal — caught by the decode-once
+  // pass; the regex alone allows '%' so these would otherwise slip through.
+  '/dashboard%2f%2fevil.com',         // decoded → /dashboard//evil.com
+  '/dashboard%2F%2Fevil.com',         // case variant
+  '/%2e%2e/evil.com',                 // decoded → /../evil.com (traversal)
+  '/%2E%2E/evil.com',                 // case variant
+  '/foo%5cevil.com',                  // decoded backslash
+  '/foo%5Cevil.com',
+  '%2F%2Fevil.com',                   // no leading '/'
+  '/foo%00bar',                       // NUL after decode
+  '/foo%0devil',                      // CR after decode
+  '/foo%0aevil',                      // LF after decode
+  '/foo%09evil',                      // TAB after decode
+  '/foo%7Fevil',                      // DEL after decode
+
+  // ── doubly-encoded — first decode-pass yields `%2f%2fevil.com`, which
+  // still matches the allowlist but a downstream consumer that decodes
+  // again would resolve to `//evil.com`. The decode-once layer doesn't
+  // catch this on its own, but the leading `/` shape keeps the value
+  // same-origin under WHATWG resolution → covered separately by the
+  // 'allowed pass-through' tests below.
 ]) {
   test(`sanitizeNext: open-redirect payload ${JSON.stringify(evil)} → /`, () => {
     assert.equal(sanitizeNext(evil), '/')
   })
 }
+
+// the over-length payload check has its own test above. Belt-and-braces:
+// a deeply-nested traversal must also collapse.
+test('sanitizeNext: deeply-nested encoded traversal → /', () => {
+  assert.equal(sanitizeNext('/%2e%2e/%2e%2e/%2e%2e/etc/passwd'), '/')
+})
+
+// non-throwing on malformed percent-encoding — `decodeURIComponent` throws
+// on a stray `%` not followed by two hex chars; the guard catches it.
+test('sanitizeNext: malformed percent-encoding → / (no throw)', () => {
+  assert.doesNotThrow(() => sanitizeNext('/foo%ZZ'))
+  assert.equal(sanitizeNext('/foo%ZZ'), '/')
+  assert.equal(sanitizeNext('/foo%'), '/')
+  assert.equal(sanitizeNext('/foo%2'), '/')
+})
+
+// legit values that should still pass — guard against over-tightening.
+test('sanitizeNext: legit paths still pass after hardening', () => {
+  assert.equal(sanitizeNext('/insights'), '/insights')
+  assert.equal(sanitizeNext('/campaigns?view=audited'), '/campaigns?view=audited')
+  assert.equal(sanitizeNext('/leads?segment=high-risk&page=2'),
+    '/leads?segment=high-risk&page=2')
+  assert.equal(sanitizeNext('/path#anchor'), '/path#anchor')
+  // Percent-encoded chars that don't form a dangerous decoded sequence still pass.
+  assert.equal(sanitizeNext('/search?q=hello%20world'), '/search?q=hello%20world')
+})

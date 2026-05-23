@@ -1,58 +1,55 @@
 'use client';
 
-import { useCallback, useState, useEffect, Fragment, useMemo, useRef, Suspense } from 'react';
+import { useCallback, useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { useFocusTrap } from '@/utils/useFocusTrap';
 import { restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
+// Row-level icons (Globe, Phone, Crosshair, Music, Pin, Facebook, Instagram,
+// AlertCircle, etc.) all moved into LeadTable.tsx with the JSX they belong
+// to. Page-level chrome still uses Upload/Mail/Shield/Settings/etc.
 import {
-  Upload, Globe, Mail, Phone, Shield,
-  Settings, AlertCircle, AlertTriangle,
+  Upload, Globe, Mail, Shield,
+  Settings, AlertTriangle,
   Download, FileDown, Crosshair,
-  Users, Loader2, Play, RefreshCw, X, Zap,
+  Loader2, Play, RefreshCw, X, Zap,
   Copy, Check, Menu,
-  Music, Pin
 } from 'lucide-react';
-import AIChat from './components/AIChat';
-import { Facebook, Instagram, Linkedin } from './components/BrandIcons';
+import { Linkedin } from './components/BrandIcons';
 import Sidebar from './components/Sidebar';
-import HealthChart from './components/HealthChart';
 import StatsCards from './components/StatsCards';
-import FilterBar from './components/FilterBar';
+import FilterBar, { DEFAULT_SORT, type SortKey } from './components/FilterBar';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 import { ensureProtocol } from '@/utils/url.mjs';
 
-interface Lead {
-  id?: string;
-  unique_key: string;
-  company_name?: string;
-  name?: string;
-  website?: string;
-  audit_status?: string;
-  retry_count: number;
-  audit_results?: {
-    score: number;
-    high_risk_flag?: boolean;
-  };
-  high_risk_flag?: boolean;
-  facebook?: string;
-  instagram?: string;
-  linkedin?: string;
-  tiktok?: string;
-  pinterest?: string;
-  company_size?: string;
-  target_clients?: string;
-  business_details?: string;
-  leadership_team?: string;
-  key_offerings?: string;
-  last_error?: string;
-  outreach_score?: number;
-  phone?: string;
-  segment?: string;
-  linkedin_hook?: string;
-  email_hook?: string;
-  email?: string;
-  pain_points?: string;
-}
+// Heavy components are lazy-loaded so the dashboard's initial JS payload
+// stays under the perf budget. Recharts (HealthChart) and the AI chat
+// runtime both ship as separate chunks fetched only when those islands
+// actually render. ssr:false skips RSC pre-rendering of these client
+// islands — saves both bytes and a server-side React tree pass; the
+// placeholder reserves height to prevent layout shift while the chunk
+// is in flight.
+const HealthChart = dynamic(() => import('./components/HealthChart'), {
+  ssr: false,
+  loading: () => <div className="card card-no-hover" style={{ minHeight: 280 }} aria-hidden="true" />,
+});
+const AIChat = dynamic(() => import('./components/AIChat'), { ssr: false });
+// LeadTable is the heaviest single component (virtualizer + 200 LOC of
+// row cell rendering). Lazy-loading here is dual-purpose: keep initial
+// JS small AND defer the @tanstack/react-virtual import (~5KB gz) so
+// it's only fetched once the user is on the dashboard. ssr:false because
+// the table only renders meaningful content after the /leads fetch
+// completes — there's nothing useful to pre-render.
+const LeadTable = dynamic(() => import('./components/LeadTable'), {
+  ssr: false,
+  loading: () => (
+    <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)' }}>
+      Loading inventory…
+    </div>
+  ),
+});
+
+import type { Lead } from './types/lead';
 
 interface OrchestratorJob {
   id: string;
@@ -98,37 +95,9 @@ const DISCOVERY_STEPS = [
   "Syncing new leads to inventory..."
 ];
 
-// Strip markdown markers for clean display
-function cleanMarkdown(text: string): string {
-  return text
-    .replace(/^###?\s*/gm, '')       // Remove ### headers
-    .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove **bold** markers
-    .replace(/^\*\s+/gm, '• ')       // Convert * list items to bullets
-    .replace(/\n{3,}/g, '\n\n')      // Collapse excess newlines
-    .trim();
-}
-
-// Collapsible text component for long content
-function CollapsibleText({ text, maxLength = 250, style }: { text: string; maxLength?: number; style?: React.CSSProperties }) {
-  const [expanded, setExpanded] = useState(false);
-  const cleaned = useMemo(() => cleanMarkdown(text), [text]);
-  const isLong = cleaned.length > maxLength;
-  const display = isLong && !expanded ? cleaned.slice(0, maxLength) + '...' : cleaned;
-
-  return (
-    <div>
-      <p className="text-wrap" style={{ ...style, margin: 0, whiteSpace: 'pre-line' }}>{display}</p>
-      {isLong && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          style={{ background: 'none', border: 'none', color: 'var(--primary-strong)', fontSize: '0.7rem', cursor: 'pointer', padding: '0.25rem 0', fontWeight: 600 }}
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
-    </div>
-  );
-}
+// cleanMarkdown + CollapsibleText were only ever called from the lead
+// inventory table cells; both moved into LeadTable.tsx alongside the
+// JSX that uses them. Re-add here only if a non-table caller appears.
 
 // Suspense wrapper so `useSearchParams()` below doesn't trip Next 16's
 // "missing-suspense-with-csr-bailout" prerender check during `next build`.
@@ -170,7 +139,11 @@ function DashboardInner() {
       if (openDiscovery) setShowDiscoveryModal(true);
       if (viewParam === 'audited' || viewParam === 'high-risk') setView(viewParam);
       if (searchParam) setSearchTerm(searchParam);
-      router.replace('/', { scroll: false });
+      // Preserve the search as ?q= so the URL-state sync below sees a
+      // consistent vocabulary. Otherwise replace('/') strips searchTerm
+      // on the very next read tick.
+      const dest = searchParam ? `/?q=${encodeURIComponent(searchParam)}` : '/';
+      router.replace(dest, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -183,6 +156,7 @@ function DashboardInner() {
   const [discoveryLocation, setDiscoveryLocation] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isGeneratingCsv, setIsGeneratingCsv] = useState(false);
+  const [isExportingMyData, setIsExportingMyData] = useState(false);
   const [orchestratorJob, setOrchestratorJob] = useState<OrchestratorJob | null>(null);
   const [, setProcessingAi] = useState(false);
   const [processingLeads, setProcessingLeads] = useState<Record<string, boolean>>({});
@@ -197,6 +171,7 @@ function DashboardInner() {
   const [filterSegment, setFilterSegment] = useState<string>('all');
   const [filterMinScore, setFilterMinScore] = useState<number>(0);
   const [filterAuditStatus, setFilterAuditStatus] = useState<string>('all');
+  const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_SORT);
   const [copiedHookType, setCopiedHookType] = useState<'email' | 'linkedin' | null>(null);
   const [copiedAction, setCopiedAction] = useState<'body' | 'subject' | 'invite' | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -232,12 +207,28 @@ function DashboardInner() {
     return () => document.removeEventListener('keydown', handleEsc);
   }, [campaign, outreachDraft, showSettings, showDiscoveryModal, isDiscovering, isSidebarOpen]);
 
+  // Cursor pagination state. `nextCursor` is the opaque token returned
+  // by the backend for the next page; null means we've reached the tail.
+  // `hasMore` is the authoritative end-of-stream signal — surface it on
+  // the Load-more button so the user can tell "data is loading" from
+  // "you've seen everything".
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState<boolean>(false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
   const fetchLeads = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await apiFetch(`${API_BASE_URL}/leads`, { signal });
+      // Refresh (not append): drop any cursor and request the first page.
+      // The 15s polling loop calls this — it must return to page 1 so
+      // newly-discovered leads at the top of created_at DESC become
+      // visible. The Load-more button uses a separate handler that
+      // *appends* the next page.
+      const response = await apiFetch(`${API_BASE_URL}/leads?limit=50`, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setLeads(data.leads || []);
+      setNextCursor(typeof data.next_cursor === 'string' ? data.next_cursor : null);
+      setHasMore(!!data.has_more);
     } catch (err) {
       // A fetch cancelled by effect-cleanup / navigation is benign. WebKit
       // reports it as a bare `TypeError: Load failed` (no AbortError), so
@@ -249,6 +240,33 @@ function DashboardInner() {
       if (!signal?.aborted) setLoading(false);
     }
   }, []);
+
+  const loadMoreLeads = useCallback(async () => {
+    if (!nextCursor || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      // encodeURIComponent the cursor — base64url is mostly URL-safe but
+      // belt-and-braces for the `=` padding character.
+      const response = await apiFetch(
+        `${API_BASE_URL}/leads?limit=50&cursor=${encodeURIComponent(nextCursor)}`
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const page: Lead[] = data.leads || [];
+      // Dedup by unique_key in case the polling refresh raced an append.
+      setLeads(prev => {
+        const seen = new Set(prev.map(l => l.unique_key));
+        return [...prev, ...page.filter(l => !seen.has(l.unique_key))];
+      });
+      setNextCursor(typeof data.next_cursor === 'string' ? data.next_cursor : null);
+      setHasMore(!!data.has_more);
+    } catch (err) {
+      console.error('Load-more failed:', err);
+      showToast('Failed to load more leads — backend unreachable.', 'error');
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [nextCursor, isLoadingMore, showToast]);
 
   const fetchInsights = useCallback(async (signal?: AbortSignal) => {
     setFetchingInsights(true);
@@ -306,6 +324,35 @@ function DashboardInner() {
     }
     return () => clearInterval(interval!);
   }, [auditStatus?.active, orchestratorJob, fetchLeads, fetchInsights]);
+
+  // Cross-tab job visibility — adopts a running orchestration job started
+  // in another tab so the operator's second tab also shows the spinner +
+  // progress instead of looking idle. Polls every 5s when this tab has no
+  // job of its own; once adopted, the existing per-job poller (next
+  // useEffect) takes over and this loop pauses until the job clears.
+  useEffect(() => {
+    if (orchestratorJob) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await apiFetch(`${API_BASE_URL}/orchestrator/active`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.job && (data.job.status === 'running' || data.job.status === 'starting')) {
+          setOrchestratorJob(data.job);
+        }
+      } catch {
+        /* transient — next tick will retry */
+      }
+    };
+    void tick();
+    const interval = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [orchestratorJob]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -420,18 +467,14 @@ function DashboardInner() {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const ingestFile = async (file: File) => {
     if (!ALLOWED_UPLOAD_TYPES.includes(file.type) && !file.name.endsWith('.csv')) {
-      showToast('Please upload a CSV file.', 'error');
-      e.target.value = '';
+      const ext = (file.name.split('.').pop() || file.type || 'unknown').toUpperCase();
+      showToast(`Only CSV files are accepted (got ${ext}).`, 'error');
       return;
     }
     if (file.size > MAX_UPLOAD_SIZE) {
       showToast('File is too large. Maximum size is 10MB.', 'error');
-      e.target.value = '';
       return;
     }
 
@@ -464,8 +507,59 @@ function DashboardInner() {
       showToast('Upload failed — backend unreachable.', 'error');
     } finally {
       setLoading(false);
-      e.target.value = '';
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) await ingestFile(file);
+    e.target.value = '';
+  };
+
+  // Drag-drop ingest. dragenter/leave fire on every child crossing, so a
+  // ref-counter tracks net depth and isDragging follows that — without it the
+  // overlay flickers as the cursor crosses internal elements (e.g. the
+  // sidebar). Files-only guard: a text drag (e.g. selection) shouldn't open
+  // the overlay.
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const isFileDrag = (dt: DataTransfer | null) =>
+    !!dt && Array.from(dt.types || []).includes('Files');
+
+  const onDashboardDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (dragCounterRef.current === 1) setIsDragging(true);
+  };
+  const onDashboardDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    // Must preventDefault to make the drop event fire on this element.
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDashboardDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  };
+  const onDashboardDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length === 0) return;
+    if (loading) {
+      showToast('Upload already in progress — wait for it to finish.', 'error');
+      return;
+    }
+    if (files.length > 1) {
+      showToast(`Only the first file was imported (${files.length - 1} other${files.length === 2 ? '' : 's'} ignored).`, 'info');
+    }
+    await ingestFile(files[0]);
   };
 
   const processLead = async (uniqueKey: string) => {
@@ -802,27 +896,152 @@ function DashboardInner() {
     'No outreach files generated yet — draft outreach for leads first.'
   );
 
-  const filteredLeads = useMemo(() => leads.filter((lead: Lead) => {
-    const matchesSearch = (lead.company_name || lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (lead.website || '').toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredLeads = useMemo(() => {
+    const matched = leads.filter((lead: Lead) => {
+      const matchesSearch = (lead.company_name || lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           (lead.website || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesSegment = filterSegment === 'all' || lead.segment === filterSegment;
-    const matchesScore = (lead.outreach_score || lead.audit_results?.score || 0) >= filterMinScore;
-    const matchesAuditStatus = filterAuditStatus === 'all' || lead.audit_status === filterAuditStatus;
+      const matchesSegment = filterSegment === 'all' || lead.segment === filterSegment;
+      const matchesScore = (lead.outreach_score || lead.audit_results?.score || 0) >= filterMinScore;
+      const matchesAuditStatus = filterAuditStatus === 'all' || lead.audit_status === filterAuditStatus;
 
-    const matchesAllFilters = matchesSegment && matchesScore && matchesAuditStatus;
+      const matchesAllFilters = matchesSegment && matchesScore && matchesAuditStatus;
 
-    if (view === 'audited') return matchesSearch && lead.audit_status === 'Completed' && matchesAllFilters;
-    if (view === 'high-risk') return matchesSearch && ((lead.audit_results?.score ?? 100) < 50 || lead.high_risk_flag || lead.audit_results?.high_risk_flag) && matchesAllFilters;
-    return matchesSearch && matchesAllFilters;
-  }), [leads, searchTerm, filterSegment, filterMinScore, filterAuditStatus, view]);
+      if (view === 'audited') return matchesSearch && lead.audit_status === 'Completed' && matchesAllFilters;
+      if (view === 'high-risk') return matchesSearch && ((lead.audit_results?.score ?? 100) < 50 || lead.high_risk_flag || lead.audit_results?.high_risk_flag) && matchesAllFilters;
+      return matchesSearch && matchesAllFilters;
+    });
+    // Sort. Null/undefined values sort last (worst rank) in both directions so
+    // un-audited rows don't poison the top of a seo_score-desc view.
+    const scoreOf = (l: Lead, key: 'seo' | 'outreach'): number | null => {
+      if (key === 'seo') {
+        const v = l.seo_score ?? l.audit_results?.score;
+        return v == null ? null : Number(v);
+      }
+      const v = l.outreach_score;
+      return v == null ? null : Number(v);
+    };
+    const cmpNullable = (a: number | null, b: number | null, desc: boolean) => {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return desc ? b - a : a - b;
+    };
+    const sorted = matched.slice();
+    sorted.sort((a, b) => {
+      switch (sortKey) {
+        case 'seo_score_desc':
+          return cmpNullable(scoreOf(a, 'seo'), scoreOf(b, 'seo'), true);
+        case 'seo_score_asc':
+          return cmpNullable(scoreOf(a, 'seo'), scoreOf(b, 'seo'), false);
+        case 'outreach_score_desc':
+          return cmpNullable(scoreOf(a, 'outreach'), scoreOf(b, 'outreach'), true);
+        case 'name_asc':
+          return (a.company_name || a.name || '').localeCompare(b.company_name || b.name || '');
+        case 'name_desc':
+          return (b.company_name || b.name || '').localeCompare(a.company_name || a.name || '');
+        case 'created_at_desc':
+        default:
+          return (b.created_at || '').localeCompare(a.created_at || '');
+      }
+    });
+    return sorted;
+  }, [leads, searchTerm, filterSegment, filterMinScore, filterAuditStatus, view, sortKey]);
 
   const segmentOptions = useMemo(() =>
     Array.from(new Set(leads.map((l: Lead) => l.segment).filter(Boolean))),
   [leads]);
 
+  const hasActiveFilters = useMemo(
+    () => filterSegment !== 'all' || filterAuditStatus !== 'all' || filterMinScore > 0 || searchTerm.length > 0 || sortKey !== DEFAULT_SORT,
+    [filterSegment, filterAuditStatus, filterMinScore, searchTerm, sortKey],
+  );
+
+  const clearFilters = useCallback(() => {
+    setFilterSegment('all');
+    setFilterAuditStatus('all');
+    setFilterMinScore(0);
+    setSearchTerm('');
+    setSortKey(DEFAULT_SORT);
+  }, []);
+
+  // URL ↔ filter state sync. Bidirectional:
+  //   - URL changes (deep-link, back/forward button) → mirror into local state
+  //   - Local state changes (user toggles a filter) → router.push so the
+  //     change is shareable AND back-button-reversible
+  // Both halves are guarded by diff checks so they don't loop. Reads
+  // happen first on each render; writes only fire when the canonical URL
+  // for the current state differs from the URL we actually see.
+  const filterReadInFlightRef = useRef(false);
+  useEffect(() => {
+    const seg = searchParams?.get('segment') || 'all';
+    const status = searchParams?.get('status') || 'all';
+    const minRaw = searchParams?.get('min');
+    const q = searchParams?.get('q') || '';
+    const sort = (searchParams?.get('sort') as SortKey | null) || DEFAULT_SORT;
+    const minN = minRaw ? parseInt(minRaw, 10) : 0;
+    const safeMin = Number.isFinite(minN) && minN >= 0 && minN <= 100 ? minN : 0;
+    // Suppress the immediate write-back during read-driven state updates.
+    filterReadInFlightRef.current = true;
+    if (seg !== filterSegment) setFilterSegment(seg);
+    if (status !== filterAuditStatus) setFilterAuditStatus(status);
+    if (safeMin !== filterMinScore) setFilterMinScore(safeMin);
+    if (q !== searchTerm) setSearchTerm(q);
+    if (sort !== sortKey) setSortKey(sort);
+    // Release the suppression in the next tick — by then the state-driven
+    // re-render has already happened and the write effect's diff check
+    // will short-circuit because URL == canonical state.
+    queueMicrotask(() => { filterReadInFlightRef.current = false; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (filterReadInFlightRef.current) return;
+    const params = new URLSearchParams();
+    if (filterSegment !== 'all') params.set('segment', filterSegment);
+    if (filterAuditStatus !== 'all') params.set('status', filterAuditStatus);
+    if (filterMinScore > 0) params.set('min', String(filterMinScore));
+    if (searchTerm) params.set('q', searchTerm);
+    if (sortKey !== DEFAULT_SORT) params.set('sort', sortKey);
+    const qs = params.toString();
+    const target = qs ? `/?${qs}` : '/';
+    if (typeof window !== 'undefined' && window.location.pathname + window.location.search !== target) {
+      router.push(target, { scroll: false });
+    }
+  }, [filterSegment, filterAuditStatus, filterMinScore, searchTerm, sortKey, router]);
+
   return (
-    <div className="dashboard-container">
+    <div
+      className="dashboard-container"
+      data-testid="dashboard-root"
+      onDragEnter={onDashboardDragEnter}
+      onDragOver={onDashboardDragOver}
+      onDragLeave={onDashboardDragLeave}
+      onDrop={onDashboardDrop}
+    >
+      {isDragging && (
+        <div
+          data-testid="drop-overlay"
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 600,
+            background: 'var(--primary-tint-15, rgba(99,102,241,0.18))',
+            border: '3px dashed var(--primary, hsl(234, 89%, 64%))',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            fontSize: '1.1rem',
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+          }}
+        >
+          Drop CSV to import
+        </div>
+      )}
       {/* Toast Notifications */}
       {toasts.length > 0 && (
         <div className="toast-container" role="status" aria-live="polite">
@@ -1009,216 +1228,30 @@ function DashboardInner() {
               setFilterAuditStatus={setFilterAuditStatus}
               filterMinScore={filterMinScore}
               setFilterMinScore={setFilterMinScore}
+              sortKey={sortKey}
+              setSortKey={setSortKey}
               segmentOptions={segmentOptions}
+              onClearFilters={clearFilters}
+              hasActiveFilters={hasActiveFilters}
             />
 
-            <div className="table-container">
-              <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0', tableLayout: 'fixed' }}>
-                <colgroup>
-                  <col style={{ width: '25%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '20%' }} />
-                  <col style={{ width: '27%' }} />
-                </colgroup>
-                <thead>
-                  <tr style={{ background: 'var(--surface-subtle)' }}>
-                    <th style={{ padding: '1rem 1.5rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>PROSPECT</th>
-                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>AUDIT STATUS</th>
-                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>INTELLIGENCE</th>
-                    <th style={{ padding: '1rem 1rem', textAlign: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>SOCIAL</th>
-                    <th style={{ padding: '1rem 0.75rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>ACTIONS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && leads.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ padding: '4rem', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-                          <Loader2 className="animate-spin" size={32} color="var(--primary)" />
-                          <span style={{ color: 'var(--text-dim)' }}>Syncing with Supabase...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : filteredLeads.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)' }}>
-                        <Users size={48} style={{ marginBottom: '1rem', opacity: 0.2 }} />
-                        <p>
-                          {leads.length === 0
-                            ? "No prospects discovered yet. Start by importing a CSV."
-                            : searchTerm
-                              ? `No leads matching "${searchTerm}" found.`
-                              : "No leads match the current filters. Try clearing search, segment, status or score."}
-                        </p>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredLeads.map((lead: Lead) => (
-                      <Fragment key={lead.unique_key}>
-                        <tr className="table-row-hover" style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '1rem 1.5rem', verticalAlign: 'middle' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-white)' }}>{lead.company_name || lead.name || 'Unknown Entity'}</span>
-                                {lead.high_risk_flag && (
-                                  <span className="badge" style={{ background: 'var(--error-tint)', color: 'var(--error-strong)', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
-                                    <AlertCircle size={12} /> RISK
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                {lead.website && (
-                                  <a href={ensureProtocol(lead.website)} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--primary-strong)', textDecoration: 'none', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    <Globe size={14} style={{ flexShrink: 0 }} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.website.replace(/^https?:\/\//, '').replace(/\?.*$/, '')}</span>
-                                  </a>
-                                )}
-                                {lead.phone && (
-                                  <a
-                                    href={`tel:${lead.phone.replace(/[^+0-9]/g, '')}`}
-                                    style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'inherit', textDecoration: 'none' }}
-                                    title={`Call ${lead.phone}`}
-                                  >
-                                    <Phone size={14} aria-hidden="true" /> {lead.phone}
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: '1rem', textAlign: 'center', verticalAlign: 'middle' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4rem' }}>
-                              <span className={`badge ${lead.audit_status === 'Completed' ? 'badge-completed' : lead.audit_status?.includes('Failed') ? 'badge-error' : 'badge-pending'}`} style={{ whiteSpace: 'nowrap' }}>
-                                {lead.audit_status || 'Unprocessed'}
-                              </span>
-                              {lead.audit_results?.score != null && (
-                                <div style={{ fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap', color: lead.audit_results.score < 50 ? 'var(--error-strong)' : 'var(--primary-strong)' }}>
-                                  SEO: {lead.audit_results.score}/100
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                          <td style={{ padding: '1rem', textAlign: 'center', verticalAlign: 'middle' }}>
-                             <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
-                               {lead.linkedin_hook && (
-                                 <button
-                                   type="button"
-                                   className="intel-hook-btn"
-                                   onClick={() => handleDraftOutreach(lead)}
-                                   title="LinkedIn Hook Ready — click to draft LinkedIn message"
-                                   aria-label={`Draft LinkedIn outreach for ${lead.company_name || lead.name || 'lead'}`}
-                                   style={{ color: 'var(--primary)' }}
-                                 >
-                                   <Linkedin size={16} aria-hidden="true" />
-                                 </button>
-                               )}
-                               {lead.email_hook && (
-                                 <button
-                                   type="button"
-                                   className="intel-hook-btn intel-hook-email"
-                                   onClick={() => handleDraftOutreach(lead)}
-                                   title="Email Hook Ready — click to draft email"
-                                   aria-label={`Draft email outreach for ${lead.company_name || lead.name || 'lead'}`}
-                                 >
-                                   <Mail size={16} aria-hidden="true" />
-                                 </button>
-                               )}
-                               {lead.audit_results?.high_risk_flag && (
-                                 <span title="Security Vulnerabilities" aria-label="Security vulnerabilities flagged" style={{ color: 'var(--error)', display: 'inline-flex', alignItems: 'center' }}>
-                                   <Shield size={16} aria-hidden="true" />
-                                 </span>
-                               )}
-                             </div>
-                          </td>
-                          <td style={{ padding: '1rem', textAlign: 'center', verticalAlign: 'middle' }}>
-                            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', color: 'var(--text-dim)' }}>
-                              {lead.facebook && <a href={ensureProtocol(lead.facebook)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} Facebook page`} className="social-link"><Facebook size={16} /></a>}
-                              {lead.instagram && <a href={ensureProtocol(lead.instagram)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} Instagram page`} className="social-link"><Instagram size={16} /></a>}
-                              {lead.linkedin && <a href={ensureProtocol(lead.linkedin)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} LinkedIn page`} className="social-link"><Linkedin size={16} /></a>}
-                              {lead.tiktok && <a href={ensureProtocol(lead.tiktok)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} TikTok page`} className="social-link"><Music size={16} /></a>}
-                              {lead.pinterest && <a href={ensureProtocol(lead.pinterest)} target="_blank" rel="noopener noreferrer" aria-label={`${lead.company_name || lead.name || 'Lead'} Pinterest page`} className="social-link"><Pin size={16} /></a>}
-                              {!lead.facebook && !lead.instagram && !lead.linkedin && !lead.tiktok && !lead.pinterest && <span aria-label="No social links" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>N/A</span>}
-                            </div>
-                          </td>
-                          <td style={{ padding: '1rem 0.75rem', textAlign: 'right', verticalAlign: 'middle' }}>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
-                              <button
-                                className="btn-secondary"
-                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '44px', minHeight: '44px' }}
-                                onClick={() => handleEnrichLead(lead.unique_key)}
-                                disabled={processingLeads[lead.unique_key]}
-                                aria-busy={processingLeads[lead.unique_key]}
-                                title="Harvest Contact Details"
-                                aria-label="Harvest contact details"
-                              >
-                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Users size={14} aria-hidden="true" />}
-                              </button>
-                              <button
-                                className="btn-secondary"
-                                style={{ padding: '0.4rem', borderRadius: '8px', minWidth: '44px', minHeight: '44px', color: 'var(--accent)', borderColor: 'rgba(245, 158, 11, 0.2)' }}
-                                onClick={() => handleDeepHunt(lead.unique_key)}
-                                disabled={processingLeads[lead.unique_key]}
-                                aria-busy={processingLeads[lead.unique_key]}
-                                title="Deep Digital Hunt"
-                                aria-label="Deep digital hunt"
-                              >
-                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Crosshair size={14} aria-hidden="true" />}
-                              </button>
-                              <button
-                                className="btn-primary"
-                                style={{ padding: '0.4rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem' }}
-                                onClick={() => handleDraftOutreach(lead)}
-                                disabled={isDrafting || lead.audit_status !== 'Completed'}
-                                aria-busy={isDrafting && activeLead?.unique_key === lead.unique_key}
-                                title="Draft Personalised Outreach"
-                              >
-                                {isDrafting && activeLead?.unique_key === lead.unique_key ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : 'Draft'}
-                              </button>
-                              <button
-                                className="btn-primary"
-                                style={{ padding: '0.4rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem', background: 'var(--secondary)' }}
-                                onClick={() => processLead(lead.unique_key)}
-                                disabled={processingLeads[lead.unique_key]}
-                                aria-busy={processingLeads[lead.unique_key]}
-                              >
-                                {processingLeads[lead.unique_key] ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : lead.audit_status === 'Completed' ? 'Re-Audit' : 'Audit'}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        {(lead.last_error || (lead.key_offerings && lead.key_offerings !== 'Unknown') || (lead.pain_points && lead.pain_points !== 'Unknown')) && (
-                          <tr style={{ background: 'var(--surface-subtle)' }}>
-                            <td colSpan={5} style={{ padding: '1rem 2rem', borderBottom: '1px solid var(--border)' }}>
-                              <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
-                                {lead.last_error && (
-                                  <div style={{ flex: '1 1 300px', borderLeft: '3px solid var(--error)', paddingLeft: '1rem' }}>
-                                    <div style={{ fontSize: '0.65rem', color: 'var(--error-strong)', textTransform: 'uppercase', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                      <AlertCircle size={10} /> PROCESSING ERROR
-                                    </div>
-                                    <p style={{ fontSize: '0.8rem', color: 'var(--error-strong)', margin: 0 }}>{lead.last_error}</p>
-                                  </div>
-                                )}
-                                {lead.key_offerings && lead.key_offerings !== 'Unknown' && (
-                                  <div style={{ flex: '1 1 200px' }}>
-                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>KEY OFFERINGS</div>
-                                    <CollapsibleText text={lead.key_offerings} style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }} />
-                                  </div>
-                                )}
-                                {lead.pain_points && lead.pain_points !== 'Unknown' && (
-                                  <div style={{ flex: '1 1 200px' }}>
-                                    <div style={{ fontSize: '0.65rem', color: 'var(--warning-strong)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>PAIN POINTS</div>
-                                    <CollapsibleText text={lead.pain_points} style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }} />
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <LeadTable
+              leads={filteredLeads}
+              loading={loading}
+              searchTerm={searchTerm}
+              totalLeadCount={leads.length}
+              processingLeads={processingLeads}
+              isDrafting={isDrafting}
+              activeLeadKey={activeLead?.unique_key}
+              hasMore={hasMore}
+              nextCursor={nextCursor}
+              isLoadingMore={isLoadingMore}
+              onLoadMore={loadMoreLeads}
+              onEnrichLead={handleEnrichLead}
+              onDeepHunt={handleDeepHunt}
+              onDraftOutreach={handleDraftOutreach}
+              onProcessLead={processLead}
+            />
           </div>
         </div>
       </div>
@@ -1619,6 +1652,54 @@ function DashboardInner() {
                     Download Latest
                   </button>
                 </div>
+              </div>
+
+              <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>My Data (GDPR)</h3>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                  Download a ZIP of every row tied to your account — leads, campaigns,
+                  messages, and the orchestration audit log. Rate-limited to once per day.
+                </p>
+                <button
+                  className="btn-secondary"
+                  style={{ fontSize: '0.8rem', width: '100%', justifyContent: 'center', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                  disabled={isExportingMyData}
+                  aria-busy={isExportingMyData}
+                  onClick={async () => {
+                    if (isExportingMyData) return;
+                    setIsExportingMyData(true);
+                    try {
+                      const res = await apiFetch(`${API_BASE_URL}/operator/data-export`);
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        const msg = res.status === 429
+                          ? "Already exported today — try again in 24h."
+                          : (data.detail || data.error || `Data export failed (HTTP ${res.status})`);
+                        showToast(msg, 'error');
+                        return;
+                      }
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+                      a.download = `leadscraper-export-${ts}.zip`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      window.URL.revokeObjectURL(url);
+                      showToast('Data export downloaded.', 'success');
+                    } catch {
+                      showToast('Data export failed — backend unreachable.', 'error');
+                    } finally {
+                      setIsExportingMyData(false);
+                    }
+                  }}
+                >
+                  {isExportingMyData ? (
+                    <><Loader2 size={14} className="animate-spin" aria-hidden="true" /> Preparing…</>
+                  ) : 'Download my data'}
+                </button>
               </div>
 
               <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid var(--error-tint)' }}>
