@@ -5,7 +5,11 @@ from typing import List, Dict, Any, Optional
 from playwright.async_api import async_playwright, Browser, Playwright
 from google import genai
 from dotenv import load_dotenv
-from src.utils.json_helper import extract_json_from_response
+from src.utils.gemini_types import (
+    DeepEnrichmentFieldsResponse,
+    response_text,
+    typed_loads,
+)
 from src.utils.logging_config import get_logger
 from src.utils.ssrf_guard import SSRFError, assert_safe_url
 
@@ -48,7 +52,7 @@ class EnrichmentEngine:
         """
         self.api_key = os.getenv("GEMINI_API_KEY")
         if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
+            self.client: Optional[genai.Client] = genai.Client(api_key=self.api_key)
         else:
             self.client = None
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
@@ -214,10 +218,10 @@ class EnrichmentEngine:
                     ),
                 ),
             )
-            result = extract_json_from_response(response.text)
-            return result if result else {}
-        except Exception as e:
-            logger.error("AI Enrichment Error for %s: %s", lead_name, e, exc_info=True)
+            result = typed_loads(response_text(response), DeepEnrichmentFieldsResponse)
+            return dict(result) if result else {}
+        except Exception:
+            logger.exception("AI Enrichment Error for %s", lead_name)
             return {}
 
     async def enrich_lead(self, lead: Dict[str, Any]) -> Dict[str, Any]:

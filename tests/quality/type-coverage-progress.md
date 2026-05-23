@@ -188,6 +188,32 @@ Expected delta: ~**-130 errors total** (mostly in `src/core/`, not
 target dirs). Target dirs from this alone: -10 (ai_mapper.py +
 processors-side calls).
 
+**Landed 2026-05-23** in `chore/typecov-phase2-gemini-types`. Actual
+delta: **-140** (607 → 467). Final scope went beyond TypedDict-only
+to a "Gemini-boundary harden":
+
+- `src/utils/gemini_types.py` — 5 response TypedDicts
+  (`OutreachHooksResponse`, `EnrichmentDetailsResponse`,
+  `DeepEnrichmentFieldsResponse`, `StrategicInsightsResponse`,
+  `StrategicInsightsPriority`) + 4 per-task params TypedDicts
+  (`UniqueKeyParams`, `DiscoverySearchParams`,
+  `DatabaseQueryParams`, `FilteredParams`) + 3 narrowing helpers
+  (`response_text`, `extract_function_call`, `typed_loads`).
+- `src/utils/json_helper.py` — tightened return type to
+  `Optional[dict[str, Any]]` + dict-isinstance guard before cast.
+- 4 call-site files — `agentic_router.py` -123, `leadhunter.py` -5,
+  `ai_mapper.py` -8, `enrichment_engine.py` -2.
+- Supabase row narrowing — added local `client = self.db.client`
+  pattern after every `if not self.db.client: return ...` guard,
+  + `cast(Mapping[str, Any], leads[0])` at Supabase row reads.
+
+Why the actual delta differed from the initial -130 estimate: the
+original plan assumed TypedDicts alone would kill ~130, but the
+diagnostic showed the 125 `union-attr` errors broke into 4 buckets
+(only one fixed by TypedDicts). Expanded scope to the full boundary
+narrowing — call-site + Supabase Optional + Gemini SDK Optional.
+Decision and four-bucket breakdown documented in the PR description.
+
 ### Phase 3 — Supabase row TypedDicts (~33 errors, 1 PR)
 
 Run `mcp__supabase__generate_typescript_types`, port to Python
@@ -233,6 +259,7 @@ Append one row per Monday. Keep chronological.
 | Week of | Total | Δ total | Target-dir | Δ tgt | Files clean | Notes |
 |---|---:|---:|---:|---:|---:|---|
 | 2026-05-22 | 593 | — | 173 | — | 8 / 42 | First scan; ci.yml not yet enforced |
+| 2026-05-23 | 467 | **-140** | (see notes) | -10 | 8 / 45 | Phase 2 landed — `src/utils/gemini_types.py` + boundary harden across 4 Gemini call sites. agentic_router 149→26 (-123), leadhunter 47→42 (-5), ai_mapper 10→2 (-8), enrichment_engine 13→11 (-2), json_helper 3→0. Total 607 baseline (drift from 593) → 467 post. See chore/typecov-phase2-gemini-types. |
 
 ---
 

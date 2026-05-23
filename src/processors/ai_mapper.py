@@ -1,15 +1,17 @@
+from typing import Optional
 from google import genai
 from google.genai import types as genai_types
 import json
 import os
 import pandas as pd
+from src.utils.gemini_types import response_text
 from src.utils.logging_config import get_logger
 from src.utils.prompt_safety import _UNTRUSTED_DATA_SYSTEM_INSTRUCTION, fenced_json
 
 logger = get_logger(__name__)
 
 
-def normalize_df_with_ai(df: pd.DataFrame, api_key: str = None) -> pd.DataFrame:
+def normalize_df_with_ai(df: pd.DataFrame, api_key: Optional[str] = None) -> pd.DataFrame:
     """
     Convenience wrapper: use GeminiMapper to map messy CSV columns to standard names.
     Pass api_key to override env-based config. Never mutates os.environ — multi-worker
@@ -28,10 +30,10 @@ def normalize_df_with_ai(df: pd.DataFrame, api_key: str = None) -> pd.DataFrame:
 
 
 class GeminiMapper:
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
+            self.client: Optional[genai.Client] = genai.Client(api_key=self.api_key)
         else:
             self.client = None
             logger.warning("GEMINI_API_KEY not found in environment.")
@@ -90,7 +92,7 @@ class GeminiMapper:
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
                 ),
             )
-            raw_text = response.text.strip('`').strip()
+            raw_text = response_text(response).strip('`').strip()
             if raw_text.startswith('json'):
                 raw_text = raw_text[4:].strip()
 

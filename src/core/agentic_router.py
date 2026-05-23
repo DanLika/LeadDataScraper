@@ -1,10 +1,20 @@
 import os
 import json
+from typing import Any, Mapping, Optional, cast
 from google import genai
 from google.genai import types as genai_types
 from dotenv import load_dotenv
 from src.utils.supabase_helper import SupabaseHelper
-from src.utils.json_helper import extract_json_from_response
+from src.utils.gemini_types import (
+    DatabaseQueryParams,
+    DiscoverySearchParams,
+    FilteredParams,
+    StrategicInsightsResponse,
+    UniqueKeyParams,
+    extract_function_call,
+    response_text,
+    typed_loads,
+)
 from src.utils.logging_config import get_logger
 from src.utils.prompt_safety import (
     _UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
@@ -30,7 +40,7 @@ class AgenticRouter:
         self.db = SupabaseHelper()
         if not self.api_key:
             logger.warning("GEMINI_API_KEY not found.")
-            self.client = None
+            self.client: Optional[genai.Client] = None
         else:
             self.client = genai.Client(api_key=self.api_key)
 
@@ -190,68 +200,77 @@ class AgenticRouter:
                 )
             )
 
-            # Process function calls
-            if response.candidates and response.candidates[0].content.parts:
-                for part in response.candidates[0].content.parts:
-                    if part.function_call:
-                        call = part.function_call
-                        return {
-                            "task": call.name.upper(),
-                            "params": call.args if call.args else {},
-                            "reasoning": f"AI selected tool: {call.name}"
-                        }
+            call = extract_function_call(response)
+            if call is not None:
+                return {
+                    "task": call["name"].upper(),
+                    "params": dict(call["args"]),
+                    "reasoning": f"AI selected tool: {call['name']}"
+                }
 
+            raw_text = response_text(response)
             return {
                 "task": "UNKNOWN",
                 "params": {},
                 "reasoning": "No tool was called by the model.",
-                "raw": response.text if response.text else "No text response"
+                "raw": raw_text or "No text response"
             }
         except Exception as e:
-            logger.error("Route instruction failed: %s", e, exc_info=True)
+            logger.exception("Route instruction failed")
             return {
                 "task": "ERROR",
                 "params": {},
                 "reasoning": f"Tool calling failed: {str(e)}"
             }
 
-    async def execute_task(self, orchestration_plan: dict):
+    async def execute_task(self, orchestration_plan: Mapping[str, Any]) -> dict[str, Any]:
         """
         Executes the specific task defined in an orchestration plan.
         Dispatches to internal specialized methods based on the task type.
         """
-        task = orchestration_plan.get("task", "").upper()
-        params = orchestration_plan.get("params", {})
+        task_raw = orchestration_plan.get("task", "")
+        task = task_raw.upper() if isinstance(task_raw, str) else ""
+        params_raw = orchestration_plan.get("params", {})
+        params: dict[str, Any] = dict(params_raw) if isinstance(params_raw, Mapping) else {}
 
-        handlers = {
-            "DATABASE_QUERY": lambda p: self._execute_database_query(p.get("query_text", ""), p),
-            "STATUS_CHECK": lambda p: self._get_status_summary(),
-            "SEO_AUDIT": self._execute_seo_audit,
-            "OUTREACH_DRAFT": self._generate_outreach_draft,
-            "GET_INSIGHTS": lambda p: self._get_strategic_insights(),
-            "DATA_MERGE": lambda p: self._execute_data_merge(),
-            "DEEP_HUNT": self._execute_deep_hunt,
-            "RUN_MASSIVE_PIPELINE": self._execute_massive_pipeline,
-            "LINKEDIN_DRAFT": self._generate_linkedin_draft,
-            "DISCOVERY_SEARCH": self._execute_discovery_search,
-            "DEEP_ENRICHMENT": self._execute_deep_enrichment,
-            "CAMPAIGN_STRATEGY": self._generate_campaign_strategy,
-        }
+        if task == "DATABASE_QUERY":
+            q = cast(DatabaseQueryParams, params)
+            return await self._execute_database_query(q.get("query_text", ""), q)
+        if task == "STATUS_CHECK":
+            return await self._get_status_summary()
+        if task == "SEO_AUDIT":
+            return await self._execute_seo_audit(cast(UniqueKeyParams, params))
+        if task == "OUTREACH_DRAFT":
+            return await self._generate_outreach_draft(cast(UniqueKeyParams, params))
+        if task == "GET_INSIGHTS":
+            return await self._get_strategic_insights()
+        if task == "DATA_MERGE":
+            return await self._execute_data_merge()
+        if task == "DEEP_HUNT":
+            return await self._execute_deep_hunt(cast(UniqueKeyParams, params))
+        if task == "RUN_MASSIVE_PIPELINE":
+            return await self._execute_massive_pipeline(cast(FilteredParams, params))
+        if task == "LINKEDIN_DRAFT":
+            return await self._generate_linkedin_draft(cast(UniqueKeyParams, params))
+        if task == "DISCOVERY_SEARCH":
+            return await self._execute_discovery_search(cast(DiscoverySearchParams, params))
+        if task == "DEEP_ENRICHMENT":
+            return await self._execute_deep_enrichment(cast(UniqueKeyParams, params))
+        if task == "CAMPAIGN_STRATEGY":
+            return await self._generate_campaign_strategy(cast(FilteredParams, params))
+        return {"error": f"Unknown task: {task}"}
 
-        handler = handlers.get(task)
-        if handler:
-            return await handler(params)
-        else:
-            return {"error": f"Unknown task: {task}"}
-
-    async def _execute_seo_audit(self, params: dict):
+    async def _execute_seo_audit(self, params: UniqueKeyParams) -> dict[str, Any]:
         unique_key = params.get("unique_key")
         if unique_key:
             from src.core.parallel_auditor import ParallelAuditor
             auditor = ParallelAuditor()
-            lead_data = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+            if not self.db.client:
+                return {"error": "Database not connected"}
+            client = self.db.client
+            lead_data = client.table("leads").select("*").eq("unique_key", unique_key).execute()
             if lead_data.data:
-                result = await auditor.audit_single_lead(lead_data.data[0])
+                result = await auditor.audit_single_lead(dict(cast(Mapping[str, Any], lead_data.data[0])))
                 return {"message": "SEO Audit completed for single lead.", "result": result}
             return {"error": f"Lead {unique_key} not found for SEO Audit"}
         else:
@@ -260,14 +279,17 @@ class AgenticRouter:
             job_id = await orchestrator.run_massive_pipeline(tasks=["audit"])
             return {"message": "Massive SEO Audit pipeline started.", "job_id": job_id}
 
-    async def _execute_deep_hunt(self, params: dict):
+    async def _execute_deep_hunt(self, params: UniqueKeyParams) -> dict[str, Any]:
         unique_key = params.get("unique_key")
         if not unique_key:
             return {"error": "unique_key is required for DEEP_HUNT"}
 
         from src.utils.supabase_helper import SupabaseHelper
         db = SupabaseHelper()
-        response = db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+        if not db.client:
+            return {"error": "Database not connected"}
+        client = db.client
+        response = client.table("leads").select("*").eq("unique_key", unique_key).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:
@@ -275,16 +297,17 @@ class AgenticRouter:
 
         from src.core.parallel_auditor import ParallelAuditor
         auditor = ParallelAuditor()
-        result = await auditor.hunt_single_lead(leads[0])
+        first_lead: dict[str, Any] = dict(cast(Mapping[str, Any], leads[0]))
+        result = await auditor.hunt_single_lead(first_lead)
 
         return {
             "message": "Deep Hunt completed.",
-            "lead_name": leads[0].get("name"),
+            "lead_name": first_lead.get("name"),
             "facebook": result.get("facebook"),
             "instagram": result.get("instagram")
         }
 
-    async def _get_status_summary(self):
+    async def _get_status_summary(self) -> dict[str, Any]:
         """
         Fetches a high-level summary of the current lead database state.
         Returns aggregated audit-status counts plus a one-line human-readable
@@ -292,13 +315,16 @@ class AgenticRouter:
         """
         if not self.db.client:
             return {"error": "Database not connected"}
+        client = self.db.client
 
-        rows = self.db.client.table("leads").select("audit_status").execute()
+        rows = client.table("leads").select("audit_status").execute()
         data = rows.data if hasattr(rows, 'data') else []
         total = len(data)
         counts: dict[str, int] = {}
         for r in data:
-            status = (r.get("audit_status") or "Unknown")
+            row: Mapping[str, Any] = dict(r) if isinstance(r, Mapping) else {}
+            status_raw = row.get("audit_status")
+            status = str(status_raw) if status_raw else "Unknown"
             counts[status] = counts.get(status, 0) + 1
 
         parts = [f"{n} {s}" for s, n in sorted(counts.items(), key=lambda kv: -kv[1])]
@@ -314,7 +340,7 @@ class AgenticRouter:
             "details": {"total": total, "counts": counts},
         }
 
-    async def _execute_database_query(self, reasoning: str, params: dict):
+    async def _execute_database_query(self, reasoning: str, params: DatabaseQueryParams) -> dict[str, Any]:
         """
         Translates a natural language data request into an AI-summarized answer based on DB context.
         """
@@ -322,6 +348,7 @@ class AgenticRouter:
             return {"error": "Database not connected"}
         if not self.client:
             return {"error": "AI model not initialized."}
+        client = self.db.client
 
         # Fetch limited data for context (to avoid token limits).
         # unique_key + email + website + phone included so AI can answer
@@ -329,7 +356,7 @@ class AgenticRouter:
         # model can't resolve a lead name to an ID and bails with
         # "data insufficient". unique_key is opaque (Google Place IDs), no
         # PII concern.
-        response = self.db.client.table("leads").select(
+        response = client.table("leads").select(
             "unique_key,name,company_name,audit_status,seo_score,lead_source,"
             "email,phone,website,high_risk_flag,segment"
         ).limit(50).execute()
@@ -358,12 +385,12 @@ class AgenticRouter:
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
                 ),
             )
-            return {"answer": summary_response.text}
-        except Exception as e:
-            logger.error("Database query AI call failed: %s", e, exc_info=True)
+            return {"answer": response_text(summary_response)}
+        except Exception:
+            logger.exception("Database query AI call failed")
             return {"error": "AI query failed"}
 
-    async def _generate_outreach_draft(self, params: dict):
+    async def _generate_outreach_draft(self, params: UniqueKeyParams) -> dict[str, Any]:
         """
         Generates a highly personalized outreach email for a specific lead using their SEO audit context.
         """
@@ -374,14 +401,21 @@ class AgenticRouter:
             return {"error": "AI model not initialized."}
 
         # Use provided lead_data if available to avoid N+1 queries, otherwise fetch
-        lead = params.get("lead_data")
-        if not lead:
-            response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+        lead_data_raw = params.get("lead_data")
+        lead: dict[str, Any]
+        if lead_data_raw is not None:
+            lead = dict(lead_data_raw)
+        else:
+            if not self.db.client:
+                return {"error": "Database not connected"}
+            client = self.db.client
+            response = client.table("leads").select("*").eq("unique_key", unique_key).execute()
             leads = response.data if hasattr(response, 'data') else []
             if not leads:
                 return {"error": "Lead not found in database"}
-            lead = leads[0]
-        audit = lead.get("audit_results", {}) or {}
+            lead = dict(cast(Mapping[str, Any], leads[0]))
+        audit_raw = lead.get("audit_results") or {}
+        audit: dict[str, Any] = dict(audit_raw) if isinstance(audit_raw, Mapping) else {}
 
         # All lead-derived values flow through _fenced_json so the model treats
         # them as data, not instructions. The static prompt body holds only
@@ -429,7 +463,7 @@ class AgenticRouter:
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
                 ),
             )
-            raw = (draft_response.text or "").strip()
+            raw = response_text(draft_response)
             subject = ""
             body = raw
             # Atomic groups + bounded character class prevent ReDoS on
@@ -453,11 +487,11 @@ class AgenticRouter:
                 "lead_email": lead.get("email") or "",
                 "operator_name": operator_name,
             }
-        except Exception as e:
-            logger.error("Outreach draft generation failed for %s: %s", unique_key, e, exc_info=True)
+        except Exception:
+            logger.exception("Outreach draft generation failed for %s", unique_key)
             return {"error": "Failed to generate outreach draft"}
 
-    async def _generate_linkedin_draft(self, params: dict):
+    async def _generate_linkedin_draft(self, params: UniqueKeyParams) -> dict[str, Any]:
         """
         Generates a personalized, concise LinkedIn connection request for a specific lead.
         """
@@ -466,12 +500,16 @@ class AgenticRouter:
             return {"error": "unique_key is required"}
         if not self.client:
             return {"error": "AI model not initialized."}
+        if not self.db.client:
+            return {"error": "Database not connected"}
+        client = self.db.client
 
-        response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+        response = client.table("leads").select("*").eq("unique_key", unique_key).execute()
         leads = response.data if hasattr(response, 'data') else []
-        if not leads: return {"error": "Lead not found"}
+        if not leads:
+            return {"error": "Lead not found"}
 
-        lead = leads[0]
+        lead: dict[str, Any] = dict(cast(Mapping[str, Any], leads[0]))
         lead_data = {
             "person": lead.get("leadership_team", "Decision Maker"),
             "company": lead.get("company_name", "your company"),
@@ -506,14 +544,14 @@ class AgenticRouter:
                 ),
             )
             return {
-                "draft": draft.text.strip(),
+                "draft": response_text(draft),
                 "recipient": lead.get('leadership_team', 'there')
             }
-        except Exception as e:
-            logger.error("LinkedIn draft generation failed for %s: %s", unique_key, e, exc_info=True)
+        except Exception:
+            logger.exception("LinkedIn draft generation failed for %s", unique_key)
             return {"error": "Failed to generate LinkedIn draft"}
 
-    async def _get_strategic_insights(self):
+    async def _get_strategic_insights(self) -> dict[str, Any]:
         """
         Analyzes the lead database to identify patterns, vulnerabilities, and high-priority targets.
         """
@@ -521,9 +559,10 @@ class AgenticRouter:
             return {"error": "Database not connected"}
         if not self.client:
             return {"error": "AI model not initialized."}
+        client = self.db.client
 
         # Fetch recent leads with audit results
-        response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(200).execute()
+        response = client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(200).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:
@@ -556,22 +595,24 @@ class AgenticRouter:
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
                 ),
             )
-            result = extract_json_from_response(ai_response.text)
+            raw_text = response_text(ai_response)
+            result = typed_loads(raw_text, StrategicInsightsResponse)
             if result:
-                return result
-            return {"summary": "System analysis completed.", "insights": [ai_response.text[:100]], "top_priorities": []}
-        except Exception as e:
-            logger.error("Strategic insights AI call failed: %s", e, exc_info=True)
+                return dict(result)
+            return {"summary": "System analysis completed.", "insights": [raw_text[:100]], "top_priorities": []}
+        except Exception:
+            logger.exception("Strategic insights AI call failed")
             return {"summary": "Insights currently unavailable.", "insights": [], "top_priorities": []}
 
-    async def _execute_data_merge(self):
+    async def _execute_data_merge(self) -> dict[str, Any]:
         """
         Triggers a deduplication and standardization process across all leads in the database.
         """
         if not self.db.client:
             return {"error": "Database not connected"}
+        client = self.db.client
 
-        response = self.db.client.table("leads").select("*").execute()
+        response = client.table("leads").select("*").execute()
         leads_data = response.data if hasattr(response, 'data') else []
 
         if not leads_data:
@@ -591,7 +632,7 @@ class AgenticRouter:
             "removed_duplicates": removed_count
         }
 
-    async def _execute_discovery_search(self, params: dict):
+    async def _execute_discovery_search(self, params: DiscoverySearchParams) -> dict[str, Any]:
         """
         Triggers the DiscoveryEngine through TaskOrchestrator to find new leads.
         """
@@ -612,7 +653,7 @@ class AgenticRouter:
             "status_url": f"/orchestrator/status/{job_id}"
         }
 
-    async def _execute_deep_enrichment(self, params: dict):
+    async def _execute_deep_enrichment(self, params: UniqueKeyParams) -> dict[str, Any]:
         """
         Triggers the EnrichmentEngine to find deep company data for a specific lead.
         """
@@ -620,8 +661,12 @@ class AgenticRouter:
         if not unique_key:
             return {"error": "unique_key is required for DEEP_ENRICHMENT"}
 
+        if not self.db.client:
+            return {"error": "Database not connected"}
+        client = self.db.client
+
         # Fetch lead from DB
-        response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+        response = client.table("leads").select("*").eq("unique_key", unique_key).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:
@@ -633,17 +678,18 @@ class AgenticRouter:
         hunter = LeadHunter()
 
         try:
-            enriched_lead = await engine.enrich_lead(leads[0])
+            enriched_lead = await engine.enrich_lead(dict(cast(Mapping[str, Any], leads[0])))
 
             # Calculate outreach score
             enriched_lead["outreach_score"] = hunter.calculate_outreach_score(enriched_lead)
 
             # Phase 10: Segmentation & Outreach Hooks
             enriched_lead["segment"] = hunter.segment_lead(enriched_lead)
-            if enriched_lead.get("pain_points") and enriched_lead["pain_points"] != "Could not analyze pain points.":
+            pain_points_val = enriched_lead.get("pain_points")
+            if pain_points_val and pain_points_val != "Could not analyze pain points.":
                 hooks = await hunter.generate_outreach_hooks_async(
-                    enriched_lead["pain_points"],
-                    enriched_lead.get("company_name") or enriched_lead.get("name") or "Prospect"
+                    str(pain_points_val),
+                    str(enriched_lead.get("company_name") or enriched_lead.get("name") or "Prospect")
                 )
                 enriched_lead["linkedin_hook"] = hooks.get("linkedin_hook", "")
                 enriched_lead["email_hook"] = hooks.get("email_hook", "")
@@ -664,7 +710,7 @@ class AgenticRouter:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("EnrichmentEngine.aclose raised: %s", exc)
 
-    async def _execute_massive_pipeline(self, params: dict):
+    async def _execute_massive_pipeline(self, params: FilteredParams) -> dict[str, Any]:
         """
         Starts a large-scale orchestration job to process many leads in the background.
         """
@@ -681,19 +727,22 @@ class AgenticRouter:
                 "job_id": job_id,
                 "status_url": f"/orchestrator/status/{job_id}"
             }
-        except Exception as e:
-            logger.error("Massive pipeline execution failed: %s", e, exc_info=True)
+        except Exception:
+            logger.exception("Massive pipeline execution failed")
             return {"error": "Failed to start massive pipeline"}
 
-    async def _generate_campaign_strategy(self, params: dict):
+    async def _generate_campaign_strategy(self, params: FilteredParams) -> dict[str, Any]:
         """
         Creates a bulk outreach campaign by selecting top leads and generating personalized drafts.
         """
         try:
             filters = params.get("filters", "high-risk")
+            if not self.db.client:
+                return {"error": "Database not connected"}
+            client = self.db.client
 
             # 1. Fetch leads
-            query = self.db.client.table("leads").select("*")
+            query = client.table("leads").select("*")
             if filters == "high-risk":
                 query = query.filter("outreach_score", "gt", 0).order("outreach_score", desc=True)
             else:
@@ -708,23 +757,26 @@ class AgenticRouter:
             from src.processors.leadhunter import LeadHunter
             hunter = LeadHunter()
 
-            campaign_leads = []
-            for lead in leads:
+            campaign_leads: list[dict[str, Any]] = []
+            for lead_raw in leads:
+                lead: dict[str, Any] = dict(lead_raw) if isinstance(lead_raw, Mapping) else {}
                 # Extract first name for personalization
-                name_src = lead.get("leadership_team") or lead.get("name") or ""
-                unique_key = lead.get("unique_key")
+                name_src = str(lead.get("leadership_team") or lead.get("name") or "")
+                unique_key_val = lead.get("unique_key")
+                unique_key_str = str(unique_key_val) if unique_key_val else ""
 
                 # Use hunter to get a clean first name
                 first_name = hunter.extract_personal_name(name_src)
 
                 # Generate personalized draft — pass lead_data to avoid N+1 DB query
-                draft_result = await self._generate_outreach_draft({
-                    "unique_key": unique_key,
-                    "lead_data": lead
-                })
+                draft_params: UniqueKeyParams = {
+                    "unique_key": unique_key_str,
+                    "lead_data": lead,
+                }
+                draft_result = await self._generate_outreach_draft(draft_params)
 
                 campaign_leads.append({
-                    "unique_key": unique_key,
+                    "unique_key": unique_key_str,
                     "company": lead.get("company_name") or lead.get("name"),
                     "first_name": first_name or "there",
                     "draft": draft_result.get("draft", "No draft generated.")
@@ -735,6 +787,6 @@ class AgenticRouter:
                 "campaign": campaign_leads,
                 "reasoning": f"Curated a selection of {filters} leads for immediate outreach."
             }
-        except Exception as e:
-            logger.error("Campaign strategy generation failed: %s", e, exc_info=True)
+        except Exception:
+            logger.exception("Campaign strategy generation failed")
             return {"error": "Failed to generate campaign strategy"}

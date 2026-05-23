@@ -2,13 +2,19 @@ import aiohttp
 import asyncio
 import re
 from bs4 import BeautifulSoup
-from typing import Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, cast
 import os
 import random
 import json
 from urllib.parse import unquote, quote_plus, urlparse, parse_qs
 from google import genai
 from google.genai import types as genai_types
+from src.utils.gemini_types import (
+    EnrichmentDetailsResponse,
+    OutreachHooksResponse,
+    response_text,
+    typed_loads,
+)
 from src.utils.json_helper import extract_json_from_response
 from src.utils.logging_config import get_logger
 from src.utils.prompt_safety import (
@@ -667,13 +673,18 @@ class LeadHunter:
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
                 ),
             )
-            text = response.text.strip()
-            return text
-        except Exception as e:
-            logger.error("Pain point analysis error: %s", e, exc_info=True)
+            text = response_text(response)
+            return text or "Could not analyze pain points."
+        except Exception:
+            logger.exception("Pain point analysis error")
             return "Could not analyze pain points."
 
-    async def generate_outreach_hooks_async(self, pain_points: str, business_name: str, audit_results: Optional[dict] = None) -> dict:
+    async def generate_outreach_hooks_async(
+        self,
+        pain_points: str,
+        business_name: str,
+        audit_results: Optional[dict[str, Any]] = None,
+    ) -> OutreachHooksResponse:
         """
         Generates specific hooks for LinkedIn and Email based on pain points and technical data.
         """
@@ -735,16 +746,19 @@ class LeadHunter:
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
                 ),
             )
-            text = response.text.strip()
-            result = extract_json_from_response(text)
+            result = typed_loads(response_text(response), OutreachHooksResponse)
             if result:
                 return result
             return {"linkedin_hook": "", "email_hook": ""}
-        except Exception as e:
-            logger.error("Hook generation error: %s", e, exc_info=True)
+        except Exception:
+            logger.exception("Hook generation error")
             return {"linkedin_hook": "", "email_hook": ""}
 
-    async def enrich_business_data_async(self, page_text: str, business_name: Optional[str] = None) -> dict:
+    async def enrich_business_data_async(
+        self,
+        page_text: str,
+        business_name: Optional[str] = None,
+    ) -> EnrichmentDetailsResponse:
         """
         Uses Gemini to extract company size, leadership team, and business details from website text.
         Returns a dictionary with specific keys for DB update.
@@ -791,12 +805,11 @@ class LeadHunter:
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
                 ),
             )
-            text = response.text.strip()
             # Basic JSON extraction in case Gemini adds markdown boilerplate
-            result = extract_json_from_response(text)
+            result = typed_loads(response_text(response), EnrichmentDetailsResponse)
             if result:
                 # Cap field lengths to keep poisoned text bounded if it slips through
-                bounded = {}
+                bounded: dict[str, str] = {}
                 for k in ("company_size", "leadership_team", "business_details", "target_clients"):
                     v = result.get(k)
                     if isinstance(v, str):
@@ -805,8 +818,8 @@ class LeadHunter:
                         bounded[k] = "Unknown"
                     else:
                         bounded[k] = str(v)[:500]
-                return bounded
+                return cast(EnrichmentDetailsResponse, bounded)
             return {}
-        except Exception as e:
-            logger.error("Enrichment error: %s", e, exc_info=True)
+        except Exception:
+            logger.exception("Enrichment error")
             return {}
