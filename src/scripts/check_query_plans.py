@@ -85,6 +85,14 @@ HOT_PATH_QUERIES: tuple[HotPathQuery, ...] = (
         ),
         params=("00000000-0000-0000-0000-000000000000",),
     ),
+    HotPathQuery(
+        label="leads by seo_score range (T3.1-A — /insights + UI filter)",
+        explain_sql=(
+            "EXPLAIN (FORMAT JSON) "
+            "SELECT * FROM leads WHERE seo_score BETWEEN %s AND %s"
+        ),
+        params=(50, 100),
+    ),
 )
 
 

@@ -314,3 +314,22 @@ DO $$ BEGIN
         USING (false)
         WITH CHECK (false);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- T3.8-A (phase16-t3): defense-in-depth grant harden. Supabase grants
+-- the full privilege set to anon + authenticated by default on every
+-- new public-schema table; RLS deny-all already blocks read/write, but
+-- a future regression that dropped the policy would silently expose the
+-- audit log. REVOKE so both layers must fail before exposure.
+REVOKE ALL ON public.account_deletions FROM anon, authenticated, PUBLIC;
+
+-- ===========================================================================
+-- Hot-path index for /insights + UI filter score-range queries.
+--
+-- T3.1-A (phase16-t3): WHERE seo_score BETWEEN ... AND ... fell through
+-- enable_seqscan=off to a Seq Scan because no index covered the column.
+-- Partial: seo_score is NULL on every pre-audit row, so the partial
+-- index keeps writes cheap while still serving the post-audit filter.
+-- ===========================================================================
+CREATE INDEX IF NOT EXISTS idx_leads_seo_score
+    ON public.leads (seo_score)
+    WHERE seo_score IS NOT NULL;
