@@ -1257,6 +1257,24 @@ async def clear_leads(request: Request):
     return {"status": "cleared", "message": "All leads and jobs have been deleted."}
 
 
+@app.delete(
+    "/leads/clear-demo",
+    dependencies=[Depends(verify_api_key), Depends(verify_admin_token)],
+)
+@limiter.limit("3/hour")
+async def clear_demo_leads(request: Request):
+    """Purge ONLY rows where is_demo=TRUE (seed_demo_data.py output).
+
+    Same triple-gate as /leads/clear: API key + Admin token + (browser
+    only reaches via the authed Supabase session). Orchestration jobs are
+    untouched — a demo seed never spawns a hunt/audit job tied back to
+    its rows. Hits idx_leads_is_demo (partial) so plan is Index Scan.
+    """
+    db.delete_demo_leads()
+    logger.warning("DESTRUCTIVE: /leads/clear-demo invoked — is_demo rows wiped.")
+    return {"status": "cleared", "message": "All demo leads have been deleted."}
+
+
 # -----------------------------------------------------------------------------
 # GDPR Article 17 (right to erasure).
 #

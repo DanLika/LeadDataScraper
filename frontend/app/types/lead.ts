@@ -40,4 +40,6 @@ export interface Lead {
   pain_points?: string;
   seo_score?: number;
   created_at?: string;
+  is_demo?: boolean;
+  lead_source?: string;
 }

@@ -172,6 +172,20 @@ function DashboardInner() {
   const [filterMinScore, setFilterMinScore] = useState<number>(0);
   const [filterAuditStatus, setFilterAuditStatus] = useState<string>('all');
   const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_SORT);
+  // Operator-facing "Hide demo data" toggle. Defaults to true so seeded
+  // _demo_ rows stay out of view once the operator imports real leads;
+  // override persists in localStorage so the choice survives reloads.
+  // Lazy init via function so prerender + hydration agree (the local
+  // default would mismatch a server-rendered "true" otherwise).
+  const [hideDemoData, setHideDemoDataState] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const v = window.localStorage.getItem('ldsHideDemoData');
+    return v === null ? true : v === '1';
+  });
+  const setHideDemoData = useCallback((v: boolean) => {
+    setHideDemoDataState(v);
+    try { window.localStorage.setItem('ldsHideDemoData', v ? '1' : '0'); } catch {}
+  }, []);
   const [copiedHookType, setCopiedHookType] = useState<'email' | 'linkedin' | null>(null);
   const [copiedAction, setCopiedAction] = useState<'body' | 'subject' | 'invite' | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -799,6 +813,26 @@ function DashboardInner() {
     }
   };
 
+  const handleClearDemoLeads = async () => {
+    if (!confirm("Remove all demo leads (is_demo=true)? Real scraped leads stay untouched.")) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/leads/clear-demo`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(body.error || body.detail || `Demo clear failed (HTTP ${res.status})`, 'error');
+        return;
+      }
+      setLeads(prev => prev.filter(l => !l.is_demo));
+      showToast("Demo leads removed.", 'success');
+    } catch (err) {
+      console.error('Clear demo leads failed:', err);
+      showToast('Demo clear failed — backend unreachable.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const startMassivePipeline = async () => {
     if (leads.length === 0) {
       showToast('No leads to orchestrate. Import a CSV first.', 'info');
@@ -898,6 +932,11 @@ function DashboardInner() {
 
   const filteredLeads = useMemo(() => {
     const matched = leads.filter((lead: Lead) => {
+      // Demo gate runs first so the other matchers never see seeded rows
+      // when the operator has the toggle on — keeps the user-facing
+      // "audited / high-risk" view counts honest under hideDemoData=true.
+      if (hideDemoData && lead.is_demo) return false;
+
       const matchesSearch = (lead.company_name || lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                            (lead.website || '').toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -946,7 +985,7 @@ function DashboardInner() {
       }
     });
     return sorted;
-  }, [leads, searchTerm, filterSegment, filterMinScore, filterAuditStatus, view, sortKey]);
+  }, [leads, searchTerm, filterSegment, filterMinScore, filterAuditStatus, view, sortKey, hideDemoData]);
 
   const segmentOptions = useMemo(() =>
     Array.from(new Set(leads.map((l: Lead) => l.segment).filter(Boolean))),
@@ -1233,6 +1272,8 @@ function DashboardInner() {
               segmentOptions={segmentOptions}
               onClearFilters={clearFilters}
               hasActiveFilters={hasActiveFilters}
+              hideDemoData={hideDemoData}
+              setHideDemoData={setHideDemoData}
             />
 
             <LeadTable
@@ -1704,6 +1745,9 @@ function DashboardInner() {
 
               <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid var(--error-tint)' }}>
                 <h3 style={{ fontSize: '0.9rem', color: 'var(--error-strong)', marginBottom: '0.5rem' }}>Danger Zone</h3>
+                <button className="btn-secondary" style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem', marginBottom: '0.5rem' }} onClick={handleClearDemoLeads}>
+                  Remove all demo data
+                </button>
                 <button className="btn-secondary" style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }} onClick={handleClearLeads}>
                   Clear All Leads
                 </button>

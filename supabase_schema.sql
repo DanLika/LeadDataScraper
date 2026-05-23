@@ -41,7 +41,12 @@ CREATE TABLE IF NOT EXISTS leads (
     first_name TEXT,
     company_name TEXT,
     priority_link TEXT,
-    needs_manual_review BOOLEAN DEFAULT FALSE
+    needs_manual_review BOOLEAN DEFAULT FALSE,
+    -- Dogfood: distinguishes seeded demo rows from real scraped leads so the
+    -- frontend can hide them by default and the "Remove all demo data"
+    -- button can scope its DELETE WHERE is_demo = TRUE. Applied live via
+    -- migration `add_leads_is_demo_column` (2026-05-23).
+    is_demo BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- Table for orchestration jobs
@@ -68,6 +73,11 @@ CREATE INDEX IF NOT EXISTS idx_orchestration_jobs_status ON orchestration_jobs(s
 -- DESC so the planner can satisfy ORDER BY directly and skip the Sort
 -- step (verified via EXPLAIN with enable_seqscan=off).
 CREATE INDEX IF NOT EXISTS idx_leads_created_at_desc ON leads(created_at DESC);
+-- Partial index on is_demo = TRUE only. Production rows default FALSE
+-- and never enter this index, so writes stay cheap. Supports the
+-- "Hide demo data" filter on the dashboard + the demo-scoped clear
+-- endpoint.
+CREATE INDEX IF NOT EXISTS idx_leads_is_demo ON leads(is_demo) WHERE is_demo = TRUE;
 
 -- Campaign management tables (Step 4: Outreach)
 CREATE TABLE IF NOT EXISTS campaigns (

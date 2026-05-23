@@ -207,6 +207,20 @@ class SupabaseHelper:
             return None
         return self.client.table("leads").delete().gte("created_at", "1970-01-01").execute()
 
+    def delete_demo_leads(self):
+        """
+        Deletes only the demo-flagged rows from 'leads'.
+
+        Uses the real boolean predicate `is_demo=TRUE` directly — no sentinel
+        needed because that's an actual selective filter (unlike delete_all_*
+        which need a tautology since PostgREST refuses naked DELETE).
+        Hits idx_leads_is_demo (partial, TRUE-only) so the plan is an
+        Index Scan even on a large leads table.
+        """
+        if not self.client:
+            return None
+        return self.client.table("leads").delete().eq("is_demo", True).execute()
+
     def delete_all_jobs(self):
         """
         Deletes all rows from the 'orchestration_jobs' table.

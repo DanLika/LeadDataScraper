@@ -26,6 +26,8 @@ interface FilterBarProps {
   segmentOptions: (string | undefined)[];
   onClearFilters: () => void;
   hasActiveFilters: boolean;
+  hideDemoData: boolean;
+  setHideDemoData: (value: boolean) => void;
 }
 
 export default function FilterBar({
@@ -42,6 +44,8 @@ export default function FilterBar({
   segmentOptions,
   onClearFilters,
   hasActiveFilters,
+  hideDemoData,
+  setHideDemoData,
 }: FilterBarProps) {
   return (
     <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-muted)', flexWrap: 'wrap', gap: '1.5rem', minWidth: 'min-content' }}>
@@ -116,6 +120,21 @@ export default function FilterBar({
           <option value="name_asc" style={{ background: 'var(--surface-dark)' }}>Name A→Z</option>
           <option value="name_desc" style={{ background: 'var(--surface-dark)' }}>Name Z→A</option>
         </select>
+
+        <label
+          htmlFor="hide-demo-data"
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--surface-muted)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', fontSize: '0.85rem', color: 'var(--text-primary)', cursor: 'pointer', minHeight: '44px', userSelect: 'none' }}
+        >
+          <input
+            type="checkbox"
+            id="hide-demo-data"
+            checked={hideDemoData}
+            onChange={(e) => setHideDemoData(e.target.checked)}
+            aria-label="Hide demo data"
+            style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+          />
+          Hide demo data
+        </label>
 
         {hasActiveFilters && (
           <button
