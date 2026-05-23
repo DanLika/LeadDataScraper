@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import aiohttp
 import ssl
 import re
@@ -6,7 +7,19 @@ import time
 from bs4 import BeautifulSoup
 from typing import Optional
 
+from src.errors import AuditFetchError
 from src.utils.ssrf_guard import SSRFError, SSRFGuardResolver, assert_safe_scheme
+
+logger = logging.getLogger(__name__)
+
+# Maximum HTTP response body the auditor will buffer into memory before
+# raising. Real HTML pages are <500 KB; 2 MB is a comfortable ceiling
+# that protects worker memory against a slow-trickle attack streaming
+# 100 MB at just-under-timeout throughput. `aiohttp.ClientTimeout` only
+# bounds wall-clock, not bytes — see vibe-security audit finding M6.
+# The downstream `html[:50_000]` regex slice in `_extract_emails_and_text`
+# happens AFTER the full body is in RAM, so it does NOT protect the worker.
+MAX_HTML_BYTES = 2 * 1024 * 1024  # 2 MB
 
 # Pre-compiled regex patterns for social URL filtering (performance optimization)
 FB_EXCLUDE = re.compile(r'sharer|messenger|plugins')
@@ -252,7 +265,25 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
             async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
                 try:
                     async with session.get(url, timeout=12) as response:
-                        html = await response.text()
+                        # Body-size cap: read MAX_HTML_BYTES + 1 so we can
+                        # detect overshoot without buffering the entire
+                        # attacker-controlled stream. See MAX_HTML_BYTES
+                        # docstring above for the threat model.
+                        raw = await response.content.read(MAX_HTML_BYTES + 1)
+                        if len(raw) > MAX_HTML_BYTES:
+                            logger.warning(
+                                "seo_audit body exceeds cap for %s: %d bytes",
+                                url,
+                                len(raw),
+                            )
+                            raise AuditFetchError(
+                                f"Response body exceeds {MAX_HTML_BYTES} bytes"
+                            )
+                        # `response.charset` may be None when the server
+                        # omits a charset hint; default to UTF-8 and use
+                        # errors="replace" so malformed bytes don't raise
+                        # UnicodeDecodeError up through the auditor.
+                        html = raw.decode(response.charset or "utf-8", errors="replace")
                         results["is_up"] = True
                         results["response_time"] = round(time.time() - start_time, 2)
                 except (aiohttp.ClientConnectorSSLError, ssl.SSLError):
@@ -264,6 +295,14 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
             results["is_up"] = True
             results["response_time"] = 0.1
 
+    except AuditFetchError:
+        # Propagate to the orchestrator's per-lead handler in
+        # ParallelAuditor.audit_single_lead, which records the lead with
+        # audit_status='Failed' and surfaces the message in last_error.
+        # Must NOT be swallowed by the generic `except Exception` below,
+        # which would convert it to a "Connection Failed: ..." red_flag
+        # and obscure the body-cap signal.
+        raise
     except Exception as e:
         results["red_flags"].append(f"Connection Failed: {str(e)}")
         return results
