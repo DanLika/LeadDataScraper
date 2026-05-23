@@ -77,6 +77,17 @@ each item is where it is.
 ## Later (3–6 months)
 
 ### [BookBed.io] Commercialization track
+> **Phase 13 scope (2026-05-22) — dogfood-only cut.** Items below
+> were the original Phase 13 commercial track for LDS but were
+> moved here because LDS is single-tenant by design (ADR-001) and
+> billing / multi-tenancy / signup work belongs in the BookBed
+> repos, not throwaway on LDS. The LDS dogfood path keeps:
+> 13.1 hr-HR i18n, 13.3 demo seed, 13.4 email dispatch, 13.5
+> DKIM/SPF/DMARC, 13.14 crossover doc (shipped above), 13.15
+> 2-week dogfood. See
+> [`docs/bookbed-crossover.md`](bookbed-crossover.md) Phase A→E
+> for what ports across.
+
 - [ ] **Marketing site** — landing page with value prop, demo video,
       pricing, signup. Out of scope for the personal deployment.
 - [ ] **Pricing page** with Stripe / LemonSqueezy / Paddle integration.
@@ -156,6 +167,13 @@ This file is updated alongside the work, not as a separate exercise:
 
 ## Recently shipped (last 4 weeks)
 
+- ✅ **Phase 13.14 — BookBed crossover gap-analysis** (2026-05-22).
+      [`docs/bookbed-crossover.md`](bookbed-crossover.md) is the
+      per-pattern decision matrix for which LDS hardening patterns
+      port to `bookbed-website/` (Next.js marketing) vs `bookbed/`
+      (Flutter SaaS + CF), which are already covered there, and
+      which are lead-gen-only (never port). Spot-checked against
+      6 real BookBed files; phased action plan A→E inside.
 - ✅ GDPR data export endpoint + tests + frontend button.
 - ✅ GDPR account deletion endpoint + tests + audit trail + 30-day
       purge script.
