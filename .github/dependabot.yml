@@ -1,0 +1,120 @@
+version: 2
+
+# Dependabot opens PRs for outdated deps. The companion workflow
+# `.github/workflows/dependabot-auto-merge.yml` flips `--auto` on
+# patch-update PRs so they merge themselves AFTER every required CI
+# check (pytest, pip-audit, npm audit, gitleaks, semgrep, ruff, mypy,
+# ESLint, Playwright, schema-drift, referential-integrity, Lighthouse,
+# container-scan) goes green. Patch updates with a failing security
+# scan or test will NOT auto-merge — branch protection still gates.
+#
+# Minor + major bumps stay manual. Reviewer DanLika is assigned by
+# Dependabot directly (the field below); branch protection enforces
+# the actual approval count.
+#
+# Each ecosystem reads the trailing `# vX.Y.Z` comment on SHA-pinned
+# references (workflows) or the lockfile + manifest (pip/npm/docker)
+# to determine the next bump. The "deps:" prefix matches the existing
+# conventional-commits scope in this repo.
+
+updates:
+  # Python — pip resolves requirements.txt + the transitive tree.
+  # The pip-audit job in ci.yml + security.yml will already block any
+  # bump that introduces a known CVE, so even an auto-merged patch
+  # update can't ship a vulnerable dep.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    reviewers:
+      - DanLika
+    commit-message:
+      prefix: "deps"
+      include: scope
+    groups:
+      # Single PR for ALL patch bumps as requested — keeps the review
+      # surface to one diff per week instead of N flake-prone PRs.
+      pip-patches:
+        update-types:
+          - patch
+        patterns:
+          - "*"
+
+  # Frontend npm — dev and prod grouped separately so a runtime-dep
+  # bump (e.g. next, @supabase/ssr) isn't bundled with a CI tooling
+  # bump (eslint, typescript). Easier to revert just one half if
+  # something breaks.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    reviewers:
+      - DanLika
+    commit-message:
+      prefix: "deps"
+      include: scope
+    groups:
+      npm-prod:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+        patterns:
+          - "*"
+      npm-dev:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+        patterns:
+          - "*"
+
+  # GitHub Actions — paired with SHA pinning (every `uses: org/action@<sha>
+  # # vX.Y.Z` line in .github/workflows/*.yml). Dependabot reads the
+  # trailing tag comment, queries the action's releases, and bumps SHA +
+  # comment together. Without this, the SHA-pin becomes a freeze.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    reviewers:
+      - DanLika
+    commit-message:
+      prefix: "deps"
+      include: scope
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
+        patterns:
+          - "*"
+
+  # Dockerfile base image — `FROM mcr.microsoft.com/playwright/python:
+  # v1.40.0-jammy`. Trivy + Grype in container-scan will flag CVEs in
+  # the running image; Dependabot opens the bump PR that clears them.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    reviewers:
+      - DanLika
+    commit-message:
+      prefix: "deps"
+      include: scope

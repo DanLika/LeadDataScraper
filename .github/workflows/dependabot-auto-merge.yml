@@ -1,0 +1,74 @@
+name: dependabot-auto-merge
+
+# Flips `gh pr merge --auto` on patch-update Dependabot PRs. GitHub then
+# merges the PR ONLY when every required check on `main`'s branch
+# protection passes — pytest, pip-audit, npm audit, gitleaks, semgrep,
+# ruff, mypy, ESLint, Playwright, schema-drift, referential-integrity,
+# Lighthouse, container-scan. A failing security scan or test will hold
+# the PR open with a red status, never merging.
+#
+# Minor + major Dependabot PRs are NOT touched here — they require a
+# human approval click.
+#
+# Prerequisites (operator action, one-time):
+#   1. Settings → General → "Allow auto-merge" must be enabled.
+#   2. Branch protection on `main` must require all the CI checks
+#      listed above (otherwise auto-merge will fire on a partial
+#      green and ship vulnerable patches).
+#   3. Settings → Code security → Dependabot must be enabled for the
+#      repo, and DanLika must have repo write access (Dependabot needs
+#      it to push update branches).
+#
+# `pull_request_target` is used (not `pull_request`) because PRs opened
+# by `dependabot[bot]` get a read-only GITHUB_TOKEN under the normal
+# `pull_request` trigger — they can't call `gh pr merge`. With
+# `pull_request_target`, the workflow runs in the context of the BASE
+# branch with a write token. We never check out PR code, so the usual
+# pwn-by-fork risk of `pull_request_target` doesn't apply here.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write       # `gh pr merge` needs write
+  pull-requests: write  # to enable auto-merge
+
+# pull_request_target events evaluate `event_name == 'pull_request'`
+# to false, so concurrent firings on the same PR ref serialize but
+# never cancel — important because the inner `gh pr merge --auto`
+# API call should be allowed to complete cleanly.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  auto-merge-patches:
+    name: Auto-merge Dependabot patch PRs
+    runs-on: ubuntu-latest
+    # Only act on PRs authored by dependabot. Belt-and-braces — if a
+    # human were to spoof the head ref, the metadata fetch below would
+    # also fail because there'd be no Dependabot PR descriptor.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        # Parses the structured commit message Dependabot generates,
+        # returning update-type, dependency-names, ecosystem, etc.
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98  # v3.1.0
+      - name: Enable auto-merge on patch-only update
+        # `version-update:semver-patch` covers single-dep patch bumps.
+        # `multi-dependency` is the value when the PR groups multiple
+        # bumps; we still auto-merge IF the highest-severity update
+        # inside the group is a patch — checked via update-type.
+        if: |
+          steps.meta.outputs.update-type == 'version-update:semver-patch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        # `--auto` defers the merge until every required check on main
+        # is green. `--squash` keeps the linear history convention used
+        # by the rest of the repo. If branch protection rejects the
+        # merge for any reason (failed check, conflict, missing review)
+        # the PR stays open and Dependabot retries next week.
+        run: gh pr merge --auto --squash "$PR_URL"

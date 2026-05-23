@@ -1,0 +1,112 @@
+name: cert-expiry-monitor
+
+# Weekly TLS-cert expiry check on both prod hosts. Alerts to Discord
+# when any cert expires inside `MIN_DAYS` (default 30).
+#
+# Render manages TLS via Let's Encrypt auto-renewal (90-day certs,
+# renews at ~30 days remaining). This monitor exists to catch the
+# rare case where auto-renewal FAILS — usually because DNS validation
+# changed (domain ownership moved, NS record drift, CNAME flip). A
+# silently-expiring cert means hard browser failure for every operator.
+#
+# Cron picks Mon 09:00 UTC — start-of-week visibility, plenty of time
+# to fix before a Monday-evening or Tuesday cert expiry.
+
+on:
+  schedule:
+    - cron: '0 9 * * MON'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Check certificate expiry on prod hosts
+        id: cert
+        env:
+          # Bare hostnames (no scheme, no path). e.g.
+          #   lead-scraper-frontend.onrender.com
+          #   lead-scraper-backend.onrender.com
+          FRONTEND_HOST: ${{ secrets.PROD_FRONTEND_HOST }}
+          BACKEND_HOST:  ${{ secrets.PROD_BACKEND_HOST }}
+          MIN_DAYS: ${{ vars.CERT_EXPIRY_MIN_DAYS || '30' }}
+        run: |
+          set -euo pipefail
+
+          urgent=""
+          report=""
+
+          check_host() {
+            local host="$1"
+            [ -z "$host" ] && return 0
+
+            # openssl returns the cert presented by the server. </dev/null
+            # closes stdin so s_client doesn't hang waiting for input.
+            # 2>/dev/null mutes the cert-chain trace; -servername sets SNI
+            # so multi-host listeners present the right cert.
+            local expiry
+            expiry=$(echo | openssl s_client -servername "$host" \
+                       -connect "$host:443" 2>/dev/null \
+                     | openssl x509 -noout -enddate \
+                     | sed 's/notAfter=//' || true)
+
+            if [ -z "$expiry" ]; then
+              report="$report"$'\n'"- ${host}: **could not retrieve cert** (DNS / connect failure)"
+              urgent="$urgent ${host}"
+              return 0
+            fi
+
+            local expiry_epoch now_epoch days_left
+            expiry_epoch=$(date -u -d "$expiry" +%s 2>/dev/null || echo "0")
+            now_epoch=$(date -u +%s)
+            days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+
+            report="$report"$'\n'"- ${host}: ${days_left} days left (expires ${expiry})"
+
+            if [ "$days_left" -lt "$MIN_DAYS" ]; then
+              urgent="$urgent ${host}"
+            fi
+          }
+
+          check_host "$FRONTEND_HOST"
+          check_host "$BACKEND_HOST"
+
+          echo "$report"
+
+          if [ -n "$urgent" ]; then
+            {
+              echo "alert=true"
+              echo "body<<__EOF__"
+              echo "Hosts with cert expiry < ${MIN_DAYS} days OR unreachable:"
+              echo "$report"
+              echo "__EOF__"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "alert=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Alert if any cert expires < MIN_DAYS
+        if: steps.cert.outputs.alert == 'true'
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          severity: warning
+          title: "🔒 TLS cert expiry imminent (or host unreachable)"
+          message: |
+            ${{ steps.cert.outputs.body }}
+
+            **Action**: check Render dashboard → service → Custom Domains.
+            If a custom domain points to a CNAME that drifted, Let's
+            Encrypt validation fails silently — fix DNS, then click
+            "Verify" on the affected domain row.
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

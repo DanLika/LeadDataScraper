@@ -1,0 +1,273 @@
+name: mutation-test
+
+# Weekly mutmut run. Mutation testing answers the question coverage % can't:
+# "Do the tests actually ASSERT the right behavior, or just execute the
+# code?" — by mutating each line (flip `<` to `<=`, swap `and` for `or`,
+# delete a return, etc.) and re-running the suite. A mutant that the
+# suite fails to catch ("survived") indicates a missing assertion.
+#
+# Three matrix entries run in parallel, one per security/business-critical
+# module. They are slow (mutation × suite per file is hours), which is
+# why this is weekly, not per-PR. Per-PR mutation testing on the full
+# repo is unreasonable; the weekly cadence still catches regressions
+# before they sit for long.
+#
+# Targets:
+#   - src/utils/ssrf_guard.py     SSRF gate — false negative = exfil window
+#   - src/utils/prompt_safety.py  Prompt-injection fence — lets attacker
+#                                 lead-row hijack Gemini
+#   - src/processors/leadhunter.py  Score calc — wrong score routes leads
+#                                   into wrong action queue
+#
+# Output:
+#   - Per-file mutmut HTML report uploaded as artifact (90d retention)
+#   - Aggregate job opens/updates ONE tracker issue (label:
+#     `mutation-coverage`) when any file drops below the 80% kill-rate
+#     threshold. Closes it when all files climb back over.
+#
+# Operator setup:
+#   - Create repo label `mutation-coverage`
+#   - The 80% threshold is in MIN_KILL_RATE below — adjust if too noisy
+
+on:
+  schedule:
+    # 03:00 UTC every Sunday — after the nightly flakiness-detector but
+    # well before Monday's Dependabot wave so a mutation regression
+    # caused by a dep bump shows up against the bumped state.
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # update the tracker issue
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  MIN_KILL_RATE: '80'
+
+jobs:
+  mutate:
+    name: mutmut ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    # Mutation runs are slow; default 6h job timeout. Three matrix
+    # entries in parallel keeps wall-clock under a single timeout.
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - src/utils/ssrf_guard.py
+          - src/utils/prompt_safety.py
+          - src/processors/leadhunter.py
+    outputs:
+      # Each matrix entry writes its own kill_rate via the
+      # `mutation-results-<file>` artifact; aggregator reads them all.
+      # (Matrix-scoped job outputs aren't aggregatable into a single
+      # downstream object in current GH Actions, so we lean on artifacts.)
+      placeholder: 'see-artifacts'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install deps + mutmut
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest mutmut
+      - name: Run mutmut against ${{ matrix.target }}
+        # `mutmut run` returns non-zero when there are survivors — we
+        # do NOT want that to short-circuit the workflow because the
+        # downstream gate decides pass/fail based on the kill RATE
+        # (some survivors are tolerated below the threshold). Always
+        # continue.
+        run: |
+          set -uo pipefail
+          mutmut run --paths-to-mutate "${{ matrix.target }}" --runner 'pytest -x -q' || true
+          echo "--- mutmut results ---"
+          mutmut results || true
+      - name: Compute kill rate
+        id: rate
+        # Parse mutmut's text output. `mutmut results` lists each mutation
+        # by status; we count categories from the underlying cache via
+        # `mutmut junitxml`-style parsing.  Simpler: scrape the printed
+        # summary. mutmut emits one line `(<n>/<total>) ...` per category
+        # in the trailer; safest to count from the cache directly.
+        run: |
+          set -euo pipefail
+          # mutmut stores results in .mutmut-cache (sqlite). Use the
+          # `mutmut results` text and a Python one-liner to extract the
+          # per-status counts.
+          python <<'PY' > rate.json
+          import json, re, subprocess, sys
+          out = subprocess.run(['mutmut', 'results'], capture_output=True, text=True).stdout
+          status = {'killed':0, 'survived':0, 'timeout':0, 'suspicious':0, 'skipped':0}
+          # mutmut's `results` lists groups: e.g. "Survived 🙁 (3)"; parse them.
+          for line in out.splitlines():
+              m = re.match(r'^(Killed|Survived|Timed out|Timeout|Suspicious|Skipped)[^\(]*\((\d+)\)', line.strip(), re.I)
+              if m:
+                  key = m.group(1).lower().replace(' ', '').replace('timedout','timeout')
+                  status[key] = status.get(key, 0) + int(m.group(2))
+          # Kill rate: timed-out mutations count as killed (test caught
+          # them, just by timing out). Skipped don't count toward the
+          # denominator (mutmut couldn't mutate that line).
+          killed = status['killed'] + status['timeout']
+          relevant = killed + status['survived'] + status['suspicious']
+          rate = 100.0 * killed / relevant if relevant else 100.0
+          print(json.dumps({
+              'target': "${{ matrix.target }}",
+              'killed': killed,
+              'survived': status['survived'],
+              'suspicious': status['suspicious'],
+              'timeout': status['timeout'],
+              'skipped': status['skipped'],
+              'relevant': relevant,
+              'kill_rate': round(rate, 2),
+          }))
+          PY
+          cat rate.json
+      - name: Generate HTML report
+        if: always()
+        run: mutmut html || true
+      - name: Upload mutmut HTML + JSON
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          # Slashes in matrix.target break artifact names — flatten.
+          name: mutmut-${{ strategy.job-index }}
+          path: |
+            rate.json
+            html/
+          retention-days: 90
+
+  aggregate:
+    name: Threshold gate + issue tracker
+    needs: [mutate]
+    runs-on: ubuntu-latest
+    if: always()
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - name: Download all mutmut artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          path: mutmut-artifacts/
+          pattern: mutmut-*
+      - name: Evaluate kill rates + build report
+        id: eval
+        run: |
+          set -euo pipefail
+          python <<'PY' > issue-body.md
+          import json, os, pathlib, sys
+          threshold = float(os.environ['MIN_KILL_RATE'])
+          rows = []
+          breached = []
+          for d in sorted(pathlib.Path('mutmut-artifacts').glob('mutmut-*')):
+              rate_file = d / 'rate.json'
+              if not rate_file.exists():
+                  continue
+              r = json.loads(rate_file.read_text())
+              rows.append(r)
+              if r['relevant'] > 0 and r['kill_rate'] < threshold:
+                  breached.append(r)
+          out = []
+          status = 'PASS' if not breached else 'FAIL'
+          out.append(f"# Mutation coverage — {status}\n")
+          out.append(f"_Threshold: ≥ {threshold:.0f}% kill rate. "
+                     f"Auto-generated by `mutation-test.yml` weekly._\n")
+          out.append("| Target | Killed | Survived | Suspicious | Timeout | Skipped | Kill rate |")
+          out.append("|---|---:|---:|---:|---:|---:|---:|")
+          for r in rows:
+              mark = '✅' if r['kill_rate'] >= threshold else '❌'
+              out.append(
+                  f"| `{r['target']}` | {r['killed']} | {r['survived']} "
+                  f"| {r['suspicious']} | {r['timeout']} | {r['skipped']} "
+                  f"| {mark} **{r['kill_rate']:.1f}%** |"
+              )
+          if breached:
+              out.append("\n## Files below threshold\n")
+              for r in breached:
+                  out.append(
+                      f"- **`{r['target']}`** — {r['survived']} survivors. "
+                      "Open the HTML report (workflow artifact `mutmut-<idx>`) "
+                      "to see which mutations escaped. Each survivor is a "
+                      "missing assertion; add a test that distinguishes the "
+                      "mutated behavior from the original."
+                  )
+          else:
+              out.append("\nAll targeted files meet or exceed the threshold.\n")
+          pathlib.Path('issue-body.md').write_text("\n".join(out))
+          # Write the status flag to a sentinel file the next step reads
+          # (heredoc stdout would be redirected away from $GITHUB_OUTPUT).
+          pathlib.Path('status.txt').write_text(status)
+          PY
+          cat issue-body.md
+          echo "status=$(cat status.txt)" >> "$GITHUB_OUTPUT"
+      - name: Open or update mutation-coverage tracker issue
+        # Same one-canonical-issue pattern as flakiness-detector. Closes
+        # the issue when status is PASS (kill rates back over threshold)
+        # so the operator only sees an open issue when action is needed.
+        run: |
+          set -euo pipefail
+          export TITLE="Mutation coverage tracker (weekly)"
+          existing=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label mutation-coverage \
+            --state open \
+            --json number,title \
+            --jq '.[] | select(.title==env.TITLE) | .number' \
+            -L 1 || echo "")
+          status="${{ steps.eval.outputs.status }}"
+          if [ "$status" = "FAIL" ]; then
+            if [ -z "$existing" ]; then
+              gh issue create \
+                --repo "${{ github.repository }}" \
+                --title "$TITLE" \
+                --body-file issue-body.md \
+                --label mutation-coverage
+            else
+              gh issue edit "$existing" \
+                --repo "${{ github.repository }}" \
+                --body-file issue-body.md
+            fi
+            # Workflow itself fails so the weekly run shows red and
+            # surfaces in the GH UI / email digest.
+            echo "::error::Mutation coverage below ${MIN_KILL_RATE}% threshold."
+            exit 1
+          else
+            # All good — if an old issue is open, post a comment + close.
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" \
+                --repo "${{ github.repository }}" \
+                --body-file issue-body.md
+              gh issue close "$existing" \
+                --repo "${{ github.repository }}" \
+                --reason completed \
+                --comment "Threshold restored. Closing automatically."
+            fi
+          fi
+
+      # Discord notification on threshold breach. Runs only when the
+      # eval step concluded FAIL (the gh-issue step above exits 1 in
+      # that case, so this needs if: failure() + the status check).
+      # The tracker issue is the authoritative state; the Discord ping
+      # is the heads-up so the operator opens GitHub instead of waiting
+      # for the next weekly email digest.
+      - name: Discord alert on mutation regression
+        if: failure() && steps.eval.outputs.status == 'FAIL'
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          severity: warning
+          title: "🧬 Mutation kill rate below ${{ env.MIN_KILL_RATE }}%"
+          message: |
+            One or more mutation-test targets dropped below the
+            **${{ env.MIN_KILL_RATE }}%** kill-rate threshold.
+            See the auto-updated tracker issue (label `mutation-coverage`)
+            for the per-file breakdown + survivors.
+          link: ${{ github.server_url }}/${{ github.repository }}/issues?q=is%3Aopen+label%3Amutation-coverage

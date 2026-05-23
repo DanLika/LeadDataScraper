@@ -1,0 +1,166 @@
+name: deploy-backend
+
+# Build → SLSA3 provenance → cosign verify → Render rollout.
+#
+# Chain of custody: every image deployed to prod is bound to the commit
+# SHA and the workflow run that produced it. The provenance attestation
+# is signed via GitHub OIDC + Sigstore (no long-lived keys). The verify
+# step before the Render API call means a forged or replayed image
+# (e.g. someone pushing a tag to ghcr.io directly) cannot reach prod —
+# its attestation won't match the expected `--certificate-identity`.
+#
+# Render must be configured in "Deploy from existing image" mode for
+# the backend service, pointing at ghcr.io/<owner>/lds-backend. The
+# Render service will pull whichever digest this workflow POSTs at
+# the end. Required repo secrets:
+#   - RENDER_API_KEY               (existing)
+#   - RENDER_BACKEND_SERVICE_ID    (new — `srv-...` for the backend)
+# GHCR push uses GITHUB_TOKEN (auto-provisioned, no secret needed).
+# If GHCR repo is private, Render service must have a "Container
+# Registry Credential" attached with a GH PAT (read:packages scope).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'src/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/deploy-backend.yml'
+
+permissions:
+  contents: read
+
+# Serialize deploys on the same ref so two near-simultaneous merges to
+# main don't race the Render API rollout. cancel-in-progress is false
+# here (push event only) — never cancel a deploy mid-flight; let the
+# second one queue and rollout the newest digest after.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/lds-backend
+
+jobs:
+  build:
+    name: Build + push to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to GHCR
+      id-token: write   # OIDC for buildx provenance attestation
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      image: ${{ env.IMAGE }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf  # v6.0.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+      - id: push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Pass the commit SHA into the image so backend Sentry init can
+          # tag every event with the exact revision. Read in the
+          # Dockerfile as ARG GIT_SHA and exported as ENV RELEASE_SHA.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          # buildx-native provenance + SBOM attached as OCI artifacts.
+          # The SLSA3 generator job below adds a stronger, externally
+          # verifiable provenance attestation on top.
+          provenance: mode=max
+          sbom: true
+
+  provenance:
+    name: SLSA3 provenance
+    needs: [build]
+    # The reusable workflow needs these permissions in the CALLER:
+    #   - actions: read   — fetch workflow run metadata for provenance
+    #   - id-token: write — OIDC token to sign via Sigstore Fulcio
+    #   - packages: write — upload attestation to GHCR alongside image
+    permissions:
+      actions: read
+      id-token: write
+      packages: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a  # v2.1.0
+    with:
+      image: ghcr.io/${{ github.repository_owner }}/lds-backend
+      digest: ${{ needs.build.outputs.digest }}
+      registry-username: ${{ github.actor }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-and-deploy:
+    name: cosign verify + Render rollout
+    needs: [build, provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DIGEST: ${{ needs.build.outputs.digest }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: ${{ secrets.RENDER_BACKEND_SERVICE_ID }}
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify SLSA provenance attestation (keyless, OIDC)
+        # Binds the image digest to THIS repo via the SLSA generator's
+        # workflow identity. The regex allows v2.x.y bumps of the
+        # generator without re-pointing, but locks the major version
+        # so a future v3 (potentially with different semantics) can't
+        # produce a passing attestation until we audit it.
+        #
+        # `--certificate-oidc-issuer` pins Sigstore Fulcio to GitHub's
+        # OIDC issuer URL — closes the door on attestations signed by
+        # an attacker's OIDC issuer with a forged "github.com"-looking
+        # identity.
+        run: |
+          set -euo pipefail
+          cosign verify-attestation \
+            --type=slsaprovenance \
+            --certificate-identity-regexp='^https://github\.com/slsa-framework/slsa-github-generator/\.github/workflows/generator_container_slsa3\.yml@refs/tags/v2\.[0-9]+\.[0-9]+$' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+            "${IMAGE}@${DIGEST}"
+          echo "Provenance verified for ${IMAGE}@${DIGEST}"
+      - name: Trigger Render rollout to verified digest
+        # If verify above failed, this step never runs (set -e via
+        # default shell). Render's API receives the exact digest, not
+        # a tag — eliminates the tag-mutation race between verify and
+        # rollout.
+        run: |
+          set -euo pipefail
+          if [ -z "$RENDER_API_KEY" ] || [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "Missing RENDER_API_KEY or RENDER_BACKEND_SERVICE_ID"
+            exit 1
+          fi
+          payload=$(jq -n --arg url "${IMAGE}@${DIGEST}" '{imageUrl: $url}')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+            -d "$payload"
+          echo "Render rollout triggered for ${IMAGE}@${DIGEST}"

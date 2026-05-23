@@ -1,0 +1,628 @@
+name: CI
+
+# Every gate here MUST pass before merge. Configure these jobs as required
+# status checks in branch-protection on `main` (Settings → Branches →
+# Branch protection rules → Require status checks to pass before merging).
+#
+# Same-repo PR runs use repo secrets (Supabase E2E). Fork PRs cannot
+# access secrets — Playwright job will be skipped via the
+# repo-ownership guard; the rest still run and gate the merge.
+
+on:
+  pull_request:
+
+# Cancel stale runs when a PR is force-pushed — avoids burning CI minutes
+# on superseded commits. Push / schedule events serialize but don't cancel
+# (the ternary on `event_name` only turns cancellation on for PRs).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: pytest (cov >= 95%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      - name: Run pytest with coverage gate
+        # --cov-fail-under=95 exits non-zero if total coverage on src/ drops
+        # below 95%. Tighten/raise in pyproject.toml once a baseline lands.
+        run: pytest --cov=src --cov-report=term-missing --cov-fail-under=95
+
+  frontend-tests:
+    name: npm test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  pre-commit:
+    name: pre-commit (local-CI parity)
+    runs-on: ubuntu-latest
+    # Runs the exact same hooks developers run locally via `make
+    # install-hooks`. Catches drift the moment .pre-commit-config.yaml
+    # and CI diverge — they should never; this job is the alarm.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend deps (for prettier + eslint local hooks)
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+      - name: Cache pre-commit envs
+        # Pre-commit creates per-hook virtualenvs/node_modules under
+        # ~/.cache/pre-commit; caching skips ~30s of repeated setup.
+        # Key on the config so a hook bump invalidates automatically.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Install pre-commit
+        run: python -m pip install --upgrade pip pre-commit
+      - name: Run pre-commit on all files
+        # `--all-files` runs against the entire repo, not just the diff —
+        # PR-time catches a hook regression even if the PR didn't touch
+        # files the hook would normally fire on. `--show-diff-on-failure`
+        # makes formatter failures readable in CI logs.
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  pip-audit:
+    name: pip-audit --strict
+    runs-on: ubuntu-latest
+    # Fork-PR guard: pip-audit resolves a potentially attacker-controlled
+    # requirements.txt and pip has no `--ignore-scripts` equivalent —
+    # setup.py runs arbitrarily on the runner.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install --upgrade pip pip-audit
+      - run: pip-audit --strict --requirement requirements.txt
+
+  npm-audit:
+    name: npm audit (moderate+)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev --audit-level=moderate
+
+  secret-scan:
+    name: gitleaks (full git history)
+    runs-on: ubuntu-latest
+    # Run on fork PRs too — exactly the case where an attacker might
+    # plant a credential. No secrets needed (offline scan), so safe.
+    #
+    # On any finding: (1) rotate the leaked credential at the provider
+    # IMMEDIATELY (the commit is already mirrored to every clone — it
+    # cannot be un-published), then (2) rewrite history with BFG
+    # Repo-Cleaner (`bfg --replace-text passwords.txt`) followed by
+    # `git reflog expire --expire=now --all && git gc --prune=now --aggressive`
+    # and a coordinated force-push. Every contributor must re-clone.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          # gitleaks needs the full commit graph to scan history.
+          fetch-depth: 0
+      - name: Install gitleaks
+        env:
+          # Pinned release. Bump deliberately — never `latest`.
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan full history (0 findings required)
+        # `detect` walks every commit in the repo. `--redact` censors
+        # the value in logs so the leak isn't re-published by the CI
+        # output. Exit code 1 on any finding.
+        run: gitleaks detect --no-banner --redact --verbose --exit-code 1
+
+  lockfile-sync:
+    name: requirements.txt ↔ requirements.in sync
+    runs-on: ubuntu-latest
+    # Verifies the committed requirements.txt is what pip-compile would
+    # produce from requirements.in RIGHT NOW. Catches:
+    #   - Hand-edit of requirements.txt without bumping requirements.in
+    #   - Forgotten `make lock-python` after a requirements.in change
+    #   - A PyPI tampering scenario where a package's sha256 changes
+    #     between the committed lockfile and a fresh resolve
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install pip-tools
+        run: python -m pip install --upgrade pip pip-tools
+      - name: Dry-run lockfile generation
+        # Writes to a temp file; the original requirements.txt is the
+        # source of truth for the diff. `--quiet` suppresses pip-compile's
+        # banner so the diff is readable in CI logs.
+        run: |
+          pip-compile --generate-hashes --strip-extras --quiet \
+            --output-file /tmp/requirements.fresh.txt requirements.in
+      - name: Diff committed lockfile against fresh resolve
+        run: |
+          if ! diff -u requirements.txt /tmp/requirements.fresh.txt; then
+            echo "::error::requirements.txt is stale or hand-edited."
+            echo "Run \`make lock-python\` locally and commit the result."
+            exit 1
+          fi
+          echo "Lockfile is in sync."
+
+  license-check:
+    name: License compliance (no copyleft)
+    runs-on: ubuntu-latest
+    # SaaS product → strict copyleft is a legal-risk vector (GPL/AGPL/LGPL).
+    # Whitelist permissive licenses: MIT, BSD*, Apache, ISC, CC0, MPL-2.0,
+    # PSF, Unlicense. Anything else fails the build for triage.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install python deps + pip-licenses
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-licenses
+      - name: Install frontend deps + license-checker
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts
+          npm install --no-save license-checker
+      - name: Audit Python licenses
+        # `--fail-on` exits non-zero if ANY package matches the listed
+        # licenses. Semicolon-delimited per pip-licenses CLI.
+        run: |
+          pip-licenses --format=json --with-license-file=false \
+            --fail-on "GPL License;LGPL License;AGPL License;GNU Affero General Public License v3 or later (AGPLv3+);GNU General Public License v3 (GPLv3);GNU Lesser General Public License v3 (LGPLv3)"
+      - name: Audit npm licenses
+        working-directory: frontend
+        # license-checker `--failOn` is also `;`-delimited. excludePackages
+        # for dev-only sub-deps would go here on a per-CVE allowlist.
+        run: |
+          npx license-checker \
+            --production \
+            --excludePrivatePackages \
+            --failOn "GPL-1.0;GPL-2.0;GPL-3.0;LGPL-2.0;LGPL-2.1;LGPL-3.0;AGPL-1.0;AGPL-3.0;CC-BY-NC-1.0;CC-BY-NC-2.0;CC-BY-NC-3.0;CC-BY-NC-4.0"
+
+  flaky-gate:
+    name: Flaky-test gate (last 7 days)
+    runs-on: ubuntu-latest
+    # Reads the tracking gist produced by flakiness-detector.yml. If a
+    # PR's changed-files set intersects any flake entry with
+    # `last_seen` within 7 days, fail — the contributor must fix the
+    # flake (or remove the entry from the gist after verifying) before
+    # merging. Reasoning: a flake near the changed code blurs the
+    # signal of every subsequent CI run on this PR; we hold the line
+    # until the flake is stabilised.
+    env:
+      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+      FLAKY_TESTS_GIST_ID: ${{ secrets.FLAKY_TESTS_GIST_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - name: Fetch flaky-tests.json from gist
+        run: |
+          set -euo pipefail
+          if [ -z "${FLAKY_TESTS_GIST_ID:-}" ] || [ -z "${GIST_TOKEN:-}" ]; then
+            # Gate not configured yet — pass open. Set both secrets in
+            # repo settings to activate.
+            echo '{"flakes": []}' > flaky-tests.json
+            echo "::warning::FLAKY_TESTS_GIST_ID/GIST_TOKEN unset — gate inactive"
+            exit 0
+          fi
+          curl -fsSL \
+            -H "Authorization: Bearer ${GIST_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/gists/${FLAKY_TESTS_GIST_ID}" \
+            | jq -r '.files["flaky-tests.json"].content' \
+            > flaky-tests.json
+      - name: Resolve PR changed files
+        id: diff
+        run: |
+          set -euo pipefail
+          gh pr diff "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --name-only > pr-files.txt
+          echo "PR changed files:"
+          sed 's/^/  - /' pr-files.txt
+      - name: Block merge if any recently-flaky file changed
+        # 7-day cutoff matches the gate-days param in
+        # aggregate-flakes.py. jq filters flakes to that window, joins
+        # against pr-files.txt, exits 1 if the intersection is non-empty.
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d '7 days ago' +%F 2>/dev/null \
+            || python3 -c 'from datetime import date,timedelta; print((date.today()-timedelta(days=7)).isoformat())')
+          echo "Cutoff (last_seen >= $cutoff): tests flagged after this date will block"
+          recent_files=$(jq -r --arg cutoff "$cutoff" \
+            '.flakes[] | select(.last_seen >= $cutoff) | .file' \
+            flaky-tests.json | sort -u)
+          if [ -z "$recent_files" ]; then
+            echo "No recent flakes — gate clear."
+            exit 0
+          fi
+          echo "Files with active flakes (last 7d):"
+          echo "$recent_files" | sed 's/^/  - /'
+          # Intersect with PR files. `grep -Fxf` is exact-line match.
+          overlap=$(echo "$recent_files" | grep -Fxf - pr-files.txt || true)
+          if [ -n "$overlap" ]; then
+            echo "::error::PR modifies files with active flaky tests:"
+            echo "$overlap" | sed 's/^/  - /'
+            echo
+            echo "Resolve by either:"
+            echo "  1. Fixing the flake — investigate the test(s) listed in"
+            echo "     the 'Flaky tests tracker' issue (label: flaky)."
+            echo "  2. If you have verified the flake is gone, edit the"
+            echo "     tracking gist (FLAKY_TESTS_GIST_ID) and delete the"
+            echo "     entry. The gate will re-check on the next push."
+            exit 1
+          fi
+          echo "No overlap between PR files and active flakes — gate clear."
+
+  semgrep:
+    name: semgrep (--config=auto)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip semgrep
+      # `--config=auto` lets Semgrep pick rulesets based on detected
+      # languages. `--error` exits non-zero on any finding.
+      - run: semgrep scan --error --config=auto
+
+  python-lint:
+    name: ruff + mypy --strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff mypy
+      - name: ruff
+        run: ruff check src/ tests/
+      - name: mypy --strict
+        run: mypy --strict src/
+
+  eslint:
+    name: ESLint (no warnings)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      # --max-warnings 0 fails on any warning, matching "no warnings".
+      - run: npm run lint -- --max-warnings 0
+
+  playwright-e2e:
+    name: Playwright E2E (Supabase ephemeral branch)
+    runs-on: ubuntu-latest
+    # Skip on fork PRs — secrets are not available, the suite cannot auth
+    # against the ephemeral Supabase branch.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # Supabase preview/branch credentials provisioned per-PR (manual or
+      # via Supabase Vercel-style branching, depending on plan).
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_E2E_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_E2E_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_E2E_SERVICE_KEY }}
+      E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+      E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+      # Backend API key + admin token wired through to the proxy under test.
+      API_SECRET_KEY: ${{ secrets.E2E_API_SECRET_KEY }}
+      ADMIN_TOKEN: ${{ secrets.E2E_ADMIN_TOKEN }}
+      ALLOWED_ORIGINS: 'http://127.0.0.1:3000'
+      BACKEND_URL: 'http://127.0.0.1:8000'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install backend deps
+        working-directory: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install frontend deps
+        run: npm ci --ignore-scripts
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Start FastAPI backend
+        working-directory: .
+        run: |
+          uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-server-header &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/ && break
+            sleep 1
+          done
+      - name: Build + start Next.js
+        run: |
+          npm run build
+          npm run start -- -p 3000 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3000/login && break
+            sleep 1
+          done
+      - name: Run Playwright suite
+        run: npx playwright test
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  schema-drift:
+    name: Schema drift + RLS posture (Supabase)
+    runs-on: ubuntu-latest
+    # Skip on fork PRs — DATABASE_URL secret + live-DB connection must
+    # never be exposed to untrusted code.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      # Set this in repo secrets. Prefer a read-only Postgres role scoped
+      # to public — the script only SELECTs from information_schema /
+      # pg_catalog / pg_policies. Connection string MUST end with
+      # `?sslmode=require`. Supabase pooler URL works; direct host works too.
+      DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        # psycopg is CI-only — keep it out of requirements.txt so the
+        # runtime image (backend) doesn't ship a Postgres driver it never
+        # uses (backend talks to Supabase via PostgREST over HTTPS).
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Verify schema + RLS posture
+        # Asserts: column parity vs supabase_schema.sql (missing/extra),
+        # RLS enabled on the 4 tables, deny_all policy present on each,
+        # no anon/authenticated/PUBLIC grants, add_lead_column SECURITY
+        # DEFINER + owner=postgres + search_path set.
+        run: python -m src.scripts.schema_drift_check
+
+  referential-integrity:
+    name: Referential integrity (CASCADE + FK enforcement)
+    runs-on: ubuntu-latest
+    # Skip on fork PRs — same reason as schema-drift.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      # Same secret as schema-drift, but the role MUST be able to INSERT
+      # into campaigns + campaign_messages and DELETE from campaigns.
+      # Every mutation is wrapped in a transaction that is unconditionally
+      # rolled back — no permanent state change, even on success.
+      DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Exercise CASCADE + FK invariants
+        # Inserts a temp campaign + 5 messages, deletes the campaign,
+        # asserts 0 orphans. Then inserts a campaign_message with a bogus
+        # lead_unique_key inside a savepoint and asserts a
+        # ForeignKeyViolation is raised. All wrapped in ROLLBACK.
+        run: python -m src.scripts.check_referential_integrity
+
+  query-plans:
+    name: Query plans (no Seq Scan on hot paths)
+    runs-on: ubuntu-latest
+    # Skip on fork PRs — same DATABASE_URL constraint as the other
+    # Supabase-DB jobs.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      # Read-only sufficient — the script only runs EXPLAIN (no ANALYZE,
+      # so the query body is never actually executed).
+      DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Assert hot-path queries use indexes
+        # SET LOCAL enable_seqscan=off + EXPLAIN per query in
+        # HOT_PATH_QUERIES. Fails if any plan node is "Seq Scan" — catches
+        # missing or functionally-mismatched indexes (e.g. index on
+        # lower(email) when query filters on raw email).
+        run: python -m src.scripts.check_query_plans
+
+  concurrency-tests:
+    name: Concurrency / contention tests (Supabase)
+    runs-on: ubuntu-latest
+    # Skip on fork PRs — needs DATABASE_URL secret. The tests INSERT/
+    # UPDATE/DELETE on `leads` with `_concurrency_test_<uuid>` keys
+    # and clean up in teardown + a session-scoped sweep. No prod data
+    # touched.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      # Same secret as the other Supabase-DB jobs. Role must have
+      # INSERT/UPDATE/DELETE on `leads` (already required by the
+      # referential-integrity + orphans-zombies gates).
+      DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest "psycopg[binary]>=3.1"
+      - name: Run concurrency + pool tests
+        # `-x` exits on first failure — a race condition usually means
+        # something fundamental is wrong; surface it fast.
+        # No coverage flag here; the main python-tests job owns the
+        # --cov-fail-under=95 gate against the unit suite.
+        # test_connection_pool.py also has static (no-DB) checks; those
+        # are duplicated into the main python-tests run via collection
+        # (psycopg.importorskip lets them through; DB-requiring tests
+        # skip via pytestmark).
+        run: pytest -x tests/test_concurrent_writes.py tests/test_connection_pool.py
+
+  lighthouse:
+    name: Lighthouse CI (Faza 4.3)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Run Lighthouse CI
+        # Reads .lighthouserc.json from the frontend root. `assert.assertions`
+        # in that config sets the budgets; LHCI exits non-zero on violation.
+        run: |
+          npm install -g @lhci/cli@0.14.x
+          lhci autorun
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+
+  container-scan:
+    name: Container scan (Trivy + Grype + SBOM)
+    runs-on: ubuntu-latest
+    # Skip on fork PRs — image build pulls a Playwright base from
+    # Microsoft Container Registry + downloads vuln DBs over the network.
+    # Matches the fork-PR posture of the other secret-bearing jobs.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - name: Build image
+        run: docker build -t lds-backend:pr-${{ github.sha }} .
+      - name: Trivy scan (CRITICAL + fixable HIGH)
+        # `severity: CRITICAL,HIGH` + `ignore-unfixed: true` +
+        # `exit-code: 1` enforces "block on any CRITICAL or fixable
+        # HIGH". Unfixable CVEs are noted in the SBOM artifact but
+        # don't gate merge — no patch exists upstream.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: lds-backend:pr-${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+          vuln-type: os,library
+      - name: Install Grype + Syft
+        # Anchore-mirrored install scripts. Pinned binary versions
+        # follow the gitleaks pattern (no third-party action surface).
+        env:
+          GRYPE_VERSION: v0.71.0
+          SYFT_VERSION: v1.25.1
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sudo sh -s -- -b /usr/local/bin "${GRYPE_VERSION}"
+          curl -fsSL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sudo sh -s -- -b /usr/local/bin "${SYFT_VERSION}"
+          grype version
+          syft version
+      - name: Grype scan (second opinion, different vuln DB)
+        # Different DB source than Trivy — catches a CVE one tool's
+        # feed missed. `--only-fixed` matches Trivy's `ignore-unfixed`;
+        # `--fail-on high` exits non-zero on any high+ severity.
+        run: |
+          grype "lds-backend:pr-${{ github.sha }}" \
+            --only-fixed \
+            --fail-on high \
+            --output table
+      - name: Generate SBOM (SPDX-JSON)
+        # Filesystem-rooted SBOM of the repo as user requested
+        # (`syft . -o spdx-json`). Captures Python/JS deps + lockfiles
+        # so a future supply-chain incident can be triaged against the
+        # exact dep tree that shipped on this commit.
+        run: syft . -o spdx-json > sbom.spdx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: sbom-spdx-${{ github.sha }}
+          path: sbom.spdx.json
+          retention-days: 30

@@ -1,0 +1,191 @@
+name: Backup verify (deep PITR restore)
+
+# Disabled by default — `workflow_dispatch` only. Enable monthly cron
+# once the prerequisites below are satisfied. The job actively creates
+# + deletes Supabase project branches; on the free tier this fails
+# (branching is Pro+). Per-run cost: a few minutes of Pro-tier branch
+# compute time, well under the included quota.
+#
+# Prerequisites to flip from "manual" to "monthly":
+#
+#   - Supabase plan: Pro or higher (Database Branching is enabled).
+#   - Repo secrets:
+#       SUPABASE_ACCESS_TOKEN  — personal access token with branch:* perms
+#       SUPABASE_PROJECT_REF   — main project ref (kbtkxpvchmunwjykbeht)
+#       SUPABASE_DATABASE_URL  — pooler URL of the MAIN project (already
+#                                used by the other DB gates)
+#   - The Supabase PAT must be allowed to call the Management API
+#     branching endpoints (see docs.supabase.com/api).
+#
+# Switching to monthly: uncomment the `schedule:` block below
+# (cron expr fires the 1st of each month at 06:00 UTC).
+#
+# RTO (Recovery Time Objective) measured here: total job time = restore
+# create + drift check + integrity check + row-count diff + delete.
+# A passing run with the timing recorded in `runtime-rto.txt` is the
+# documented evidence that point-in-time-recovery actually works
+# end-to-end on the current infrastructure.
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 6 1 * *'   # 06:00 UTC on the 1st of every month
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  pitr-restore-verify:
+    name: PITR restore + post-restore verification
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      MAIN_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install deps
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+
+      - name: Verify prerequisites
+        run: |
+          set -euo pipefail
+          if [[ -z "${SUPABASE_ACCESS_TOKEN:-}" || -z "${SUPABASE_PROJECT_REF:-}" || -z "${MAIN_DATABASE_URL:-}" ]]; then
+            echo "::error::Prerequisites missing. See workflow header."
+            exit 1
+          fi
+
+      - name: Record RTO start
+        id: rto-start
+        run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------
+      # STEP 1: Create a Supabase branch from main, restored to the
+      # `restore_target` timestamp (1h ago).
+      #
+      # The Management API endpoint:
+      #   POST /v1/projects/{ref}/branches
+      # accepts a `restore_target` ISO-8601 timestamp. We capture the
+      # branch ref and its DATABASE_URL for the subsequent steps.
+      #
+      # The branch is registered for cleanup in STEP 6 even if any
+      # subsequent step fails.
+      # ---------------------------------------------------------------
+      - name: Trigger PITR branch creation
+        id: create-branch
+        run: |
+          set -euo pipefail
+          RESTORE_TARGET=$(date -u -d '1 hour ago' '+%Y-%m-%dT%H:%M:%SZ')
+          echo "Restoring to: $RESTORE_TARGET"
+          response=$(curl -sS -X POST \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"branch_name\":\"backup-verify-$(date +%s)\",\"restore_target\":\"$RESTORE_TARGET\"}" \
+            "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/branches")
+          branch_ref=$(echo "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ref",""))')
+          if [[ -z "$branch_ref" ]]; then
+            echo "::error::Branch creation failed. Response: $response"
+            exit 1
+          fi
+          echo "branch_ref=$branch_ref" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------
+      # STEP 2-5: Run our DB gates against the restored branch.
+      # Same scripts that gate prod — if they pass against the restore,
+      # the restore is structurally complete.
+      # ---------------------------------------------------------------
+      - name: Fetch branch DATABASE_URL + wait until ready
+        id: fetch-branch-url
+        env:
+          BRANCH_REF: ${{ steps.create-branch.outputs.branch_ref }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            response=$(curl -sS \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              "https://api.supabase.com/v1/branches/$BRANCH_REF")
+            status=$(echo "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))')
+            if [[ "$status" == "ACTIVE_HEALTHY" ]]; then
+              db_url=$(echo "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("connection_string",""))')
+              echo "db_url=$db_url" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "${db_url:-}" ]]; then
+            echo "::error::Branch never reached ACTIVE_HEALTHY"
+            exit 1
+          fi
+
+      - name: Schema drift against restore
+        env:
+          DATABASE_URL: ${{ steps.fetch-branch-url.outputs.db_url }}
+        run: python -m src.scripts.schema_drift_check
+
+      - name: Referential integrity against restore
+        env:
+          DATABASE_URL: ${{ steps.fetch-branch-url.outputs.db_url }}
+        run: python -m src.scripts.check_referential_integrity
+
+      - name: Row-count delta vs main
+        env:
+          MAIN_URL: ${{ env.MAIN_DATABASE_URL }}
+          RESTORE_URL: ${{ steps.fetch-branch-url.outputs.db_url }}
+        # Compare counts on the 4 core tables. Restore is from 1h ago,
+        # so the delta is bounded by 1h of writes. Hard cap of
+        # 10x is a soft heuristic — adjust once you have a real write-
+        # rate baseline.
+        run: |
+          python3 - <<'PYTHON'
+          import os, psycopg, sys
+          tables = ("leads","campaigns","campaign_messages","orchestration_jobs")
+          def counts(url):
+              with psycopg.connect(url, autocommit=True) as c:
+                  out = {}
+                  for t in tables:
+                      cur = c.execute(f"SELECT COUNT(*) FROM public.{t}")  # nosemgrep: constant tables
+                      out[t] = cur.fetchone()[0]
+                  return out
+          m = counts(os.environ["MAIN_URL"])
+          r = counts(os.environ["RESTORE_URL"])
+          failed = False
+          for t in tables:
+              mv, rv = m[t], r[t]
+              # Restore must have <= main rows (some writes are post-restore).
+              # If restore > main * 1.5 something is seriously off.
+              if rv > mv * 1.5 + 100:
+                  print(f"FAIL {t}: restore={rv} main={mv} — restore should be <= main", file=sys.stderr)
+                  failed = True
+              else:
+                  print(f"OK {t}: main={mv} restore={rv} delta={mv-rv}")
+          sys.exit(1 if failed else 0)
+          PYTHON
+
+      # ---------------------------------------------------------------
+      # STEP 6: Always delete the branch (don't leak quota).
+      # ---------------------------------------------------------------
+      - name: Delete restore branch
+        if: always() && steps.create-branch.outputs.branch_ref != ''
+        env:
+          BRANCH_REF: ${{ steps.create-branch.outputs.branch_ref }}
+        run: |
+          curl -sS -X DELETE \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/branches/$BRANCH_REF" \
+            && echo "Branch $BRANCH_REF deleted." \
+            || echo "::warning::Branch $BRANCH_REF delete failed; clean up manually."
+
+      - name: Record RTO total
+        if: success()
+        run: |
+          end=$(date +%s)
+          start=${{ steps.rto-start.outputs.ts }}
+          echo "PITR restore + verify RTO: $((end - start)) seconds"

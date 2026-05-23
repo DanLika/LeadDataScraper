@@ -1,0 +1,51 @@
+name: synthetic-monitor
+
+# Heartbeat — 4 lightweight checks every 5 minutes, results persisted to
+# a private gist, Slack-paged on the 3rd consecutive failure (and on
+# recovery). See docs/synthetic-monitor.md for setup.
+#
+# GitHub Actions cron is best-effort; under cluster load runs can lag by
+# minutes. The 3-strike rule is sized for ~15-minute MTTD, which absorbs
+# the occasional skipped tick without false alarms.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two overlapping runs would race on the gist PATCH and could lose a
+  # history entry or corrupt the streak counter. Serialize them; if a
+  # cron firing collides with an in-flight run, drop the new one.
+  group: synthetic-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BACKEND_URL:         ${{ secrets.PROD_BACKEND_URL }}
+      FRONTEND_URL:        ${{ secrets.PROD_FRONTEND_URL }}
+      API_SECRET_KEY:      ${{ secrets.PROD_API_SECRET_KEY }}
+      GIST_TOKEN:          ${{ secrets.GIST_TOKEN }}
+      MONITOR_GIST_ID:     ${{ secrets.MONITOR_GIST_ID }}
+      # Alert channel — DISCORD_WEBHOOK_URL preferred (Discord-native
+      # embed, matches every other workflow alert via the composite
+      # action). SLACK_WEBHOOK_URL is the fallback if Discord is unset
+      # (also works against Discord's /slack endpoint per
+      # docs/alerting.md). See `postAlert()` in the .mjs.
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      SLACK_WEBHOOK_URL:   ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Run synthetic checks
+        run: node .github/scripts/synthetic-monitor.mjs

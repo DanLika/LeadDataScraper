@@ -1,0 +1,98 @@
+name: cold-start-monitor
+
+# Daily off-peak probe of the backend liveness endpoint. Times the
+# request and alerts to Discord if the latency exceeds 30 s.
+#
+# Why 30 s? The Render `starter` plan does NOT auto-spin-down (ADR-007),
+# so a healthy boot should stay well under 5 s. A >30 s response is the
+# proxy for: deploy that went bad, dyno in restart-loop, or Render
+# infra incident. The synthetic monitor (every 5 min, 4-check) covers
+# fast functional regressions; this monitor is the cold-tail latency
+# canary they don't catch.
+#
+# Cron picks 04:00 UTC — outside operator hours, no real traffic should
+# perturb the measurement.
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Probe backend / endpoint and measure latency
+        id: probe
+        env:
+          BACKEND_URL: ${{ secrets.PROD_BACKEND_URL }}
+          THRESHOLD_SECONDS: ${{ vars.COLD_START_THRESHOLD_SECONDS || '30' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$BACKEND_URL" ]; then
+            echo "::error::PROD_BACKEND_URL secret not set — cannot probe."
+            exit 1
+          fi
+
+          # --max-time 60 so a wedged dyno can't hang the whole job.
+          # `time` flags request the round-trip in seconds (float).
+          # Strip query strings / trailing slashes to derive a clean URL.
+          start=$(date +%s.%3N)
+          http_status=$(curl --silent --show-error --max-time 60 \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            "$BACKEND_URL/" || echo "000")
+          end=$(date +%s.%3N)
+          latency=$(awk "BEGIN {printf \"%.2f\", $end - $start}")
+
+          echo "BACKEND_URL=$BACKEND_URL"
+          echo "http_status=$http_status"
+          echo "latency_s=$latency"
+          echo "threshold_s=$THRESHOLD_SECONDS"
+
+          {
+            echo "latency=$latency"
+            echo "http_status=$http_status"
+          } >> "$GITHUB_OUTPUT"
+
+          # Alert when latency over threshold OR HTTP non-2xx.
+          if awk "BEGIN {exit !($latency > $THRESHOLD_SECONDS)}"; then
+            echo "alert=true" >> "$GITHUB_OUTPUT"
+            echo "reason=slow" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_status" != "2"* ]]; then
+            echo "alert=true" >> "$GITHUB_OUTPUT"
+            echo "reason=non-2xx" >> "$GITHUB_OUTPUT"
+          else
+            echo "alert=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Alert if probe exceeded threshold OR returned non-2xx
+        if: steps.probe.outputs.alert == 'true'
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          severity: warning
+          title: "🐌 Cold-start / latency probe failed"
+          message: |
+            **Backend probe latency: ${{ steps.probe.outputs.latency }}s**
+            HTTP status: `${{ steps.probe.outputs.http_status }}`
+            Threshold: 30s
+            Reason: `${{ steps.probe.outputs.reason }}`
+
+            Likely causes (in rough order):
+            1. Last deploy is in a bad state (check Render → Deploys).
+            2. Render infrastructure incident (status.render.com).
+            3. Supabase connection pool saturated (drives `/` slow because lifespan blocks on `db.check_schema()`).
+            4. Playwright browser pool wedged (check backend logs for `Playwright` errors).
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

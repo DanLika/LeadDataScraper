@@ -1,0 +1,98 @@
+name: discord-notify
+description: |
+  Post a structured alert embed to a Discord webhook. One channel, one
+  webhook URL, used by every operational alert source in the repo
+  (synthetic monitor, storage report, mutation gate, cold-start probe,
+  cert-expiry check). See `docs/alerting.md` for the full routing map.
+
+  The webhook URL is passed via `inputs.webhook-url` rather than
+  `env.DISCORD_WEBHOOK_URL` so each caller is explicit about which
+  channel they're talking to (lets you swap to a per-environment
+  webhook by passing a different secret without touching the action).
+  Skips cleanly with an actions warning if the URL is empty — keeps
+  preview-PR runs from failing when secrets aren't propagated.
+
+inputs:
+  webhook-url:
+    description: |
+      Discord webhook URL. Pass via `${{ secrets.DISCORD_WEBHOOK_URL }}`.
+      Empty value → step exits 0 with a warning (no alert).
+    required: true
+  title:
+    description: Alert title (≤256 chars per Discord embed limit)
+    required: true
+  message:
+    description: |
+      Alert body. Supports Discord markdown (`**bold**`, `code`,
+      `[link](url)`). ≤4000 chars per Discord embed description limit.
+    required: true
+  severity:
+    description: |
+      One of `critical` / `error` / `warning` / `info`. Sets the embed
+      colour. Default `warning` (so a forgotten input is still visible).
+    required: false
+    default: warning
+  link:
+    description: |
+      Optional URL the operator should click through to (workflow run,
+      Render dashboard, GitHub issue, etc.). Renders as the embed title's
+      hyperlink.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: POST to Discord webhook
+      shell: bash
+      env:
+        DISCORD_WEBHOOK_URL: ${{ inputs.webhook-url }}
+        ALERT_TITLE: ${{ inputs.title }}
+        ALERT_MESSAGE: ${{ inputs.message }}
+        ALERT_SEVERITY: ${{ inputs.severity }}
+        ALERT_LINK: ${{ inputs.link }}
+      run: |
+        set -euo pipefail
+        if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+          echo "::warning::DISCORD_WEBHOOK_URL is empty — skipping alert."
+          echo "    Set the repo secret to enable Discord notifications."
+          exit 0
+        fi
+
+        # Severity → Discord embed colour (decimal).
+        case "$ALERT_SEVERITY" in
+          critical|error) color=15158332 ;;   # red
+          warning)        color=15844367 ;;   # amber
+          info)           color=3447003 ;;    # blue
+          *)              color=9807270 ;;    # neutral grey
+        esac
+
+        ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+        # Build payload via jq so quoting / special chars / multi-line
+        # messages don't break JSON. Title/desc are trimmed to Discord's
+        # documented limits as belt-and-braces against accidental overruns.
+        payload=$(jq -nc \
+          --arg title  "$(printf '%s' "$ALERT_TITLE"   | head -c 256)" \
+          --arg desc   "$(printf '%s' "$ALERT_MESSAGE" | head -c 4000)" \
+          --arg link   "$ALERT_LINK" \
+          --arg ts     "$ts" \
+          --argjson color "$color" \
+          '{
+            embeds: [(
+              {title: $title, description: $desc, color: $color, timestamp: $ts}
+              + (if $link == "" then {} else {url: $link} end)
+            )]
+          }')
+
+        # --fail → 4xx/5xx exit non-zero so a Discord outage / wrong URL
+        # turns the workflow step red instead of silently dropping the alert.
+        # --silent --show-error → quiet on success, surfaces real errors.
+        # --data-binary @- → URL is on the command line, but GitHub Actions
+        # masks the secret content; payload body comes via stdin.
+        echo "$payload" | curl --fail --silent --show-error \
+          --request POST \
+          --header "Content-Type: application/json" \
+          --data-binary @- \
+          "$DISCORD_WEBHOOK_URL"
+        echo "Discord alert posted: $ALERT_TITLE"

@@ -1,0 +1,61 @@
+name-template: '$RESOLVED_VERSION'
+tag-template: '$RESOLVED_VERSION'
+
+# Conventional-commits → release-note categories.
+categories:
+  - title: 'Security'
+    labels: ['security']
+    collapse-after: 1
+  - title: 'Features'
+    labels: ['feat', 'feature']
+  - title: 'Bug fixes'
+    labels: ['fix', 'bug']
+  - title: 'Performance'
+    labels: ['perf']
+  - title: 'Refactor'
+    labels: ['refactor']
+  - title: 'Documentation'
+    labels: ['docs']
+  - title: 'Tests'
+    labels: ['test']
+  - title: 'Chores'
+    labels: ['chore']
+
+# Map PR title prefix → label so categorisation works without manual labels.
+autolabeler:
+  - label: 'security'
+    title: '^security(\(.+\))?:'
+  - label: 'feat'
+    title: '^feat(\(.+\))?:'
+  - label: 'fix'
+    title: '^fix(\(.+\))?:'
+  - label: 'perf'
+    title: '^perf(\(.+\))?:'
+  - label: 'refactor'
+    title: '^refactor(\(.+\))?:'
+  - label: 'docs'
+    title: '^docs(\(.+\))?:'
+  - label: 'test'
+    title: '^test(\(.+\))?:'
+  - label: 'chore'
+    title: '^chore(\(.+\))?:'
+
+version-resolver:
+  major:
+    labels: ['breaking']
+  minor:
+    labels: ['feat', 'feature']
+  patch:
+    labels: ['fix', 'bug', 'security', 'perf', 'refactor', 'docs', 'test', 'chore']
+  default: patch
+
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+change-title-escapes: '\<*_&'
+
+template: |
+  ## What's new in $RESOLVED_VERSION
+
+  $CHANGES
+
+  ---
+  **Full diff**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...$RESOLVED_VERSION
