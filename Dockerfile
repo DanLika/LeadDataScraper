@@ -2,6 +2,14 @@
 # This avoids complicated dependency installation for browser automation on Linux
 FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
+# Build-time release tag for Sentry. Defaults to "unknown" if the build
+# context didn't pass --build-arg GIT_SHA (e.g. `docker build .` locally).
+# The deploy-backend.yml workflow passes the commit SHA so prod images
+# carry the exact revision label. Sentry resolves source maps + commits
+# against this string.
+ARG GIT_SHA=unknown
+ENV RELEASE_SHA=${GIT_SHA}
+
 # Set work directory
 WORKDIR /app
 
@@ -9,9 +17,14 @@ WORKDIR /app
 # same RUN layer so gcc/make/etc don't ship to the runtime image. Keeps the
 # post-RCE local-privesc toolkit out of the container.
 COPY requirements.txt .
+# --require-hashes enforces sha256 verification of every wheel/sdist
+# against the lockfile produced by `pip-compile --generate-hashes`.
+# A PyPI tampering scenario where a package's content changes between
+# resolve-time and install-time fails the install with a HashMismatch.
+# Operator regenerates the lockfile via `make lock-python`.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
-    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --require-hashes -r requirements.txt \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
 
