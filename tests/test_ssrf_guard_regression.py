@@ -51,6 +51,10 @@ REJECT_CASES: list[tuple[str, str, str | None]] = [
     ("gcp_metadata_host",     "http://metadata.google.internal/foo", None),
     ("gcp_metadata_alias",    "http://metadata.goog/foo",       None),
     ("ec2_instance_data",     "http://instance-data/foo",       None),
+    ("azure_metadata_host",   "http://metadata.azure.com/metadata/instance", None),
+    ("oracle_metadata_host",  "http://metadata.oraclecloud.com/opc/v2/instance/", None),
+    ("alibaba_metadata_host", "http://metadata.alibabacloud.com/latest/meta-data/", None),
+    ("tencent_metadata_host", "http://metadata.tencentcloudapi.com/latest/meta-data/", None),
 
     # Kubernetes service DNS
     ("k8s_default_svc",       "http://kubernetes.default.svc/api", None),

@@ -53,6 +53,10 @@ class TestAssertSafeScheme(unittest.TestCase):
             "metadata",
             "instance-data",
             "instance-data.ec2.internal",
+            "metadata.azure.com",
+            "metadata.oraclecloud.com",
+            "metadata.alibabacloud.com",
+            "metadata.tencentcloudapi.com",
             "kubernetes.default.svc",
             "kubernetes.default.svc.cluster.local",
         ]:

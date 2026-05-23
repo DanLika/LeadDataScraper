@@ -23,11 +23,21 @@ class SSRFError(ValueError):
 
 
 _BLOCKED_HOSTS = {
+    # GCP instance metadata
     "metadata.google.internal",
     "metadata.goog",
     "metadata",
+    # AWS EC2 IMDS aliases
     "instance-data",
     "instance-data.ec2.internal",
+    # Azure / Oracle / Alibaba / Tencent metadata endpoints — the underlying
+    # IPs are already caught by `is_global=False`, but matching the canonical
+    # DNS name short-circuits before any resolver is invoked.
+    "metadata.azure.com",
+    "metadata.oraclecloud.com",
+    "metadata.alibabacloud.com",
+    "metadata.tencentcloudapi.com",
+    # Kubernetes in-cluster API service
     "kubernetes.default.svc",
     "kubernetes.default.svc.cluster.local",
 }
