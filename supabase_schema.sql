@@ -56,10 +56,18 @@ CREATE TABLE IF NOT EXISTS orchestration_jobs (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Index for faster lookups
-CREATE INDEX IF NOT EXISTS idx_leads_unique_key ON leads(unique_key);
-CREATE INDEX IF NOT EXISTS idx_leads_audit_status ON leads(audit_status);
+-- Index for faster lookups.
+--
+-- `leads(unique_key)` is intentionally NOT indexed here — the UNIQUE
+-- constraint on the column auto-creates a btree index (`leads_pkey` in
+-- the live DB, since unique_key is the de-facto PK). A second named
+-- `idx_leads_unique_key` would be redundant disk + write-amp on insert.
+CREATE INDEX IF NOT EXISTS idx_leads_audit_status        ON leads(audit_status);
 CREATE INDEX IF NOT EXISTS idx_orchestration_jobs_status ON orchestration_jobs(status);
+-- Dashboard hot path: `ORDER BY created_at DESC LIMIT 200`. Index is
+-- DESC so the planner can satisfy ORDER BY directly and skip the Sort
+-- step (verified via EXPLAIN with enable_seqscan=off).
+CREATE INDEX IF NOT EXISTS idx_leads_created_at_desc ON leads(created_at DESC);
 
 -- Campaign management tables (Step 4: Outreach)
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -87,9 +95,10 @@ CREATE TABLE IF NOT EXISTS campaign_messages (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
 
-CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
-CREATE INDEX IF NOT EXISTS idx_campaign_messages_campaign_id ON campaign_messages(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_campaign_messages_status ON campaign_messages(status);
+CREATE INDEX IF NOT EXISTS idx_campaigns_status                 ON campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_campaign_messages_campaign_id    ON campaign_messages(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_messages_lead_unique_key ON campaign_messages(lead_unique_key);
+CREATE INDEX IF NOT EXISTS idx_campaign_messages_status         ON campaign_messages(status);
 
 -- =============================================================================
 -- Row Level Security
@@ -172,3 +181,136 @@ ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS campaign_segment      TEXT;
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS business_summary      TEXT;
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS business_description  TEXT;
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS company_description   TEXT;
+
+-- =============================================================================
+-- DB-level CHECK constraints (defense in depth)
+--
+-- Pydantic at the FastAPI boundary already validates these, but Supabase
+-- Studio + the service_role key bypass that layer. Allowlists below mirror
+-- current producer output verified by grep across `src/` + `backend/`. The
+-- `schema_drift_check.py` CI gate asserts every named constraint below
+-- exists in the live DB.
+--
+-- `DO $$ ... EXCEPTION WHEN duplicate_object` lets a fresh apply skip a
+-- constraint that's already present (PostgreSQL has no `ADD CONSTRAINT IF
+-- NOT EXISTS` for CHECK — only column-level constraints support that).
+-- =============================================================================
+DO $$ BEGIN
+  ALTER TABLE public.leads
+    ADD CONSTRAINT leads_seo_score_range
+    CHECK (seo_score IS NULL OR (seo_score BETWEEN 0 AND 100));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.leads
+    ADD CONSTRAINT leads_outreach_score_range
+    CHECK (outreach_score IS NULL OR (outreach_score BETWEEN 0 AND 100));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- audit_status wide allowlist. Code (src/core/parallel_auditor.py) writes
+-- 'Pending'/'Completed'/'Failed' + error-reason strings ('Timeout',
+-- '403 Forbidden', '404 Not Found', 'Invalid URL'). 'Processing' kept
+-- for forward-compat — schema previously declared it; no producer writes
+-- it today. Refactoring the error-reason values into `last_error` would
+-- let us shrink the allowlist; tracked separately.
+DO $$ BEGIN
+  ALTER TABLE public.leads
+    ADD CONSTRAINT leads_audit_status_allowed
+    CHECK (audit_status IS NULL OR audit_status IN (
+      'Pending', 'Processing', 'Completed', 'Failed',
+      'Timeout', '403 Forbidden', '404 Not Found', 'Invalid URL'
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- enrichment_status uppercase per src/scrapers/enrichment_engine.py +
+-- src/core/parallel_auditor.py. Default 'PENDING'.
+DO $$ BEGIN
+  ALTER TABLE public.leads
+    ADD CONSTRAINT leads_enrichment_status_allowed
+    CHECK (enrichment_status IS NULL OR enrichment_status IN (
+      'PENDING', 'COMPLETED', 'FAILED', 'FAILED_NO_CONTENT'
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Loose email shape. Intentionally less strict than the SMTP sender's
+-- regex (src/integrations/email_sender.py uses
+-- `^[^@\s]+@[^@\s]+\.[^@\s]+$` — header-injection guard at boundary).
+-- DB rejects only obviously broken values so ingest doesn't fail on
+-- quirky-but-valid scraped emails.
+DO $$ BEGIN
+  ALTER TABLE public.leads
+    ADD CONSTRAINT leads_email_basic_shape
+    CHECK (email IS NULL OR (length(email) >= 3 AND email LIKE '%@%'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.orchestration_jobs
+    ADD CONSTRAINT orchestration_jobs_status_allowed
+    CHECK (status IN (
+      'starting', 'running', 'completed', 'failed', 'stopped'
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaigns
+    ADD CONSTRAINT campaigns_channel_allowed
+    CHECK (channel IN ('email', 'linkedin', 'multi'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaigns
+    ADD CONSTRAINT campaigns_status_allowed
+    CHECK (status IS NULL OR status IN (
+      'draft', 'active', 'paused', 'completed'
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_messages
+    ADD CONSTRAINT campaign_messages_channel_allowed
+    CHECK (channel IN ('email', 'linkedin', 'multi'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_messages
+    ADD CONSTRAINT campaign_messages_status_allowed
+    CHECK (status IS NULL OR status IN (
+      'pending', 'sent', 'delivered', 'replied', 'bounced'
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ===========================================================================
+-- GDPR Article 17 (right to erasure) audit trail.
+--
+-- One row per DELETE /operator/account invocation. Retained for 30 days
+-- (fraud / contested-deletion window), then purged by
+-- src/scripts/purge_expired_audit_log.py (security.yml daily cron).
+--
+-- Schema is intentionally narrow — operator_email + remote_ip + row
+-- counts snapshot are enough to trace "who, when, from where, what was
+-- wiped" without holding any deleted business data (which would defeat
+-- the erasure right).
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS public.account_deletions (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deleted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    operator_email TEXT,
+    remote_ip     TEXT,
+    row_counts    JSONB NOT NULL,
+    expires_at    TIMESTAMPTZ NOT NULL
+);
+
+-- Index supports the daily purge query.
+CREATE INDEX IF NOT EXISTS idx_account_deletions_expires_at
+    ON public.account_deletions (expires_at);
+
+-- RLS: deny-all (matches the 4 core tables — only service_role bypasses).
+ALTER TABLE public.account_deletions ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    CREATE POLICY account_deletions_deny_all ON public.account_deletions
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

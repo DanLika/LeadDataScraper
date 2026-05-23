@@ -31,6 +31,17 @@ services:
       # with "Your Name" placeholder.
       - key: OPERATOR_NAME
         sync: false
+      # Sentry error tracking + APM. Same DSN string as the frontend's
+      # NEXT_PUBLIC_SENTRY_DSN; backend init in backend/main.py runs
+      # only when this is set (dev / preview without Sentry stays clean).
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
+      # Temporarily set to "1" to expose POST /_sentry/test for boot-time
+      # verification. Unset (or set to anything else) in normal operation.
+      - key: SENTRY_TEST_ENABLED
+        sync: false
       - key: PYTHON_ENV
         value: production
 
@@ -73,3 +84,30 @@ services:
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
+      # Sentry — same DSN exposed both server-side (SENTRY_DSN, read by
+      # sentry.server.config.ts / sentry.edge.config.ts) and client-side
+      # (NEXT_PUBLIC_SENTRY_DSN, read by instrumentation-client.ts). DSNs
+      # are designed to be public — see Sentry docs.
+      - key: SENTRY_DSN
+        sync: false
+      - key: NEXT_PUBLIC_SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
+      - key: NEXT_PUBLIC_SENTRY_ENVIRONMENT
+        value: production
+      # Build-time source-map upload. SENTRY_AUTH_TOKEN is the secret;
+      # SENTRY_ORG + SENTRY_PROJECT name the destination. Without these,
+      # `next build` skips source-map upload (stack traces in Sentry stay
+      # minified — broken). Set in the Render dashboard.
+      - key: SENTRY_ORG
+        sync: false
+      - key: SENTRY_PROJECT
+        sync: false
+      - key: SENTRY_AUTH_TOKEN
+        sync: false
+      # SENTRY_RELEASE / NEXT_PUBLIC_SENTRY_RELEASE: auto-resolved at
+      # build time from Render's auto-exposed RENDER_GIT_COMMIT via the
+      # fallback chain in frontend/next.config.ts. No explicit env var
+      # needed unless you want to override (e.g. semver tag like
+      # "1.4.0" instead of the bare git SHA).
