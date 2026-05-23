@@ -74,6 +74,12 @@ async function mockDashboardEmpty(page: Page) {
   await page.route('**/api/proxy/audit-status**', (r) =>
     r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ active: false }) }),
   )
+  // /insights page reads stats via this route. Without the mock, the fetch
+  // falls through to a real backend (if uvicorn is up locally) and the
+  // baseline becomes non-deterministic across machines.
+  await page.route('**/api/proxy/stats**', (r) =>
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ total_leads: 0, audit_status_distribution: [], seo_score_ranges: [], source_distribution: [] }) }),
+  )
 }
 
 async function mockDashboardPopulated(page: Page) {
@@ -99,6 +105,32 @@ async function mockDashboardPopulated(page: Page) {
   )
   await page.route('**/api/proxy/audit-status**', (r) =>
     r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ active: false }) }),
+  )
+  // Numbers match FIXTURE_LEADS_20:
+  //   Completed (i%3==0): 7 leads, SEO scores 50/56/62/68/74/80/86
+  //   Pending   (i%3==1): 7 leads
+  //   Failed    (i%3==2): 6 leads
+  await page.route('**/api/proxy/stats**', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total_leads: 20,
+        audit_status_distribution: [
+          { name: 'Completed', value: 7 },
+          { name: 'Pending', value: 7 },
+          { name: 'Failed', value: 6 },
+        ],
+        seo_score_ranges: [
+          { range: '0-20', count: 0 },
+          { range: '21-40', count: 0 },
+          { range: '41-60', count: 2 },
+          { range: '61-80', count: 4 },
+          { range: '81-100', count: 1 },
+        ],
+        source_distribution: [{ name: 'visual_fixture', value: 20 }],
+      }),
+    }),
   )
 }
 
