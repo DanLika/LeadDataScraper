@@ -31,6 +31,13 @@ node-compile-cache/
 # Database
 *.sqlite
 *.db
+# Gemini-budget runtime SQLite (created lazily by src/utils/gemini_budget.py;
+# default path data/gemini_budget.db).  Caught by *.db above but listed
+# explicitly so operators see it in the runtime-artifact inventory.
+data/gemini_budget.db
+data/gemini_budget.db-journal
+data/gemini_budget.db-wal
+data/gemini_budget.db-shm
 
 # OS
 .DS_Store

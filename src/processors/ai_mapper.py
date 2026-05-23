@@ -5,6 +5,10 @@ import os
 import pandas as pd
 from src.utils.logging_config import get_logger
 from src.utils.prompt_safety import _UNTRUSTED_DATA_SYSTEM_INSTRUCTION, fenced_json
+from src.utils.gemini_call import (
+    estimate_tokens_from_text,
+    guarded_generate_content,
+)
 
 logger = get_logger(__name__)
 
@@ -83,12 +87,16 @@ class GeminiMapper:
         """
 
         try:
-            response = self.client.models.generate_content(
+            response = guarded_generate_content(
+                self.client,
                 model='gemini-flash-latest',
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
+                    max_output_tokens=2048,
                 ),
+                estimate_input=estimate_tokens_from_text(prompt),
+                estimate_output=2048,
             )
             raw_text = response.text.strip('`').strip()
             if raw_text.startswith('json'):
