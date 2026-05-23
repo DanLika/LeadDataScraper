@@ -97,6 +97,32 @@ polish.
 
 ---
 
+## Status snapshot — 2026-05-23 session
+
+Six surgical-fix PRs shipped after the initial findings. All branch off `origin/main` and merge independently.
+
+| # | Sev | Status | PR |
+| --- | --- | --- | --- |
+| 1 | ~~P0~~ | **RETRACTED** Phase 16 (false positive — stale build from Phase 15's broken `pkill -f`) | this PR (#227) |
+| 2 | P2 | **PR open** — `router.replace('/')` in `clearFilters` to bypass the read-effect race | [#235](https://github.com/DanLika/LeadDataScraper/pull/235) |
+| 3 | P2 | **PR open** — rename `TOTAL LEADS` → `LOADED` (honest cursor-pagination semantics) | [#241](https://github.com/DanLika/LeadDataScraper/pull/241) |
+| 4 | P2 | **PR open** — `/api/proxy/metrics` exact-match in public-path allowlist | [#234](https://github.com/DanLika/LeadDataScraper/pull/234) |
+| 5 | P2 | **No fix** — default `web-vitals` behaviour. Opt into `{reportAllChanges:true}` later if eager flush worth the extra beacons per page-view | — |
+| 6 | P2 | **No fix yet** — needs Gemini test fixtures (`test_insights_quality.py::no-invented-numbers`) to validate a `total_count` prompt-pin without regressing other insights. Out of scope for a surgical PR | — |
+| 7 | P2 | **PR open** — `document.hidden` guard + `visibilitychange` re-fire on the 5 s cross-tab poller | [#233](https://github.com/DanLika/LeadDataScraper/pull/233) |
+| 8 | P3 | **Re-trace after #233 merges** — forced reflow was inside the polling re-render window; visibility-pause likely halves the affected duration | — |
+| 9 | P3 | **Covered by #233** — leads refetch fires alongside orchestrator polls; same visibility cascade reduces churn | (via #233) |
+| 10 | P3 | **PR open** — drop `'Inter'` from `--font-main` (literal never loaded) | [#239](https://github.com/DanLika/LeadDataScraper/pull/239) |
+| 11 | P3 | **PR open** — COOP / CORP / X-Permitted-Cross-Domain-Policies header stamps | [#237](https://github.com/DanLika/LeadDataScraper/pull/237) |
+| 12 | P3 | **RETRACTED** — `data-testid="drop-overlay"` IS present at `page.tsx:1024`; only renders while `isDragging===true`. A proper drag-drop MCP test must dispatch `dragenter` on `[data-testid="dashboard-root"]` first to flip `isDragging`, then `drop` on the now-rendered overlay | — |
+| 13 | **P0 ops** | **Operator action** — restore failing CI secret then confirm Render service state. No code change possible | — |
+
+**Outstanding for the operator:**
+1. Restore CI green on `main` — every run since 2026-05-23 07:39 UTC has failed (most-likely a single missing/expired secret per #13).
+2. Confirm Render prod state once CI is green. `plan: starter` shouldn't auto-suspend; 404 `no-server` implies manual pause / re-provision / billing.
+3. Re-run Phase 15 prod tier (`15.13`–`15.17`) once both restored.
+
+
 ## Verified-working surface (positives worth documenting)
 
 - **CSP nonce + `strict-dynamic`**: hydration works under prod CSP; 17 scripts carry a fresh nonce per reload; `__next_f.push` bootstrap blocks all nonced; inline `<script>` via `innerHTML +=` blocked by HTML parser. Sev-1 regression fix from `d3a90ff` holds.
