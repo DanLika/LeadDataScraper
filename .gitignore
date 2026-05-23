@@ -53,6 +53,9 @@ supabase/.branches/
 *.jpg
 *.jpeg
 *.png
+# Exception: visual regression baselines must be committed so CI can
+# diff renders against them. See frontend/e2e/visual.spec.ts-snapshots/README.md.
+!frontend/e2e/visual.spec.ts-snapshots/*.png
 
 # IDE / Tools
 .claude/
