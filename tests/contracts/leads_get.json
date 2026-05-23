@@ -1,0 +1,19 @@
+{
+  "name": "leads_get",
+  "method": "GET",
+  "path": "/leads",
+  "query": "?limit=1",
+  "expected_status": 200,
+  "expected_content_type": "application/json",
+  "auth": "api_key",
+  "schema": {
+    "type": "object",
+    "required": ["leads"],
+    "additionalProperties": false,
+    "properties": {
+      "leads": { "type": "array" },
+      "next_cursor": { "type": ["string", "null"] },
+      "has_more": { "type": "boolean" }
+    }
+  }
+}

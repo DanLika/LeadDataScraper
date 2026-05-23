@@ -1,0 +1,17 @@
+{
+  "name": "health_schema_get",
+  "method": "GET",
+  "path": "/health/schema",
+  "expected_status": 200,
+  "expected_content_type": "application/json",
+  "auth": "api_key",
+  "schema": {
+    "type": "object",
+    "required": ["drift"],
+    "properties": {
+      "drift": { "type": "boolean" },
+      "missing_columns": { "type": "array", "items": { "type": "string" } },
+      "missing_columns_count": { "type": "integer", "minimum": 0 }
+    }
+  }
+}
