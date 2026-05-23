@@ -11,9 +11,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
+import dynamic from 'next/dynamic';
 import Sidebar from '../components/Sidebar';
-import AIChat from '../components/AIChat';
 import { Linkedin } from '../components/BrandIcons';
+
+// Chat island lazy-loads on the client; keeps /campaigns first-load JS small.
+const AIChat = dynamic(() => import('../components/AIChat'), { ssr: false });
 
 interface Campaign {
   id: string;

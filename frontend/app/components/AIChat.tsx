@@ -7,6 +7,7 @@ import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
 interface AIChatPlan {
   task: string;
   params: Record<string, string | number | boolean>;
+  reasoning?: string;
 }
 
 interface Message {
@@ -254,8 +255,18 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
                     width: '100%',
                     maxWidth: isMobile ? '100%' : '400px'
                   }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--primary-light)', fontWeight: 600, textTransform: 'uppercase' }}>Proposed Plan</div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Task: <strong>{msg.plan.task}</strong></div>
+                    <div data-testid="plan-card" style={{ fontSize: '0.75rem', color: 'var(--primary-light)', fontWeight: 600, textTransform: 'uppercase' }}>Proposed Plan</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Task: <strong data-testid="plan-task">{msg.plan.task}</strong></div>
+                    {msg.plan.params && Object.keys(msg.plan.params).length > 0 && (
+                      <div data-testid="plan-params" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        Params: <code style={{ background: 'var(--surface-muted)', padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem' }}>{JSON.stringify(msg.plan.params)}</code>
+                      </div>
+                    )}
+                    {msg.plan.reasoning && (
+                      <div data-testid="plan-reasoning" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                        {msg.plan.reasoning}
+                      </div>
+                    )}
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <button
                         className="btn-primary"

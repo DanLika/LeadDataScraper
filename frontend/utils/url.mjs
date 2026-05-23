@@ -44,6 +44,13 @@ export function ensureProtocol(url) {
  * form and is a phishing-display aid — can't pass. Neither character is
  * needed for a legitimate same-origin path in this app.
  *
+ * Percent-decoded variants are checked too: a value like
+ * `/dashboard%2f%2fevil.com` or `/%2e%2e/evil.com` matches the regex
+ * (`%` is in the allowlist) but would decode to a path the browser /
+ * intermediate proxies could normalise into a host-swap. Decode-once
+ * and reject if the decoded form contains `//`, `\`, control chars,
+ * or path-traversal segments.
+ *
  * Anything that fails the checks collapses to `'/'` (the app root).
  */
 export function sanitizeNext(raw) {
@@ -52,5 +59,23 @@ export function sanitizeNext(raw) {
   if (raw.length > 512) return '/';
   if (!/^\/[A-Za-z0-9._~\-/?#=&%+!$'()*,;]*$/.test(raw)) return '/';
   if (raw.startsWith('//')) return '/';
+  // Defense against %-encoded host-swap / traversal payloads. We decode
+  // exactly once; if the decoded form differs from the input, we re-apply
+  // the dangerous-pattern checks. Anything still suspect collapses to '/'.
+  let decoded;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    return '/';
+  }
+  if (decoded !== raw) {
+    if (decoded.includes('//')) return '/';
+    if (decoded.includes('\\')) return '/';
+    if (decoded.includes('..')) return '/';
+    // Control characters (incl. NUL, CR, LF, TAB) and DEL — any of these
+    // can desync intermediate proxies into treating the redirect as a
+    // different target than what the app intended.
+    if (/[\x00-\x1f\x7f]/.test(decoded)) return '/';
+  }
   return raw;
 }

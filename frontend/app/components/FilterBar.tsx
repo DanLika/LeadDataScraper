@@ -1,6 +1,16 @@
 'use client';
 
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
+
+export type SortKey =
+  | 'created_at_desc'
+  | 'seo_score_desc'
+  | 'seo_score_asc'
+  | 'outreach_score_desc'
+  | 'name_asc'
+  | 'name_desc';
+
+export const DEFAULT_SORT: SortKey = 'created_at_desc';
 
 interface FilterBarProps {
   searchTerm: string;
@@ -11,7 +21,11 @@ interface FilterBarProps {
   setFilterAuditStatus: (value: string) => void;
   filterMinScore: number;
   setFilterMinScore: (value: number) => void;
+  sortKey: SortKey;
+  setSortKey: (value: SortKey) => void;
   segmentOptions: (string | undefined)[];
+  onClearFilters: () => void;
+  hasActiveFilters: boolean;
 }
 
 export default function FilterBar({
@@ -23,7 +37,11 @@ export default function FilterBar({
   setFilterAuditStatus,
   filterMinScore,
   setFilterMinScore,
+  sortKey,
+  setSortKey,
   segmentOptions,
+  onClearFilters,
+  hasActiveFilters,
 }: FilterBarProps) {
   return (
     <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-muted)', flexWrap: 'wrap', gap: '1.5rem', minWidth: 'min-content' }}>
@@ -83,6 +101,33 @@ export default function FilterBar({
             style={{ accentColor: 'var(--primary)', width: '100px' }}
           />
         </div>
+
+        <select
+          value={sortKey}
+          onChange={(e) => setSortKey(e.target.value as SortKey)}
+          id="sort-leads"
+          aria-label="Sort leads"
+          style={{ background: 'var(--surface-muted)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.6rem 1rem', color: 'var(--text-white)', fontSize: '0.9rem', outline: 'none' }}
+        >
+          <option value="created_at_desc" style={{ background: 'var(--surface-dark)' }}>Newest first</option>
+          <option value="seo_score_desc" style={{ background: 'var(--surface-dark)' }}>SEO score: high → low</option>
+          <option value="seo_score_asc" style={{ background: 'var(--surface-dark)' }}>SEO score: low → high</option>
+          <option value="outreach_score_desc" style={{ background: 'var(--surface-dark)' }}>Outreach score: high → low</option>
+          <option value="name_asc" style={{ background: 'var(--surface-dark)' }}>Name A→Z</option>
+          <option value="name_desc" style={{ background: 'var(--surface-dark)' }}>Name Z→A</option>
+        </select>
+
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={onClearFilters}
+            id="clear-filters"
+            aria-label="Clear filters"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '12px', padding: '0.55rem 0.85rem', fontSize: '0.85rem', cursor: 'pointer', minHeight: '44px' }}
+          >
+            <X size={14} aria-hidden="true" /> Clear filters
+          </button>
+        )}
       </div>
     </div>
   );
