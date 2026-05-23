@@ -4,12 +4,13 @@
 blocked in production).
 **Discovered:** 2026-05-22, during live chrome-devtools-mcp testing.
 **Affected build:** Next.js 16.2.6, `frontend/next.config.ts:17`.
-**Status: RESOLVED 2026-05-22 on branch `fix/csp-nonce-rsc-hydration`** —
-recommended fix path (per-request nonce + `'strict-dynamic'`) implemented
-across three load-bearing files. Verified end-to-end via chrome-devtools-mcp:
-15 streamed scripts now carry the per-request nonce, login form renders,
-hydration succeeds, dashboard reaches `Pipeline Intelligence`. Landing
-patches:
+**Status: RESOLVED.** Fix landed on branch `fix/csp-nonce-rsc-hydration`
+on 2026-05-22, merged to `main` in commit `d3a90ff` on 2026-05-23.
+Local build green + smoke clean before push: 15/16 scripts nonced (the 1
+external script lacks its own nonce — covered by `'strict-dynamic'`),
+5/5 `__next_f.push` RSC bootstrap blocks nonced, `body[data-nonce="1"]`,
+0 console messages, login form renders + interactive. The repeatable
+verification recipe is at the bottom of this doc. Landing patches:
 - `frontend/proxy.ts` — generates 16-byte base64 nonce per request, sets
   `x-nonce` on a NEW `Headers` object passed via
   `NextResponse.next({ request: { headers } })` and the matching

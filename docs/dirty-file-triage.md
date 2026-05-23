@@ -1,5 +1,39 @@
 # Dirty File Triage — Phase 12.14
 
+> ## Status — 2026-05-23 update
+>
+> The triage was executed overnight. Working tree dropped from **213 paths → 20** (–90%). Open PR count moved +9 (drain PRs #201–#210). Original #185–#200 stack still all open (the drain track ran in parallel, not after, the original stage plan).
+>
+> **Landed to `main`** (8 drain PRs + 1 direct commit):
+>
+> | Bucket | PR | Title | Merged |
+> |---|---|---|---|
+> | **S1 — CSP nonce/RSC hydration** | direct commit `d3a90ff` | `fix(csp): per-request nonce + strict-dynamic for RSC hydration` | 2026-05-23 |
+> | G — backend utils | #201 | chore(G-broad): drain backend python — utils + perf + hardening | 2026-05-23 06:37 |
+> | C — frontend components | #202 | chore(C): drain frontend components — virtualization + URL hardening | 2026-05-23 06:38 |
+> | D+M — Sentry + frontend deps | #203 | chore(D+M): drain Sentry instrumentation + frontend deps | 2026-05-23 06:39 |
+> | I+J — loadtest + perf | #204 | chore(I+J): drain loadtest scaffolding + perf evidence reports | 2026-05-23 06:40 |
+> | B+L — docs + CLAUDE.md | #205 | chore(B+L): drain docs + CLAUDE.md + SECURITY.md | 2026-05-23 06:40 |
+> | H — backend tests | #206 | chore(H): drain backend tests batch — security/AI/concurrency/GDPR | 2026-05-23 06:41 |
+> | (gitignore) | #209 | chore: gitignore perf traces + cx tool configs | 2026-05-23 06:43 |
+> | C-followup | #210 | chore(C-followup): drain offlineQueue + cookie-floor fuzz tests | 2026-05-23 06:45 |
+>
+> **Drained but PRs open** (commits exist on `chore/drain-*-2026-05-23` branches):
+>
+> - Bucket A — CI infrastructure → likely **#207 or #208**
+> - Bucket E — E2E Playwright suite → likely **#207 or #208**
+>
+> **Still dirty (20 files = remaining work):**
+>
+> - **Bucket K — backend schema/ops** (3 modified): `Dockerfile`, `render.yaml`, `supabase_schema.sql` + `requirements.in` (untracked)
+> - **Bucket F — DB safety gate scripts** (16 untracked): all `src/scripts/check_*.py` + `cost_report.py`, `purge_expired_audit_log.py`, `schema_drift_check.py`, `slow_query_report.py`, `storage_report.py`, `suggest_jsonb_indexes.py`
+>
+> **Phase 12.9 still pending** — `schema_drift_check.py` `TABLES` tuple needs `account_deletions` added before K lands, or the drift gate trips on first run. See in-line guidance below in Bucket F.
+>
+> **Next slice:** Bucket K + Bucket F as one coupled PR. Schema-first sequencing (per `CLAUDE.md`): apply schema to live Supabase project → enable drift gate → land PR.
+>
+> ---
+
 **Generated:** 2026-05-22
 **Working tree on:** `fix/csp-nonce-rsc-hydration` (misnamed — see `git-state-2026-05.md`)
 **Totals:** 30 modified tracked files + 183 untracked = **213 paths**
