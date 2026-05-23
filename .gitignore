@@ -74,3 +74,7 @@ tests/perf/*.json
 
 # context-mode tool configs (local-only)
 frontend/.cx_*.config.mjs
+
+# Mutation testing (mutmut)
+.mutmut-cache
+html/
