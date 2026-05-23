@@ -2009,10 +2009,10 @@ surgical fix PRs. Source of truth: `tests/perf/phase15-findings.md`
 | --- | --- |
 | #1 Sign Out click no-ops (P0) | **RETRACTED** Phase 16 — false positive from a stale build cache (`pkill -f "next start" -f "uvicorn backend"` only kills the second pattern on macOS, so the old `next-server` kept serving cached output) |
 | #2 Clear filters doesn't strip URL | **PR #235** — `router.replace('/')` in `clearFilters` bypasses the read-effect race |
-| #3 `TOTAL LEADS` shows page-load count | **PR #241** — rename → `LOADED` (honest cursor-pagination semantics) |
+| #3 `TOTAL LEADS` shows page-load count | **PR #244** — bind to `/stats.total_leads` so the card reflects DB-wide count (#241 closed in favour of this approach) |
 | #4 Pre-login vitals 307→/login | **PR #234** — `/api/proxy/metrics` exact-match in middleware public-path allowlist |
-| #5 Vitals only flush on visibility-change | **No fix** — default `web-vitals` behaviour; opt into `{reportAllChanges:true}` later if eager flush worth the extra beacons |
-| #6 AI Insights hallucinated counts | **No fix yet** — needs Gemini test fixtures (`test_insights_quality.py::no-invented-numbers`) to validate a `total_count` prompt-pin without regressing other insights |
+| #5 Vitals only flush on visibility-change | **PR #242** — pass `{reportAllChanges:true}` to `onCLS` + `onLCP` so beacons fire eagerly while tab still active; web-vitals lib still installs its own pagehide/visibilitychange handlers internally for the final snapshot |
+| #6 AI Insights hallucinated counts | **PR #245** — `_get_strategic_insights` fetches DB-wide count via `select(count="exact").limit(1)` and embeds it as a `GROUND TRUTH` block in the prompt; bumps `test_prompt_snapshots.py` SHA256 (regenerate via `UPDATE_PROMPT_SNAPSHOTS=1`) |
 | #7 `/orchestrator/active` polling storm | **PR #233** — `document.hidden` guard + `visibilitychange` re-fire on the 5 s cross-tab poller |
 | #8 ForcedReflow on reload trace | **Re-trace after #233** — coincided with the polling re-render window; visibility-pause likely halves the affected duration on its own |
 | #9 `/leads` refetched 3× in 30 s idle | **Covered by #233** — same poller cascade |
