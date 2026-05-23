@@ -40,6 +40,10 @@ export default defineConfig({
   // mobile.spec.ts is the inverse — viewport regressions are the *only*
   // thing it tests, so it runs ONLY on the iPhone 14 + Pixel 7 projects
   // (testMatch). Desktop projects testIgnore it.
+  // visual.spec.ts is chromium-only: baselines are pixel-locked to a
+  // Playwright Docker image (matches CI ubuntu-latest), so cross-browser
+  // glyph drift would just churn noise. Auth + security-headers + a11y
+  // already exercise the Firefox/WebKit rendering surface.
   projects: [
     {
       name: 'chromium',
@@ -49,12 +53,12 @@ export default defineConfig({
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
-      testIgnore: /(full-flow|mobile)\.spec\.ts$/,
+      testIgnore: /(full-flow|mobile|visual)\.spec\.ts$/,
     },
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
-      testIgnore: /(full-flow|mobile)\.spec\.ts$/,
+      testIgnore: /(full-flow|mobile|visual)\.spec\.ts$/,
     },
     {
       name: 'iphone-14',
