@@ -528,5 +528,140 @@ class TestExecuteTaskAllowlist(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(res.status_code, 403)
 
 
+# ---- PipelineRequest.filters typed allowlist (M5 hardening) ----------------
+
+class TestPipelineFiltersTyped(unittest.IsolatedAsyncioTestCase):
+    """
+    `PipelineRequest.filters` used to be `Optional[dict]` — the only field
+    in any inbound model without `extra='forbid'` + bounded `constr`.
+    That escape hatch let an authed caller smuggle arbitrary keys + nested
+    dict-shaped values past Pydantic.
+
+    This class locks in the typed `PipelineFilters` allowlist
+    (`type`/`query`/`location`/`limit`). Anything outside the allowlist
+    must 422. Bounds (constr 200 / 64 / ge=1 / le=1000) must trip at
+    boundary + 1.
+    """
+
+    async def asyncSetUp(self):
+        self.app = _fresh_app()
+        self.http = _client(self.app)
+        self.h_ok = {"X-API-Key": API_KEY}
+
+    async def asyncTearDown(self):
+        await self.http.aclose()
+
+    async def _post_pipeline(self, body):
+        return await self.http.post("/orchestrator/start",
+                                    headers=self.h_ok, json=body)
+
+    def _assert_pydantic_accepted(self, res):
+        """Pydantic validation passed if status is NOT 422 and NOT 403.
+
+        Test fixture sets `mock_db.client = None`, so the handler then
+        short-circuits to 503 ("Database not connected"). 503 here means
+        validation passed and the handler ran — exactly what we're
+        proving. Anything 4xx other than 422/403 would also indicate the
+        wrong gate fired."""
+        self.assertNotEqual(res.status_code, 422,
+                            f"Pydantic rejected valid body: {res.status_code} {res.text[:200]!r}")
+        self.assertNotEqual(res.status_code, 403,
+                            f"Auth rejected (test misconfigured): {res.status_code} {res.text[:200]!r}")
+        # 200 (mock pipeline returns) or 503 (db.client is None) both indicate
+        # the validator passed; either is acceptable here.
+        self.assertIn(res.status_code, (200, 503),
+                      f"Unexpected status: {res.status_code} {res.text[:200]!r}")
+
+    # ---- Accept paths --------------------------------------------------
+
+    async def test_type_only_accepted(self):
+        """Matches the AI-router shape (`{"type": ...}`)."""
+        res = await self._post_pipeline({"filters": {"type": "ev_charger"}})
+        self._assert_pydantic_accepted(res)
+
+    async def test_query_plus_location_accepted(self):
+        """Matches the discovery shape (`{"query": ..., "location": ...}`)."""
+        res = await self._post_pipeline({
+            "filters": {"query": "dentist", "location": "Mostar"}
+        })
+        self._assert_pydantic_accepted(res)
+
+    async def test_filters_null_accepted(self):
+        """`filters=null` is the default — pipeline runs against the full
+        lead inventory."""
+        res = await self._post_pipeline({"filters": None})
+        self._assert_pydantic_accepted(res)
+
+    async def test_filters_empty_dict_accepted(self):
+        """`{}` is valid — every PipelineFilters key is Optional."""
+        res = await self._post_pipeline({"filters": {}})
+        self._assert_pydantic_accepted(res)
+
+    async def test_limit_at_lower_bound_accepted(self):
+        res = await self._post_pipeline({"filters": {"limit": 1}})
+        self._assert_pydantic_accepted(res)
+
+    async def test_limit_at_upper_bound_accepted(self):
+        res = await self._post_pipeline({"filters": {"limit": 1000}})
+        self._assert_pydantic_accepted(res)
+
+    # ---- Reject paths --------------------------------------------------
+
+    async def test_extra_filter_key_rejected_422(self):
+        """`PipelineFilters` is `extra='forbid'` — unknown keys must 422.
+        This is the M5 fix: the old `Optional[dict]` accepted any key."""
+        res = await self._post_pipeline({
+            "filters": {"type": "x", "extra_key": "y"}
+        })
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+    async def test_arbitrary_db_column_key_rejected_422(self):
+        """A caller probing for orchestrator-side allowlist columns
+        (`segment`, `audit_status`, etc.) must 422 at the HTTP edge."""
+        res = await self._post_pipeline({"filters": {"segment": "dental"}})
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+    async def test_limit_zero_rejected_422(self):
+        """`ge=1` — zero or negative must 422."""
+        res = await self._post_pipeline({"filters": {"limit": 0}})
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+    async def test_limit_above_max_rejected_422(self):
+        """`le=1000` — 1001 must 422."""
+        res = await self._post_pipeline({"filters": {"limit": 1001}})
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+    async def test_query_over_max_length_rejected_422(self):
+        """`constr(max_length=200)` — 201 chars must 422."""
+        res = await self._post_pipeline({"filters": {"query": "x" * 201}})
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+    async def test_location_over_max_length_rejected_422(self):
+        """`constr(max_length=200)` — 201 chars must 422."""
+        res = await self._post_pipeline({"filters": {"location": "y" * 201}})
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+    async def test_type_over_max_length_rejected_422(self):
+        """`constr(max_length=64)` — 65 chars must 422."""
+        res = await self._post_pipeline({"filters": {"type": "t" * 65}})
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+    async def test_nested_dict_value_rejected_422(self):
+        """A nested dict at any leaf key must 422 — closes the deep-nest
+        smuggle surface the old `Optional[dict]` allowed."""
+        res = await self._post_pipeline({
+            "filters": {"type": {"smuggled": "object"}}
+        })
+        self.assertEqual(res.status_code, 422,
+                         f"got {res.status_code} body={res.text[:200]!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

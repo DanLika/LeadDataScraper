@@ -180,13 +180,39 @@ def error_response(message, status_code=500) -> JSONResponse:
 
 CampaignChannel = Literal["email", "linkedin", "multi"]
 CampaignStatus = Literal["draft", "active", "paused", "completed", "archived"]
-# Allowlist of columns callers may filter on in PipelineRequest. Keeping this
-# tight stops the caller from probing arbitrary DB columns via error messages
-# and bypassing intended segment scoping.
-_PIPELINE_FILTER_KEYS = frozenset({
-    "segment", "audit_status", "high_risk_flag", "company_size", "campaign_id",
-    "country", "city", "language", "outreach_score", "seo_score",
-})
+
+
+class PipelineFilters(BaseModel):
+    """Typed allowlist for `PipelineRequest.filters`.
+
+    Replaces the previous `Optional[dict]` escape hatch — every other
+    inbound model on this app pins `extra='forbid'` + bounded `constr`,
+    and `filters` was the only field that let an authed caller smuggle
+    arbitrary keys + nested objects past validation.
+
+    The four keys here are the union of what the two actual producers
+    of `orchestration_jobs.filters` JSONB emit:
+
+      - `agentic_router._execute_massive_pipeline` -> ``{"type": <str>}``
+      - `task_orchestrator.run_discovery_job`     -> ``{"query": <str>, "location": <str>}``
+
+    `limit` is forward-compatibility only — `run_massive_pipeline`
+    does not consume it today (no orchestrator-side wiring), so a value
+    here is stored in JSONB and otherwise ignored. Bounded `ge=1,
+    le=1000` for when it lands.
+
+    NOTE: this is a *superset* of the two shapes that
+    `src/scripts/check_jsonb_shapes.py` accepts (`{"type"}` OR
+    `{"query","location"}`). The boundary is deliberately looser so
+    forward-compat keys (`limit`, `query`-without-`location`) don't
+    422 here at the HTTP edge; the daily JSONB shape audit remains
+    the authority for what hits the column.
+    """
+    model_config = ConfigDict(extra="forbid")
+    type: Optional[constr(max_length=64)] = None
+    query: Optional[constr(max_length=200)] = None
+    location: Optional[constr(max_length=200)] = None
+    limit: Optional[int] = Field(default=None, ge=1, le=1000)
 
 
 class CampaignCreate(BaseModel):
@@ -242,12 +268,16 @@ class DiscoveryRequest(BaseModel):
 
 class PipelineRequest(BaseModel):
     """Body for `/start-pipeline` — the multi-stage audit/enrich/score
-    pipeline. Either pass `filters` (a server-side allowlisted dict)
-    to select leads by attribute, or pass `lead_ids` for an explicit
-    list. `tasks` selects which stages to run; defaults to the full
-    pipeline when absent."""
+    pipeline. Either pass `filters` (a typed `PipelineFilters` submodel
+    with `extra='forbid'`) to select leads by attribute, or pass
+    `lead_ids` for an explicit list. `tasks` selects which stages to
+    run; defaults to the full pipeline when absent.
+
+    Prior to 2026-05-23 `filters` was `Optional[dict]` — the only field
+    in any inbound model without `extra='forbid'` + bounded `constr`.
+    See `PipelineFilters` above for the typed allowlist."""
     model_config = ConfigDict(extra="forbid")
-    filters: Optional[dict] = None
+    filters: Optional[PipelineFilters] = None
     lead_ids: Optional[conlist(constr(min_length=1, max_length=128), max_length=10_000)] = None
     tasks: Optional[conlist(constr(min_length=1, max_length=64), max_length=64)] = None
 
@@ -1433,7 +1463,11 @@ async def delete_operator_account(request: Request, payload: AccountDeletionRequ
 async def start_massive_pipeline(request: Request, payload: PipelineRequest):
     if not db.client:
         return error_response("Database not connected", status_code=503)
-    job_id = await orchestrator.run_massive_pipeline(filters=payload.filters, lead_ids=payload.lead_ids, tasks=payload.tasks)
+    # Orchestrator's `run_massive_pipeline(filters=...)` expects a plain
+    # dict (or None) — `model_dump(exclude_none=True)` keeps the typed
+    # boundary at the HTTP edge without changing the downstream signature.
+    filters_dict = payload.filters.model_dump(exclude_none=True) if payload.filters else None
+    job_id = await orchestrator.run_massive_pipeline(filters=filters_dict, lead_ids=payload.lead_ids, tasks=payload.tasks)
     return {"status": "job_started", "job_id": job_id}
 
 @app.get("/orchestrator/status/{job_id}", dependencies=[Depends(verify_api_key)])
