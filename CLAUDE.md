@@ -8,12 +8,15 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - **Frontend**: Next.js (App Router), React 19, TypeScript, Recharts, Lucide icons
 
 ## Backend Architecture
-- `backend/main.py` — FastAPI app with all API endpoints (leads, campaigns, orchestrator, AI chat, exports)
-- `src/utils/supabase_helper.py` — Supabase client wrapper (uses `SUPABASE_SERVICE_ROLE_KEY` for backend ops)
-- `src/scrapers/seo_audit.py` — Async SEO auditor with tech stack detection
-- `src/scrapers/discovery_engine.py` — Google Maps lead discovery via Playwright
-- `src/core/task_orchestrator.py` — Background job orchestration for audits, hunts, enrichment
-- `src/core/agentic_router.py` — AI instruction routing (natural language → task execution)
+- `backend/main.py` — FastAPI app with all API endpoints (leads, campaigns, orchestrator, AI chat, exports). Lazy module-level singletons (`db`, `router`, `auditor`, `orchestrator`) via module `__getattr__` so heavy chains (pandas, google.genai, playwright) don't fire at import time. **PEP 562 caveat:** `__getattr__` is only consulted for attribute access on the module object, not for bare-name `LOAD_GLOBAL` lookups inside functions in the same module — handlers like `if not db.client:` would raise `NameError` if hit before priming, so the lifespan explicitly attribute-accesses each name via `sys.modules[__name__]` to populate `globals()` once at boot. See "Cold-start lazy imports" below.
+- `src/utils/supabase_helper.py` — Supabase client wrapper (uses `SUPABASE_SERVICE_ROLE_KEY` for backend ops). Hot-path read methods (`list_leads_recent`, `get_stats_rows`, `find_running_job`, `insert_orchestration_job`) are `asyncio.to_thread`-wrapped so sync PostgREST calls don't block the uvicorn event loop.
+- `src/utils/stats_cache.py` — In-process TTL cache (60s) with `asyncio.Lock` stampede guard for `/stats`. Per-uvicorn-worker singleton; `invalidate()` hooked into write paths.
+- `src/utils/query_profiler.py` — Dev-only Supabase query profiler, env-gated (`QUERY_PROFILER=1`). Monkey-patches `client.table` via a chainable proxy to record verb + caller frame + timing; `assert_o1(per_unit=N)` for N+1 regression guards.
+- `src/scrapers/seo_audit.py` — Async SEO auditor with tech stack detection (aiohttp, no Playwright).
+- `src/scrapers/discovery_engine.py` — Google Maps lead discovery via Playwright.
+- `src/scrapers/enrichment_engine.py` — Shared-browser-pool enrichment. One Chromium process per `EnrichmentEngine` instance; per-lead `new_context()`. `aclose()` tears down on batch end (called from orchestrator + `_execute_deep_enrichment` `finally`).
+- `src/core/task_orchestrator.py` — Background job orchestration for audits, hunts, enrichment. `_process_in_chunks` `finally` calls `enricher.aclose()` + `stats_cache.invalidate()`.
+- `src/core/agentic_router.py` — AI instruction routing (natural language → task execution).
 
 ## API Security
 - **Frontend access requires a Supabase Auth session.** Root `frontend/proxy.ts`
@@ -33,12 +36,19 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   start with `//` or `/\`). The allowlist regex deliberately excludes
   `@` and `:` so a `/@evil.com/foo` value can't resolve to a same-origin
   URL whose address bar mimics the `user@host` phishing-display pattern.
-  Closes open-redirect + phishing-assist on auth. `utils/url.mjs` also
-  exports `ensureProtocol()` — the `<a href>` scheme guard that forces
-  scraped `website`/social-link values through a `http:`/`https:`-only
-  allowlist (rejects `javascript:` / `data:`). Both are pure functions,
-  CI-covered by `utils/url.test.mjs` (`.mjs` so `node --test` needs no
-  build step — same pattern as `cookie-floor.mjs`).
+  **Decode-once layer**: the regex allows `%` (URL-encoded chars), so
+  payloads like `/dashboard%2f%2fevil.com` and `/%2e%2e/evil.com` would
+  otherwise slip through. After the regex pass, the value is
+  `decodeURIComponent`'d once and re-rejected if the decoded form
+  contains `//`, `\`, `..`, or control chars (`\x00-\x1f\x7f`).
+  Malformed encoding (`%ZZ`, `%2`, lone `%`) catches in the try/except
+  and collapses to `/`. Closes open-redirect + phishing-assist on auth.
+  `utils/url.mjs` also exports `ensureProtocol()` — the `<a href>`
+  scheme guard that forces scraped `website`/social-link values through
+  a `http:`/`https:`-only allowlist (rejects `javascript:` / `data:`).
+  Both are pure functions, CI-covered by `utils/url.test.mjs` (57 cases,
+  `.mjs` so `node --test` needs no build step — same pattern as
+  `cookie-floor.mjs`) and the e2e `tests/test_open_redirect.py`.
 - Supabase session cookies set via `setAll()` in
   `frontend/utils/supabase/middleware.ts` are true-floored to
   `SameSite=Lax`, `HttpOnly=true`, `Secure=true` (prod). Spread order is
@@ -128,13 +138,39 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   back to the TCP peer IP — so even if the FastAPI port is ever exposed
   directly, attackers cannot spoof XFF to spread load across rate-limit
   buckets.
-- Browser security headers set in `frontend/next.config.ts`: CSP
-  (`script-src 'self'` in prod; `connect-src` whitelists Supabase URL + wss;
-  `img-src 'self' data: blob: <SUPABASE_URL>` — no blanket `https:` so
+- Browser security headers: CSP is set **per-request** in
+  `frontend/proxy.ts` (NOT statically in `next.config.ts`) so the
+  `script-src` directive can carry a fresh `'nonce-<n>'` +
+  `'strict-dynamic'` each render. Next 16 RSC streams inline
+  `<script>self.__next_f.push(...)</script>` bootstrap blocks — a
+  static `script-src 'self'` would block hydration in `npm run start`
+  prod (sev-1, see `docs/findings/2026-05-22-csp-blocks-prod-hydration.md`).
+  The nonce flow:
+  1. `frontend/proxy.ts` generates a per-request 16-byte base64 nonce,
+     puts it on a NEW `Headers` object (mutating
+     `request.headers` in-place does NOT propagate to RSC under
+     Next 16 — must pass via `NextResponse.next({ request: { headers } })`),
+     and sets the matching `Content-Security-Policy` on the response.
+  2. `frontend/utils/supabase/middleware.ts::updateSession` accepts the
+     `requestHeaders` arg and threads it into the `NextResponse.next`
+     call.
+  3. `frontend/app/layout.tsx` is `dynamic = 'force-dynamic'` and
+     calls `(await headers()).get('x-nonce')` — registering the
+     `headers()` dependency. This combo makes Next.js auto-stamp the
+     same nonce onto every inline `__next_f` block it streams.
+     Without `force-dynamic`, routes pre-render statically with no
+     nonce and CSP rejects hydration.
+  Other static headers stay in `next.config.ts`: HSTS (2y + preload),
+  `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy`,
+  `Permissions-Policy` (camera/mic/geo off).
+  `productionBrowserSourceMaps: false`. CSP directives still in effect:
+  `connect-src 'self' <SUPABASE_URL>` + the matching `wss:`,
+  `img-src 'self' data: blob: <SUPABASE_URL>` (no blanket `https:` so
   attacker-controlled URLs can't be rendered as tracking pixels),
-  HSTS (2y + preload), `X-Frame-Options: DENY`, `X-Content-Type-Options`,
-  `Referrer-Policy`, `Permissions-Policy` (camera/mic/geo off).
-  `productionBrowserSourceMaps: false`.
+  `default-src 'self'`, `base-uri 'self'`, `form-action 'self'`,
+  `frame-ancestors 'none'`, `object-src 'none'`,
+  `style-src 'self' 'unsafe-inline'` (Next inlines a tiny style
+  block — required for CSS).
 - HTML page routes (`/`, `/login`, `/insights`, `/campaigns`) additionally
   get `Cache-Control: private, no-store, max-age=0` + `Vary: Cookie` via the
   `pageNoCacheHeaders` block in `next.config.ts`. This opts the authed pages
@@ -158,12 +194,37 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `/campaigns/{id}/export` handler in `backend/main.py`. Any new export
   path must use the same helper.
 - **SMTP header injection guard** (`src/integrations/email_sender.py`).
-  Recipient regex is `^[^@\s]+@[^@\s]+\.[^@\s]+$` — `\s` excludes `\r\n`
+  Recipient regex is `^[^@\s]+@[^@\s]+\.[^@\s]+\Z` — `\s` excludes `\r\n`
   so `victim@x.com\r\nBcc: attacker@evil` can't smuggle Cc/Bcc/Subject
-  headers via `msg["To"]`. Subject + from_name additionally pass a
-  CRLF-reject check before they are written into MIME headers — both
-  carry attacker-controllable content (Gemini draft, operator override).
-  When/if SMTP send wires up, this is the boundary check.
+  headers via `msg["To"]`. **Anchored with `\Z`, not `$`** — Python's
+  `re` treats `$` as "end OR before trailing `\n`" by default, so
+  `victim@x.com\n` would have slipped through and let a trailing-LF
+  recipient smuggle into the RCPT envelope. Subject + from_name
+  additionally pass a CRLF-reject check before they are written into
+  MIME headers — both carry attacker-controllable content (Gemini draft,
+  operator override). When/if SMTP send wires up, this is the boundary
+  check. Locked in by `tests/test_crlf_injection.py` + the existing
+  `tests/test_email_sender_guards.py`.
+- **Log-line forgery guard** (`src/utils/logging_config.py`). Every
+  `logger.error("processing %s", lead_name)` call carries attacker-
+  controllable args (lead names / websites / pain-points come from
+  CSV uploads + Google-Maps scrapes). `_CRLFScrubFilter` is attached
+  to both the console + `RotatingFileHandler` and translates raw
+  CR/LF/VT/FF in `record.msg` AND every entry of `record.args` (tuple
+  + dict forms) to the printable `\r` / `\n` escape. Without it, a
+  lead named `X\r\nERROR forged log line` would emit a second log
+  entry at attacker-chosen level + content. Locked in by
+  `tests/test_crlf_injection.py::TestLoggingCRLFScrub`.
+- **Email-extraction input cap** (`src/scrapers/seo_audit.py`,
+  `src/processors/leadhunter.py`). The legacy email regex
+  `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b` is O(n²) under
+  `re.findall` on attacker-shaped HTML (`"a@" + "a." * N + "x"` —
+  charset/literal-dot overlap forces backtracking at every starting
+  position). Production sites slice the input to **50 KB** before
+  findall/search: scraped emails sit near the document head, so the
+  cap is operationally safe but bounds worst-case CPU. Static-scan
+  test `tests/test_redos.py::TestEmailRegexInputBounded` fails CI if
+  a new call site lands without a `[:N]` slice.
 - Outbound HTTP from `seo_audit.py` and `enrichment_engine.py` runs through
   `src/utils/ssrf_guard.py` (`SSRFGuardResolver` + `assert_safe_url`) which
   rejects private / loopback / link-local / reserved / multicast IPs and
@@ -214,7 +275,11 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - Error responses never leak internal exception details
 - Global FastAPI exception handler converts any uncaught exception to JSON
   (`{"error": "Internal server error"}`, 500) so the Next.js proxy can always
-  `.json()` the body without SyntaxError.
+  `.json()` the body without SyntaxError. **`RecursionError` (deep-JSON DoS)
+  is special-cased to 413 `{"error": "Payload nesting too deep"}`** so a
+  2000-level nested body doesn't surface as a 500 the operator has to
+  triage. Locked in by
+  `tests/test_json_pollution.py::TestDeeplyNestedJSON`.
 - `_validation_with_authz_check` (the `@app.exception_handler(RequestValidationError)`
   override in `backend/main.py`) gates Pydantic 422 responses behind the
   X-API-Key check. Without this, FastAPI's default 422 returned the full
@@ -226,7 +291,13 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   full Pydantic `detail[]` array so the frontend's
   `AIChat.handleSubmit` join on `detail[].msg` continues to surface
   user-actionable errors (e.g. "String should have at most 4000
-  characters"). Locked in by `tests/test_validation_authz_gate.py`.
+  characters"). The `input` field is stringified via `json.dumps(default=str,
+  allow_nan=False)` and capped at 512 chars — two reasons: (a) `NaN`/`Infinity`
+  in the request body would otherwise crash the 422 response (`json.dumps`
+  raises "Out of range float values"), turning a validation error into a
+  500; (b) a 10 KB malicious value can't roundtrip back to the client in
+  the error response. Locked in by `tests/test_validation_authz_gate.py`
+  + `tests/test_json_pollution.py::TestLargeNumberPrecision`.
 - Lookups for a single row use `.maybe_single()` (not `.single()`) so a
   missing row returns `data=None` and the handler can answer 404. `.single()`
   raises `APIError(PGRST116)` on 0 rows, which the broad `except` swallows
@@ -267,6 +338,114 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   and the `model_dump(exclude_none=True)` requirement that preserves
   handler defaults like `params.get("filters", "high-risk")`. Run via
   `pytest tests/`.
+- **AI quality & safety test suite** (offline + live tiers under `tests/`):
+  - **Offline (CI-default, no GEMINI_API_KEY needed)**:
+    - `test_prompt_snapshots.py` — "prompts are code" guardrail. 8 Gemini
+      call sites, SHA256-hashed in `tests/fixtures/prompt_snapshots.json`.
+      Any drift forces an intentional review; regenerate baseline with
+      `UPDATE_PROMPT_SNAPSHOTS=1 pytest tests/test_prompt_snapshots.py`.
+    - `test_endpoint_hardening.py` — every authed endpoint × 7 concerns
+      (missing/wrong API key, empty body, extra fields, max-length+1,
+      adversarial Unicode/NUL/zero-width/RTL/emoji, rate-limit boundary,
+      admin-token guard on `DELETE /leads/clear`). `httpx.AsyncClient` +
+      `ASGITransport`; ~170 assertions in 1.1s. Fresh app per test class
+      so slowapi memory storage resets. **Note: code returns 403 not 401
+      on auth failures — the test asserts real behaviour.** Adversarial
+      codepoints built via `chr(0x200b)` so source stays pure ASCII
+      (semgrep bidi-detector clean).
+    - `test_pydantic_models_meta.py` — auto-discovers every `BaseModel`
+      in `backend.main` and enforces `extra='forbid'`, `max_length` on
+      every string + list, `Literal` on enum-shaped fields
+      (`channel/status/task/kind/role`). Reads `FieldInfo.metadata`
+      (Pydantic v2 canonical constraint location). New models can't ship
+      without hardening.
+    - `test_agentic_router_behavior.py` — every `ExecutableTask` value
+      dispatches without raising; arbitrary / SQL-injection-shaped /
+      missing task names reject with **zero Gemini calls** (counter
+      asserted); injection payloads in `params.query_text` land inside
+      an `UNTRUSTED_DATA` fence with `system_instruction` set;
+      non-existent `unique_key` short-circuits before Gemini; DB never
+      receives raw injection strings as filter args.
+    - `test_ssrf_guard_regression.py` — 25 reject cases via `subTest`
+      (loopback, AWS/GCP metadata, k8s `*.cluster.local`, RFC1918,
+      disallowed schemes, userinfo confusion, decimal/hex-encoded IPs)
+      + benign-URL allowlist + dedicated DNS-rebind test
+      (getaddrinfo public→private; second call raises).
+    - `test_outreach_score_properties.py` — fixed-fixture + hypothesis
+      (skipped if hypothesis absent). **Pinned finding:
+      `calculate_outreach_score` does NOT read `seo_score`** —
+      `test_seo_score_does_not_affect_score` locks current behaviour so
+      a future refactor that wires it in trips loudly.
+    - `test_segment_stability.py` — 20 leads × 5 runs.
+      **`segment_lead` is pure-Python regex, not Gemini** — test is a
+      regression guard for a future Gemini-backed segmenter AND a
+      contract pin on the 11-label `KNOWN_LABELS` vocabulary.
+  - **Live tier (skipped without GEMINI_API_KEY)** — run before model /
+    prompt changes:
+    - `test_outreach_golden_set.py`, `test_linkedin_golden_set.py` —
+      10-lead quality bar + Gemini-as-judge (avg ≥ 7.5).
+    - `test_outreach_hallucination.py` — 5 sparse leads (name + website
+      only). Two-layer detection: regex (number-claims, named-title
+      claims, 35+ tech tokens) + judge (every claim, `verifiable=bool`).
+      ANY invented claim fails. Judge sees the exact `lead_data` dict
+      the writer saw — synced to `agentic_router.py:389`.
+    - `test_ask_determinism.py` — 20× same instruction → same task;
+      `params.query` pairwise cosine ≥ 0.90 via `text-embedding-004`.
+      Documents that schema doesn't declare `limit`.
+    - `test_pain_points_consistency.py` — 50 calls; intra-lead pairwise
+      Jaccard ≥ 0.60 AND inter-lead < 0.30 (catches input-blind generic
+      output via 12-category synonym taxonomy).
+    - `test_ai_mapper_golden.py` — 15 CSV header variants spanning
+      English/Bosnian/French/German/Spanish + BOM-prefix + SQL injection
+      + prompt injection + ambiguous "contact" + junk columns. 100% on
+      canonicals; `custom_assert` per edge case.
+    - `test_i18n_outreach.py` — BiH/Croatian leads (`Kovačević`, `Žito`,
+      `Đurić`) through outreach + LinkedIn + mapper. Mojibake fingerprint
+      sweep, 60-word BCS function-word slop detector, diacritic-
+      preservation guard (catches silent ASCII transliteration).
+    - `test_refusal_boundaries.py` — 6 malicious instructions
+      (delete_leads, bulk_spam, phishing_bank, scrape_private_social,
+      threatening_legal, doxx_owners). Classifier: refusal / benign /
+      foreclosed / dangerous. ANY `dangerous` fails. Full transcript JSON
+      dumped to a tempfile; path printed each run.
+    - `test_json_compliance.py` — 50× per JSON-emitting call site
+      (mapper, insights, hooks, enrich). 100% parse + schema required.
+      Failure message points at `response_mime_type='application/json'`
+      + `response_schema` as the canonical fix.
+    - `test_ai_cost_budget.py` — 100-call pipeline budget per 20 leads:
+      ≤200k input, ≤50k output, ≤8k single-call, ≤$0.50 total. Per-task
+      breakdown printed on every run. Pricing constants pinned at top.
+    - `test_insights_quality.py` — 50-lead seeded fixture
+      (audit_status mix, score range, lead_source distribution). 5 calls
+      + 5 judges. No-invented-numbers check uses an allowed-set from
+      ground truth (counts + percentages ±1). Judge avg ≥ 8. Documents
+      that `_get_strategic_insights` SELECTs only 5 fields.
+    - `test_campaign_diversity.py` — 20 dentists, identical audit
+      profile, only company/contact differs. Subject pairwise Jaccard
+      ≤ 0.30 (after `COMPANY_NOUN_WORDS` masking) + opening-sentence
+      cosine < 0.85. Catches "personalization theater".
+  - **Critical pinned findings** (do NOT lose these on refactors —
+    each lives in a test docstring):
+    1. `seo_score` is not an input to `calculate_outreach_score`.
+    2. `segment_lead` is pure regex, not Gemini.
+    3. `_get_strategic_insights` SELECTs only
+       `name,company_name,audit_status,seo_score,lead_source`.
+    4. `discovery_search` / `run_massive_pipeline` tool schemas don't
+       declare `limit`.
+    5. `verify_api_key` returns 403, not 401.
+    6. Discovery and SEO audit are NOT Gemini calls — excluded from cost
+       budget.
+  - **Run targeting**:
+    - Full suite: `pytest tests/`
+    - Offline-only (~5s, no API key): `pytest tests/test_endpoint_hardening.py
+      tests/test_pydantic_models_meta.py tests/test_agentic_router_behavior.py
+      tests/test_ssrf_guard_regression.py tests/test_prompt_snapshots.py
+      tests/test_outreach_score_properties.py tests/test_segment_stability.py`
+    - Live quality: `GEMINI_API_KEY=... pytest tests/test_*golden*.py
+      tests/test_*hallucination*.py tests/test_*determinism*.py
+      tests/test_*consistency*.py tests/test_*i18n*.py tests/test_*refusal*.py
+      tests/test_*json_compliance*.py tests/test_*cost_budget*.py
+      tests/test_*insights_quality*.py tests/test_*diversity*.py`
 - **Outreach modal `mailto:` href** (`frontend/app/page.tsx`). `leadEmail`
   is `encodeURIComponent`-wrapped before interpolation, alongside the
   subject + body. Without the encode an attacker-controlled lead email
@@ -280,7 +459,69 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   removing `^` is belt-and-braces. The `postcss` override is pinned
   `^8.5.10` (was unbounded `>=`) to prevent a regenerated lockfile from
   accepting an arbitrary future postcss.
-- CI security gates in `.github/workflows/security.yml`: `pip-audit --strict`
+- **CI/CD architecture** — full inventory + operator setup at
+  `docs/ci-architecture.md`. 15 workflows under `.github/workflows/`,
+  every action SHA-pinned with `# vX.Y.Z` comment, standard concurrency
+  block, top-level `permissions: contents: read` with explicit per-job
+  escalations. PR gate in `ci.yml` (~20 required checks: pytest+95%
+  coverage, npm test, pre-commit, pip-audit, npm audit moderate+,
+  gitleaks, lockfile-sync, license-check, flaky-gate, semgrep,
+  ruff+mypy --strict, ESLint --max-warnings 0, Playwright E2E,
+  schema-drift, referential-integrity, query-plans, Lighthouse,
+  container-scan (Trivy+Grype+SBOM), Conventional Commits title,
+  PR size gate). Post-merge in `security.yml` (push + daily cron) re-runs
+  the security scans + DB invariant sweeps. Tagged-release supply
+  chain: `deploy-backend.yml` (push main) + `release.yml` (push tag
+  `v*`) push to GHCR → SLSA3 provenance via reusable workflow →
+  `cosign verify-attestation` → Render API rollout on the pinned
+  digest. Render service MUST be in "Deploy from existing image"
+  mode for the chain to gate rollout. Forged GHCR images (e.g. leaked
+  PAT push) fail cosign verify and never reach Render.
+- **Workflow pin invariant**: every `uses: org/action@<sha>  # vX.Y.Z`
+  line is a 40-char commit SHA + comment Dependabot reads to bump
+  both atomically (Codecov 2021 pattern). `workflow-pin-guard` local
+  pre-commit hook + `ci.yml::pre-commit` job both reject
+  `uses: org/action@vN` patterns. Resolve new-action SHAs via
+  `git ls-remote --tags https://github.com/<repo>`.
+- **Operational trackers** — three workflows maintain ONE canonical
+  auto-updated GitHub issue each: `flakiness-detector.yml` → label
+  `flaky` (nightly 3× parallel pytest, gist `flaky-tests.json`, fed
+  into `ci.yml::flaky-gate` which blocks PRs touching files with
+  active flakes in the last 7 days); `mutation-test.yml` → label
+  `mutation-coverage` (weekly mutmut, 80% kill-rate threshold on
+  `ssrf_guard.py`, `prompt_safety.py`, `leadhunter.py`); 
+  `workflow-drift.yml` → label `workflow-drift` (daily sha256
+  vs `.github/workflow-hashes.json` + git-log untracked-commit
+  audit; `make workflow-hashes` regenerates snapshot).
+- **pip-tools lockfile + hash pinning**: `requirements.in` is the
+  source-of-truth for direct deps; `requirements.txt` is generated by
+  `make lock-python` (`pip-compile --generate-hashes --strip-extras`).
+  Dockerfile installs with `--require-hashes` — a PyPI tampering
+  scenario where package bytes change between resolve and install
+  fails the build with `HashMismatch`. The `lockfile-sync` CI job
+  re-runs `pip-compile --dry-run` and diffs against committed; hand-
+  edits or forgotten regenerations turn the gate red. **Day-one
+  blocker**: operator must run `make lock-python` once locally before
+  the next merge or both lockfile-sync AND the Docker build will fail.
+- **Secret inventory + rotation** at `docs/secret-inventory.md`. 29
+  secrets cataloged with blast-radius-tiered rotation: monthly
+  (`SUPABASE_SERVICE_ROLE_KEY`, `RENDER_API_KEY`,
+  `SUPABASE_DATABASE_URL`); quarterly (`API_SECRET_KEY`,
+  `ADMIN_TOKEN`, `GEMINI_API_KEY`). OIDC where supported (GHCR +
+  Sigstore Fulcio); Render OIDC verify-before-adopting; Supabase
+  Mgmt API + Gemini stay PAT-only until upstream support lands.
+- **Local-CI parity** via pre-commit (`.pre-commit-config.yaml` +
+  `Makefile`). `make install-hooks` once per clone; same hooks run
+  in `ci.yml::pre-commit (local-CI parity)` so any drift is itself
+  the alarm. Selective `mypy` in pre-commit targets
+  `src/utils/(ssrf_guard|csv_helper)\.py` only (security-critical,
+  fully typed); the hard `--strict src/` gate runs in
+  `ci.yml::python-lint`. Semgrep runs via `pip install semgrep &&
+  semgrep scan --error` — the deprecated `returntocorp/semgrep-action@v1`
+  was removed; the org was renamed and the action repo is stale, so
+  a tag re-point would have executed attacker code in CI.
+- Legacy CI security gates documentation (now superseded by
+  `docs/ci-architecture.md`): `pip-audit --strict`
   on `requirements.txt`, `npm audit --omit=dev --audit-level=high` on the
   frontend, and Semgrep OWASP/Python/TypeScript/React rulesets. Runs on
   push, PR, and daily cron (catches newly-disclosed CVEs in already-pinned
@@ -293,6 +534,338 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `returntocorp/semgrep-action@v1` was removed; the org was renamed and
   the action repo is stale, so a tag re-point would have executed
   attacker code in CI.
+- **Supabase schema + RLS drift gate**
+  (`src/scripts/schema_drift_check.py`). Runs in both `ci.yml`
+  (PR-time, blocks merge) and `security.yml` (push to `main` + daily
+  cron — catches manual Supabase Studio edits between PRs). Connects via
+  the `SUPABASE_DATABASE_URL` GitHub Actions secret (`?sslmode=require`).
+  Fail-closed: exits 2 if the secret is unset, so a missing/typo'd
+  secret turns the job red instead of silently passing. Asserts: column
+  parity vs `supabase_schema.sql` (CREATE TABLE + ALTER TABLE ADD
+  COLUMN, no missing/extra); RLS enabled on `leads`, `campaigns`,
+  `campaign_messages`, `orchestration_jobs`; a `<table>_deny_all` policy
+  exists on each (roles ⊇ {anon, authenticated}, FOR ALL, qual=false,
+  with_check=false); no anon/authenticated/PUBLIC GRANT on those 4
+  tables; `add_lead_column` is SECURITY DEFINER, owned by `postgres`,
+  has `search_path` set, and no EXECUTE grant to
+  anon/authenticated/PUBLIC. Column check is **name-only** — type drift
+  (e.g. `needs_manual_review` text-vs-boolean, `outreach_score`
+  double-vs-int) is intentionally out of scope and tracked separately.
+- **Supabase referential integrity gate**
+  (`src/scripts/check_referential_integrity.py`). Runs alongside the
+  drift gate in both workflows. Exercises invariants that a static
+  schema check can't prove: (1) deleting a `campaigns` row CASCADE-deletes
+  its `campaign_messages` children; (2) inserting a `campaign_messages`
+  row with a non-existent `lead_unique_key` raises
+  `ForeignKeyViolation`. All mutations run inside a single transaction
+  that is **unconditionally rolled back** in a `finally` block — Postgres
+  READ COMMITTED hides the in-flight rows from other sessions, and ROLLBACK
+  undoes everything even if the connection drops mid-test. UUID IDs prevent
+  collisions between concurrent CI runs. Shares the `SUPABASE_DATABASE_URL`
+  secret with schema-drift, but the role must additionally have INSERT on
+  `campaigns` + `campaign_messages` and DELETE on `campaigns`. The
+  FK-violation probe runs inside a SAVEPOINT (`conn.transaction()`) so
+  the outer rollback survives the inner abort.
+- **Supabase hot-path index gate** (`src/scripts/check_query_plans.py`).
+  Runs alongside the drift + integrity gates in both workflows. For each
+  query in `HOT_PATH_QUERIES`, runs `SET LOCAL enable_seqscan = off`
+  followed by `EXPLAIN (FORMAT JSON)`, walks the plan tree, and fails if
+  any node is `Seq Scan`. Disabling seqscan forces the planner to pick
+  any *usable* index — so the check works on empty tables (which the
+  live DB currently has for `leads` and `campaign_messages`). Plain
+  EXPLAIN ANALYZE on an empty table picks Seq Scan trivially regardless
+  of indexes; `enable_seqscan=off` is the only way to distinguish "no
+  index" from "no rows yet". Covers: dashboard `ORDER BY created_at
+  DESC LIMIT 200`, `WHERE audit_status = ?`, `WHERE unique_key = ?`,
+  and `campaign_messages WHERE campaign_id = ?`. Read-only role is
+  sufficient because EXPLAIN without ANALYZE never executes the query
+  body. The supporting indexes (`idx_leads_created_at_desc`,
+  `idx_leads_audit_status`, `idx_orchestration_jobs_status`) were
+  reconciled in migration `add_missing_perf_indexes` (declared in
+  `supabase_schema.sql` but missing from the live project — verified
+  via `pg_indexes` on 2026-05-22). The redundant
+  `idx_leads_unique_key` declaration was removed from the schema file —
+  the UNIQUE constraint on `unique_key` auto-creates `leads_pkey` and a
+  second named index would be write-amp on every INSERT.
+- **DB-level CHECK constraints (defense in depth).** Supabase Studio
+  and the `service_role` key both bypass Pydantic, so allowlist + range
+  guards live in the database itself. Applied via the
+  `add_check_constraints` migration and mirrored in
+  `supabase_schema.sql` (under `DO $$ ... EXCEPTION WHEN
+  duplicate_object` blocks — Postgres has no `ADD CONSTRAINT IF NOT
+  EXISTS` for table-level CHECKs). `schema_drift_check.py` has an
+  `EXPECTED_CHECK_CONSTRAINTS` allowlist + `check_check_constraints()`
+  asserting parity in both directions (missing-in-DB **and**
+  undeclared-in-schema). 10 constraints currently locked in:
+  - `leads_seo_score_range` / `leads_outreach_score_range` — 0..100
+    inclusive, NULL allowed.
+  - `leads_audit_status_allowed` — wide allowlist matching producer
+    reality: `'Pending'`, `'Processing'`, `'Completed'`, `'Failed'`,
+    plus error-reason strings `'Timeout'`, `'403 Forbidden'`,
+    `'404 Not Found'`, `'Invalid URL'`. The last four are misuse of
+    the `audit_status` slot (a separate `last_error TEXT` column
+    exists for reasons); refactoring `src/core/parallel_auditor.py`
+    to write only the four canonical statuses would let us shrink the
+    allowlist. Tracked as future cleanup.
+  - `leads_enrichment_status_allowed` — uppercase per
+    `src/scrapers/enrichment_engine.py`:
+    `'PENDING'`/`'COMPLETED'`/`'FAILED'`/`'FAILED_NO_CONTENT'`.
+  - `leads_email_basic_shape` — `email IS NULL OR
+    (length(email) >= 3 AND email LIKE '%@%')`. Loose by design —
+    the strict regex lives at the SMTP boundary in
+    `src/integrations/email_sender.py`; DB only rejects obviously
+    broken values so scraped imports don't fail on quirky-but-valid
+    addresses.
+  - `orchestration_jobs_status_allowed` —
+    `'starting'`/`'running'`/`'completed'`/`'failed'`/`'stopped'`.
+  - `campaigns_channel_allowed` +
+    `campaign_messages_channel_allowed` —
+    `'email'`/`'linkedin'`/`'multi'`.
+  - `campaigns_status_allowed` —
+    `'draft'`/`'active'`/`'paused'`/`'completed'` (last is
+    forward-compat; no producer writes it yet).
+  - `campaign_messages_status_allowed` —
+    `'pending'`/`'sent'`/`'delivered'`/`'replied'`/`'bounced'` (only
+    `'pending'` written today; the rest forward-compat for SMTP /
+    LinkedIn integration callbacks).
+- **Supabase JSONB shape gate** (`src/scripts/check_jsonb_shapes.py`).
+  Runs in `security.yml` on push + **daily cron only** — intentionally
+  not PR-blocking. Shape drift in existing rows shouldn't block
+  unrelated code merges; daily cadence is right for catching a Studio
+  hand-edit or a producer-side regression that landed yesterday. Two
+  columns validated:
+  - `leads.audit_results` (only for `audit_status='Completed'` rows —
+    Pending/Processing/Failed legitimately have NULL or partial
+    payloads). Required keys + value types: `score` (number|null),
+    `is_up` (boolean|null), `tech_flags` (object), `red_flags` (array).
+    Producer: `src/scrapers/seo_audit.py::perform_seo_audit_async`
+    persisted via `src/core/parallel_auditor.py`.
+  - `orchestration_jobs.filters` must match **one of**
+    `{"type": <str>}` (pipeline path in
+    `task_orchestrator.py:143`) **or** `{"query": <str>,
+    "location": <str>}` (discovery path in
+    `task_orchestrator.py:101`). NULL is accepted.
+  `business_details` + `contact_details` were originally listed
+  alongside but are **TEXT free-form prose** (Gemini-generated, e.g.
+  "Full-service plumbing company specializing in ..."), not JSONB —
+  no structural validation possible. Promoting either to JSONB would
+  be a separate, deliberate migration.
+- **Supabase NULL ratio audit** (`src/scripts/check_null_audit.py`).
+  Runs in `security.yml` on push + daily cron, but the per-human-review
+  cadence is **weekly** — operator skims Monday's report to decide
+  which CANDIDATE_DROP / TIGHTEN items become a real migration. Two
+  failure modes: (1) advisory report (does NOT fail CI) — columns with
+  >90% NULL ratio (drop candidates) and columns the app reads as
+  required but the schema still allows NULL (`leads.name`,
+  `leads.lead_source`, `campaigns.status`, `campaign_messages.status`,
+  `campaign_messages.campaign_id`); (2) hard invariants (FAIL CI) —
+  any NULL row in a column with a schema default + app guarantee
+  (`unique_key`, `audit_status`, `created_at`, `updated_at` on
+  `leads`; `name`, `channel`, `created_at`, `updated_at` on
+  `campaigns`; `channel`, `created_at` on `campaign_messages`;
+  `id`, `status`, `created_at`, `updated_at` on
+  `orchestration_jobs`). Empty tables are skipped entirely — total=0
+  would make every column trivially "0% NULL" of nothing, drowning
+  the report. NULL counts are computed in one pass per table using
+  `psycopg.sql.SQL` + `sql.Identifier` composition (column names from
+  `information_schema`, never user input).
+- **Supabase orphan + zombie sweep**
+  (`src/scripts/check_orphans_and_zombies.py`). Runs in `security.yml`
+  on push + daily cron. Five checks, ONE auto-heal:
+  - **Soft-orphan campaign_messages** — `lead_unique_key` with no
+    matching `leads.unique_key`. FK should prevent this; orphans
+    signal a dropped or DEFERRABLE FK that the schema-drift gate
+    should also catch.
+  - **Zombie orchestration_jobs** — `status='running'` with
+    `updated_at` older than `ZOMBIE_THRESHOLD_HOURS = 4`. **AUTO-HEALED**
+    via `UPDATE orchestration_jobs SET status='failed',
+    updated_at=now()`. This is the only auto-heal: low risk
+    (slow-but-alive job at 4h is rare; flipping is reversible at zero
+    cost), high value (unblocks the orchestrator from leaking the
+    slot). All other checks involve user data where guessing wrong
+    would destroy info.
+  - **Stuck leads** — `audit_status IN ('Pending','Processing')` with
+    `updated_at` older than `STUCK_THRESHOLD_HOURS = 24`. Report-only
+    (could be retried, skipped, or reclassified — operator decides).
+  - **State-machine violation** — `campaign_messages.sent_at IS NOT
+    NULL AND status='pending'`. Report-only (don't know which write
+    is wrong).
+  - **Completed-without-results invariant** —
+    `audit_status='Completed' AND audit_results IS NULL`. Report-only.
+    Pairs with the JSONB shape gate.
+
+  Role permission delta: the `SUPABASE_DATABASE_URL` Postgres role
+  needs UPDATE on `orchestration_jobs` for the auto-heal (alongside
+  the existing INSERT/DELETE perms on `campaigns`/`campaign_messages`
+  that the referential-integrity gate needs). All other checks are
+  pure SELECT.
+- **Supabase concurrency / contention tests**
+  (`tests/test_concurrent_writes.py`). Runs in a dedicated
+  `concurrency-tests` job in `ci.yml` (PR-time, fork-PR guarded).
+  Five tests on live DB; isolation via `_concurrency_test_<uuid>`
+  unique-key prefix + per-test teardown + a session-scoped sweep
+  fixture that wipes any leftover rows from a SIGKILL'd CI worker.
+  Five invariants verified:
+  - **20 concurrent UPDATEs** to the same lead converge under row-lock
+    serialization — final `audit_status` is one of the values
+    written, every UPDATE returns.
+  - **20 concurrent INSERTs** with the same `unique_key` produce
+    exactly 1 success and 19 `UniqueViolation`s (no torn rows, no
+    deadlock).
+  - **Concurrent UPDATE + DELETE** on the same row always converges
+    to "row deleted" regardless of order (READ COMMITTED re-evaluates
+    the WHERE clause on the loser).
+  - **Lost-update window without advisory lock** — documents that
+    READ COMMITTED does NOT prevent classic read-modify-write losses
+    between two writers. Assertion is intentionally weak ("final
+    value is one of the writers"); a stronger invariant requires an
+    application-level serialization layer.
+  - **`pg_advisory_xact_lock` serializes 20 read-modify-write
+    increments** — final value is exactly `initial + 20`. Documents
+    the fix to adopt in `ParallelAuditor` when a lead can race with a
+    manual UI edit. Lock key: `(LEAD_LOCK_NAMESPACE=0x4EAD,
+    hashtext(unique_key))` — the namespace constant MUST be reused
+    by any other code that locks on a lead.
+  The unit-test job (`python-tests`) also collects this file but
+  every test skips via `pytest.importorskip("psycopg")` +
+  `pytest.mark.skipif(not DATABASE_URL, ...)` since `requirements.txt`
+  doesn't include psycopg. So the test file is exercised only in the
+  dedicated job with the right env.
+- **Per-role `statement_timeout` (long-running query DoS guard).**
+  Defaults configured at the role level via `ALTER ROLE ... SET
+  statement_timeout = ...` so every new connection inherits the cap:
+  - `anon` → **3s** (Supabase default, kept tight)
+  - `authenticated` → **8s** (Supabase default, kept tight)
+  - `service_role` → **30s** (added via `set_service_role_statement_timeout`
+    migration — Supabase ships this role with no timeout). Generous
+    enough for the longest legitimate single statement on the
+    pipeline's hot paths, tight enough to abort any runaway.
+  Verified daily in `security.yml` by
+  `src/scripts/check_statement_timeouts.py`. Two layers: (1) query
+  `pg_db_role_setting` and assert each role carries the expected
+  `statement_timeout=Ns` entry — catches a "RESET ALL" or
+  ALTER-ROLE-undone via Studio; (2) prove the cancellation primitive
+  fires by `SET LOCAL statement_timeout = '2s'` followed by
+  `SELECT pg_sleep(5)` — must raise `QueryCanceled`. Together these
+  transitively verify per-role behavior without needing separate
+  per-role connection strings. **Optional**: set
+  `DATABASE_URL_ANON` / `_AUTHENTICATED` / `_SERVICE_ROLE` secrets to
+  also exercise true per-role enforcement (script no-ops if absent).
+- **Connection pool / pooler-URL contract**
+  (`tests/test_connection_pool.py`). Three layers: (a) static grep
+  asserts no module under `backend/` or `src/` (excluding
+  `src/scripts/` + `tests/`) imports psycopg/asyncpg/psycopg2/pg8000
+  — the backend MUST go through PostgREST over HTTPS via supabase-py;
+  (b) static check that `DATABASE_URL` (when set) targets
+  `*.pooler.supabase.com` not the direct `db.<ref>.supabase.co` host;
+  (c) dynamic test opens `POOL_TEST_CONCURRENCY=20` concurrent
+  connections and asserts every one succeeds (pooler queues, doesn't
+  error). Lives in the same `concurrency-tests` ci.yml job as the
+  other live-DB pytest file. Backend "503-not-500 on pool exhaustion"
+  is intentionally out of scope here — that's an integration test
+  belonging in Playwright E2E with a forced-exhaustion fixture; the
+  test file documents this in module-level docstring.
+- **DB bloat report** (`src/scripts/check_db_bloat.py`). Runs in
+  `security.yml` on push + daily cron; the operator reviews weekly.
+  Fails CI when any non-empty core table has `n_dead_tup /
+  GREATEST(n_live_tup, 1) > 0.20` (autovacuum is throttled). Also
+  prints table sizes sorted largest first as the archival hit list.
+  `pgstattuple` extension auto-detected; not installed on the
+  current project, so the index-bloat metric is omitted with a note
+  in the report header. To enable index bloat, run `CREATE EXTENSION
+  pgstattuple;` in Studio (Pro plan).
+- **Slow query report** (`src/scripts/slow_query_report.py`). Read-only
+  on `pg_stat_statements` v1.11 (already enabled). Three sections:
+  top-10 by `total_exec_time`, anything with `mean_exec_time > 1s`,
+  and hot queries (`calls >= 100`) with cache hit ratio < 99%. Fails
+  CI on any finding so the operator notices; the fix is usually a
+  follow-up index PR. Runs in `security.yml` on push + daily cron.
+- **Grants matrix audit** (`src/scripts/check_grants_matrix.py`).
+  Beyond the deny-all RLS gate in `schema_drift_check.py`, this
+  enumerates every `information_schema.table_privileges` row and
+  asserts: `anon` / `authenticated` / `PUBLIC` have ZERO grants on
+  the 4 core tables; `service_role` + `postgres` carry the full set
+  (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `REFERENCES`, `TRIGGER`,
+  `TRUNCATE`); no other role appears in the matrix. Also enumerates
+  `pg_roles` against `EXPECTED_ROLES` (Supabase platform roles +
+  pg_* built-ins) — anything else flags a Studio CREATE ROLE or
+  extension surprise. Runs in `security.yml`.
+- **Function safety audit** (`src/scripts/check_function_safety.py`).
+  Three checks against `pg_proc` / `role_routine_grants`:
+  (a) only `EXPECTED_FUNCTIONS = {add_lead_column,
+  rls_auto_enable, update_updated_at_column}` exist in `public`;
+  (b) every `SECURITY DEFINER` function is owned by `postgres` and
+  has `search_path` in `proconfig`;
+  (c) no anon/authenticated/PUBLIC EXECUTE grant exists unless
+  declared in `EXEC_GRANT_ALLOWLIST` (currently empty). Runs in
+  `security.yml`.
+- **Deep backup PITR verification**
+  (`.github/workflows/backup-verify-deep.yml`). DISABLED by default
+  (`workflow_dispatch` only). When enabled (Pro plan + Supabase
+  PAT secret), runs monthly: creates a Supabase branch restored to
+  `now() - 1h`, runs schema-drift + referential-integrity + row-count
+  diff against the restore, deletes the branch in `if: always()`
+  cleanup. Records RTO end-to-end as evidence that PITR works.
+  Workflow header documents the full prerequisite list.
+- **ANALYZE freshness gate** (`src/scripts/check_analyze_freshness.py`).
+  Reads `pg_stat_user_tables.{last_analyze,last_autoanalyze}` for the
+  4 core tables. Fails CI when any table with > `ROW_THRESHOLD=10_000`
+  rows has both timestamps NULL or both older than
+  `STALE_AFTER_DAYS=7`. Below threshold = report-only (small tables
+  ride autovacuum just fine). For bulk-write paths (CSV upload of
+  >1000 rows) the backend should call `ANALYZE leads` immediately
+  after the upload completes — wire into `backend/main.py`'s
+  `/upload` handler if/when volume grows.
+- **JSONB GIN / expression-index suggestions**
+  (`src/scripts/suggest_jsonb_indexes.py`). Advisory only — always
+  exits 0. Scans `pg_stat_statements` for `@>` / `?` / `?|` / `?&`
+  predicates on `leads.audit_results` + `orchestration_jobs.filters`
+  and for `column->>'key'` extraction patterns; suggests
+  `CREATE INDEX ... USING gin (column)` or
+  `CREATE INDEX ... ((column->>'key'))` accordingly. The operator
+  reads the weekly run log; a suggestion appearing multiple weeks
+  is the signal to actually create the index.
+- **Soft-delete decision (deliberately not adopted).** Hard delete
+  is intentional for this single-operator project:
+  - The pipeline already has explicit DELETE points (`/leads/clear`
+    behind the X-Admin-Token gate; `/campaigns/{id}` cascades via
+    the FK on `campaign_messages`). No "oops, recover the row"
+    pattern needed at the single-operator scale.
+  - Adopting soft delete would require every `SELECT` site to add
+    `WHERE deleted_at IS NULL`, every FK constraint to respect the
+    soft-delete chain, and partial indexes scoped on
+    `deleted_at IS NULL`. Audit-grep would need to enforce the
+    filter at every read site.
+  - Recovery uses the Supabase PITR snapshot (verified by
+    `backup-verify-deep.yml`) rather than tombstone rows.
+  If this changes (multi-operator, audit requirement, regulatory
+  retention), the soft-delete adoption checklist lives in the
+  workflow comments above.
+- **Migration safety preview-branch gate**
+  (`.github/workflows/migration-safety.yml`). DISABLED by default
+  (`workflow_dispatch` only). When enabled on PRs touching
+  `supabase_schema.sql` or `supabase/migrations/**`: creates a
+  preview Supabase branch, applies the new schema to it, runs
+  `schema_drift_check` + `check_referential_integrity` +
+  `check_query_plans` against the branch, then deletes the branch.
+  Block-merge gate when added to the required status checks.
+  Prerequisites in the workflow header.
+- **Storage size + WoW growth monitor**
+  (`src/scripts/storage_report.py`). Reports
+  `pg_database_size(current_database())` and per-table
+  `pg_total_relation_size`. Soft-warns at 70% of
+  `STORAGE_QUOTA_BYTES` (default 8 GiB matching Supabase Pro base
+  disk), hard-fails at 90%. Diffs against a baseline JSON persisted
+  via `actions/cache@v4` keyed on workflow + month; any table
+  growing >2x WoW contributes to FAIL ("stuck job inserting
+  forever" signal). `audit_results` JSONB is the prime growth
+  suspect once volume builds — the report flags it explicitly when
+  it crosses thresholds. Runs in `security.yml` on push + daily
+  cron.
+- CI-only dep: `psycopg[binary]>=3.1` is installed inline by every
+  Supabase-DB job, not added to `requirements.txt` (backend talks to
+  Supabase over PostgREST HTTPS, not Postgres wire — no need to ship a
+  driver into the runtime image).
 - **Login brute-force gate** (`frontend/utils/loginThrottle.ts`). In-process
   per-IP throttle in front of `signInWithPassword`: 5 attempts / 60s.
   Bucket key derives from `TRUSTED_CLIENT_IP_HEADER` (same trusted-IP
@@ -312,6 +885,413 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   `*.localhost`) — that exempts `npm run start` smoke-tests against a
   local backend while still blocking any prod misconfiguration that would
   silently downgrade Render-network traffic to plaintext.
+- **GDPR Article 20 — data export** at `GET /operator/data-export`
+  (`backend/main.py`). Returns a ZIP with `leads.csv`, `campaigns.csv`,
+  `messages.csv`, `audit_log.json` (orchestration_jobs wrapped with
+  `{export_timestamp, operator_email, schema_version, row_counts}`).
+  Single-operator semantics ([ADR-001](docs/adr/001-single-tenant-by-design.md))
+  → the export is unconditional. CSV-injection guard
+  (`sanitize_csv_cell`) on every cell; `csv.QUOTE_MINIMAL` keeps
+  embedded CRLF inside one row. Rate-limit **1/day, peer-IP-keyed
+  (`get_remote_address`, NOT XFF-honouring)** — closes a theoretical
+  XFF-rotation bypass by an API-key holder hitting the backend's
+  public URL directly. Locked in by `tests/test_gdpr_export.py`
+  (17 tests). Operator-facing button: `frontend/app/page.tsx` Settings
+  → "Download my data". Full doc: [docs/observability.md](docs/observability.md) §12
+  + [docs/legal/privacy-policy.md](docs/legal/privacy-policy.md) §7.
+- **GDPR Article 17 — right to erasure** at `DELETE /operator/account`.
+  Three-factor gate: (1) `X-API-Key`, (2) `X-Admin-Token` (same gate
+  as `/leads/clear`), (3) JSON body with Pydantic
+  `Literal["DELETE MY ACCOUNT"]` confirmation (wrong value = 422
+  BEFORE the destructive step). **Audit-first invariant**: a row is
+  written to `account_deletions` BEFORE any DELETE runs — partial-
+  failure paths still leave a trace; audit-write failure returns 503
+  and **skips the destructive step entirely** (zero rows touched).
+  FK dependency order: `campaign_messages` → `campaigns` →
+  `orchestration_jobs` → `leads`. Sentinel-UUID predicate
+  (`_NEVER_UUID = "00000000-..."`) on `delete().neq("id", ...)` —
+  PostgREST requires a WHERE filter for safety. Footgun: a row whose
+  `id` IS the all-zero UUID escapes the wipe (~2⁻¹²² probability with
+  `gen_random_uuid()`); upgrade path is `.gte("created_at",
+  "1970-01-01")`. Rate-limit **1/hour, peer-IP-keyed**. Locked in by
+  `tests/test_gdpr_deletion.py` (16 tests: three-factor gate,
+  audit-first, row counts, retention, rate limit).
+- **`account_deletions` audit table** (`supabase_schema.sql`): one row
+  per `DELETE /operator/account`. Schema: `{id, deleted_at,
+  operator_email, remote_ip, row_counts JSONB, expires_at}`. RLS
+  deny-all (matches the 4 core tables). Index on `expires_at`.
+  **30-day retention** — purged daily by
+  `src/scripts/purge_expired_audit_log.py` (wired into `security.yml`
+  before the storage-monitor job). After 30 days, **no trace remains**
+  ([docs/legal/privacy-policy.md](docs/legal/privacy-policy.md) §5).
+  ⚠️ Day-1 follow-up: `EXPECTED_TABLES` in
+  `src/scripts/schema_drift_check.py` needs `account_deletions` added
+  + the RLS deny-all assertion list extended, or the schema-drift CI
+  gate goes red on next push.
+
+## Security test inventory
+
+Every defense above is locked in by a test. When you change a defense,
+the matching file fails loudly. Live-infra tests opt in via env var so
+CI stays green without setup.
+
+**Pure unit / fast (always run in `pytest tests/`):**
+- `tests/test_validation_authz_gate.py` — 422 schema-leak gate
+- `tests/test_execute_plan_model.py` — `/execute` Literal allowlist
+- `tests/test_email_sender_guards.py` + `tests/test_crlf_injection.py` —
+  SMTP CRLF / log-line forgery / `aiohttp` outbound-header rejection
+  (12 tests + 77 subtests; one real bug fixed: SMTP regex `$` → `\Z`)
+- `tests/test_ssrf_guard.py` + `tests/test_ssrf_deep.py` — IPv6
+  classifications, DNS rebinding (mocked sequenced resolver), HTTP/0.9
+  raw-socket rejection, static-scan for `max_redirects` / manual `Host`
+  header / DNS-TXT lookups (26 tests)
+- `tests/test_security_defenses.py` — `fenced_json` corpus + Playwright
+  route guard
+- `tests/test_prompt_injection_corpus.py` — 15-payload injection corpus
+  through `fenced_json` + mocked-Gemini router/draft surfaces (12 tests
+  + 34 subtests)
+- `tests/test_redos.py` — Subject-parser regression + email-regex
+  input-cap static scan (6 tests + 16 subtests; two real bugs fixed)
+- `tests/test_json_pollution.py` — prototype pollution, duplicate-key
+  smuggling, control chars, deep-nest 4xx (not 500), `NaN`/`Infinity`
+  not crashing the 422 handler (104 tests; two real bugs fixed)
+- `tests/test_error_message_leak.py` — fault-injected DB/Gemini/file
+  errors scraped against an 18-regex sensitive-substring list; header
+  fingerprint sweep; liveness probe + docs disabled checks (13 tests)
+- `tests/test_upload_attacks.py` — `/upload` adversarial fuzz: boundary
+  size, content-type / filename allowlists, traversal, NUL bytes,
+  polyglot, BOMs, binary bombs, gzip lies (30 tests + 1 documented-skip)
+- `tests/test_timing_attack.py` — `secrets.compare_digest` empirical
+  timing distribution + source-grep assertion (4 tests; Welch's t-test
+  via scipy if available)
+- `tests/test_supabase_helper.py`, `tests/test_security_helpers.py`,
+  `tests/test_csv_helper_health.py` — narrow utility-layer guards
+
+**Frontend node tests (`cd frontend && node --test utils/...`):**
+- `frontend/utils/url.test.mjs` — `sanitizeNext` open-redirect +
+  decoded-payload rejection + `ensureProtocol` (57 cases)
+- `frontend/utils/supabase/cookie-floor.test.mjs` — happy-path floor
+- `frontend/utils/supabase/cookie-floor-fuzz.test.mjs` — full
+  `(sameSite, httpOnly, secure)` adversarial matrix (1157 cases + 2
+  documented-skip TODOs: domain narrowing + `__Host-` prefix)
+
+**Opt-in e2e (env-gated; require running infra + real Supabase user):**
+- `tests/test_supabase_anon_bypass.py` — PostgREST direct-hit with anon
+  key (auto-loads creds from `frontend/.env.local`; skips if absent)
+- `tests/test_proxy_origin_csrf_e2e.py` — Playwright cross-origin POST
+  (`RUN_PROXY_ORIGIN_E2E=1`)
+- `tests/test_jwt_manipulation.py` — 6 JWT tamper variants vs the proxy
+  auth gate (`RUN_JWT_MANIPULATION_E2E=1`)
+- `tests/test_open_redirect.py` — Playwright `/login?next=`
+  (`RUN_OPEN_REDIRECT_E2E=1`)
+- `tests/test_idor_sweep.py` — wrong-API-key, path-traversal,
+  enumeration timing, extra-param ignored (`RUN_IDOR_SWEEP=1`).
+  Parametrize IDs are opaque labels (`first-char-mutated`,
+  `bearer-prefix`) — pytest collection never echoes the real key value.
+- `tests/test_concurrency_rate_limit_e2e.py` — `asyncio.gather` burst
+  against rate-limited endpoints (`RUN_CONCURRENCY_E2E=1`); the
+  `/leads/clear` ×10 case requires the extra
+  `ALLOW_DESTRUCTIVE_LEADS_CLEAR=1` opt-in.
+
+**Test-infrastructure patterns to know:**
+- Backend tests use `fastapi.testclient.TestClient` against
+  `from main import app` (with `backend/` added to `sys.path`).
+- `backend/main.py` resolves `db` / `router` / `auditor` /
+  `orchestrator` via module `__getattr__` lazy load + a lifespan
+  priming loop (`sys.modules[__name__]` attribute access — see the
+  "PEP 562 trap" note in the cold-start invariants). The
+  `TestClient`-driven tests don't run the lifespan, so they still hit
+  the original "name not in globals" path. Pattern:
+  `_prime_lazy_globals` autouse fixture injects `MagicMock` /
+  `AsyncMock` replacements (see `tests/test_json_pollution.py` +
+  `tests/test_error_message_leak.py`). The prod-mode fix and the
+  test-fixture priming are independent layers — both stay.
+- `/upload` + `/orchestrator/start` rate-limits trip during long test
+  sweeps. Pattern: `_reset_rate_limiter` autouse fixture clears the
+  slowapi `MovingWindowStorage` between tests.
+- ReDoS tests bound `re.search` with `signal.SIGALRM` +
+  `setitimer(ITIMER_REAL, ...)`. POSIX-only; falls back to wall-clock
+  on Windows.
+- Tests that touch real secrets (API keys etc.) MUST use opaque
+  parametrize ids — `ids=["first-char-mutated", ...]` not the value
+  itself — so pytest collection never echoes the secret to stdout /
+  CI logs.
+
+## Performance + observability invariants
+
+- **Cursor pagination on `/leads`.** `?limit=1..200` (default 50) +
+  `?cursor=<opaque>`. Response: `{leads, next_cursor, has_more}`.
+  Cursor is `base64url(json({c: created_at_iso, k: unique_key}))` —
+  `_encode_lead_cursor` / `_decode_lead_cursor` in `backend/main.py`.
+  Decoder fail-closed (malformed → `None` → page-1). Length-bounded
+  (≤512 bytes raw, k ≤128). `SupabaseHelper.list_leads_recent(limit,
+  cursor)` uses `created_at.lt.<c>` OR `and(created_at.eq.<c>,
+  unique_key.lt.<k>)` — tie-break eliminates off-by-one on identical
+  microsecond timestamps. Uses existing `idx_leads_created_at_desc`.
+- **Async DB wrappers** in `SupabaseHelper` (`list_leads_recent`,
+  `get_stats_rows`, `find_running_job`, `insert_orchestration_job`)
+  wrap sync supabase-py `.execute()` in `asyncio.to_thread` so
+  PostgREST round-trips don't block the uvicorn event loop. Background
+  code in `_process_in_chunks` keeps direct sync calls — already off
+  the request loop. Only `/leads`, `/stats`, `/process-lead`/
+  `/process-all` hop through `to_thread`.
+- **`/stats` cache** at `src/utils/stats_cache.py`.
+  `_StatsCache(ttl_seconds=60.0)` with `asyncio.Lock` double-checked
+  locking. 100 concurrent at expiry trigger exactly ONE rebuild.
+  Per-uvicorn-worker — at `--workers N` you pay N builds per TTL.
+  Invalidated by `process_csv_background` on successful upsert +
+  orchestrator `_process_in_chunks` `finally` (every job exit).
+  Single-lead `update_lead_info` / `update_audit` do NOT invalidate —
+  operator edits can lag /stats up to 60s.
+- **Cold-start lazy imports.** `backend/main.py` defers `pandas`,
+  `AgenticRouter`, `ParallelAuditor`, `TaskOrchestrator`,
+  `SupabaseHelper`, `export_leads`. Module `__getattr__(name)`
+  resolves `db`/`router`/`auditor`/`orchestrator` on **attribute
+  access on the module object** and caches into `globals()`.
+  `pd.DataFrame` annotations are string-quoted + `TYPE_CHECKING` keeps
+  the type hints meaningful. Result: `python -X importtime` 1.141s →
+  219ms (-81%). **DO NOT** re-introduce eager construction of the
+  singletons.
+  - **PEP 562 trap (locked in 2026-05-22).** Module `__getattr__` does
+    NOT fire for bare-name `LOAD_GLOBAL` lookups inside functions in
+    the same module — only for `getattr(module, name)` /
+    `module.name`. Handler code like `if not db.client:` would
+    `NameError` if hit before `db` lands in `globals()`. The lifespan
+    therefore runs a priming loop:
+    ```python
+    import sys as _sys
+    _self = _sys.modules[__name__]
+    for _name in ("db", "router", "auditor", "orchestrator"):
+        try: getattr(_self, _name)
+        except Exception as exc:
+            logger.warning("Lazy global %s could not initialize: %s", _name, exc)
+    ```
+    Each `getattr` walks the attribute path → triggers `__getattr__`
+    → caches the instance into `globals()`. After that, every
+    handler's bare reference resolves via the normal globals lookup
+    at zero cost. Per-name try/except so a partially-configured env
+    (e.g. missing `GEMINI_API_KEY` → `router` init raises) only
+    disables the affected feature instead of bricking the whole API.
+    Any future lazy singleton added to `__getattr__` MUST also land
+    in this loop.
+- **Lifespan still blocks cold start.** `_self.db.check_schema()` +
+  `_self.orchestrator.recover_interrupted_jobs()` run before uvicorn
+  binds (note: explicit module attribute access — see PEP 562 trap
+  above). Move `recover_interrupted_jobs()` into `asyncio.create_task`
+  after `yield` to hit <5s on Render free tier. Follow-up.
+- **Block-logger middleware** (`_block_logger_middleware`) logs
+  `WARN slow handler: METHOD path took Nms` when elapsed ≥
+  `SLOW_HANDLER_THRESHOLD_MS` (default 100 ms, env-overridable).
+  Catches sync calls in async handlers. `loop.set_debug(True)`
+  rejected — too costly. Use `PYTHONASYNCIODEBUG=1` in dev.
+- **Web-vitals RUM** — `/metrics` endpoint accepts the
+  `WebVitalsMetric` Pydantic model (Literal-allowlisted name,
+  bounded value/rating/path/id). Browser sends via
+  `navigator.sendBeacon` with a JSON `Blob` (bare `sendBeacon`
+  defaults to `text/plain` and Pydantic 422s). Rate-limited 60/min.
+  WARN for poor/needs-improvement, INFO for good. Frontend hook:
+  `frontend/app/components/WebVitalsReporter.tsx`, mounted from
+  `app/layout.tsx`.
+- **Streaming `/export/download` and `/export/outreach`** use
+  `StreamingResponse` + `_stream_leads_csv` async generator paging
+  200 rows at a time via the keyset cursor. Memory bounded ≈60 KB
+  per chunk. Inline `_csv_cell` injection guard. Column order LOCKED
+  via `_EXPORT_FULL_COLUMNS` / `_EXPORT_OUTREACH_COLUMNS` tuples —
+  adding a lead column doesn't auto-add to the export. Legacy
+  `/export` (disk-write via `src/scripts/export_leads.py`) kept for
+  CRM workflows; memory-bound by design.
+- **Query profiler** at `src/utils/query_profiler.py`. Refuses without
+  `QUERY_PROFILER=1`. Chainable proxy records verb + caller + timing.
+  `assert_o1(per_unit=N, tolerance=2.0)` raises if any single caller
+  exceeded `2*N` hits. Static audit of `src/` (2026-05-22) found
+  ZERO O(N) N+1 patterns; profiler exists as a regression guard.
+- **EnrichmentEngine shared-browser pool.** One Chromium per
+  `EnrichmentEngine`; per-lead `new_context()`. `aclose()` MUST be
+  called on teardown — invoked from `_process_in_chunks` `finally`
+  and `_execute_deep_enrichment` `finally`. New direct callers must
+  also `await engine.aclose()` or leak Chromium per job.
+- **Load-test scaffolding** in `tests/loadtest/`:
+  `locustfile.py` (3 scenarios A/B/C), `bench_enrich.py` (browser-pool
+  A/B), `spike_locustfile.py` + `spike.sh` (0→100→0 trapezoid),
+  `soak.sh` + `SOAK_PLAYBOOK.md` (24h driver + 8-signal monitoring
+  playbook), `chaos.md` + `drop_supabase_pool.py` (3 scenarios,
+  pool-drop is local-only via `CHAOS_LOCAL_ONLY=1`). Each VU injects
+  a synthetic RFC1918 `X-Forwarded-For` — `_rate_limit_key` honors
+  XFF only when `X-API-Key` validates, matching the Vercel/Render
+  proxy pattern.
+- **Structured JSON logging** (`src/utils/logging_config.py`). One
+  JSON object per stdout line with the canonical envelope
+  `{timestamp, level, logger, message, request_id, user_id, route,
+  duration_ms?, exception?, <domain>...}`. Domain fields passed via
+  `logger.info(msg, extra={"job_id": "..."})` merge at the top level
+  (NOT nested under `"context": {…}`) — operator-facing `jq` queries
+  in [docs/observability.md](docs/observability.md) §12 rely on the
+  flat shape. `JsonFormatter` + `_CRLFScrubFilter` cooperate: filter
+  scrubs `record.msg`, `record.args` (tuple OR dict form), AND any
+  non-reserved `extra={}` key in `record.__dict__` — attacker-
+  controllable values in any path can't smuggle a fake log line.
+  Render's logs UI is grep-only, but JSON lines stay greppable
+  (`grep '"level":"ERROR"' app.log | jq`). Sentry / Logtail / Loki
+  parse the same envelope without an adapter. Pinned by
+  `tests/test_logging_request_id.py::TestJsonFormatterEnvelope`
+  (11 tests) + the existing
+  `tests/test_crlf_injection.py::TestLoggingCRLFScrub`.
+- **Request-context middleware**
+  (`backend/main.py::_request_context_middleware`). Runs FIRST
+  inbound (declared BEFORE `_block_logger_middleware`; Starlette
+  stack: first-registered = outermost). For every HTTP request:
+  honours valid inbound `X-Request-ID` (`[A-Za-z0-9_-]{1,64}`),
+  mints `uuid.uuid4().hex` otherwise; binds the three ContextVars
+  (`request_id_var` / `user_id_var` / `route_var`); tags Sentry's
+  per-request scope with `request_id` + `user.email`; propagates
+  `X-Request-ID` on the response. **Critical: does NOT call
+  `clear_request_context` in `finally`.** Each request runs in its
+  own asyncio Task; the Context is GC'd cleanly on task end.
+  Clearing eagerly would break `StreamingResponse` body iterators
+  (e.g. `_stream_leads_csv`, `/operator/data-export`) — `call_next`
+  returns when the response *object* is built; the body iterator
+  runs *later* in the same task, and a cleared ContextVar would
+  lose request_id on those log lines. Pinned by
+  `tests/test_logging_request_id.py::TestRequestIdMiddleware`
+  (7 tests).
+- **`_block_logger_middleware`** logs `"slow handler"` with
+  `extra={method, path, duration_ms, threshold_ms}` so duration_ms
+  lands as a structured envelope field, not text-interpolated.
+  Threshold default `SLOW_HANDLER_THRESHOLD_MS = 100`, env-overridable.
+
+## Observability — Sentry
+
+Backend + frontend both ship errors + transactions to Sentry. Full
+wiring + verification procedure: [docs/observability.md](docs/observability.md).
+
+- **Backend init** at module load in `backend/main.py` (between
+  `logger = get_logger(__name__)` and the API-key block).
+  `sample_rate=1.0` (errors), `traces_sample_rate=0.1`,
+  `send_default_pii=False`. Skipped when `SENTRY_DSN` unset (dev
+  stays clean). `before_send=_scrub_sensitive` strips `X-API-Key` /
+  `X-Admin-Token` / `Authorization` / `Cookie` from
+  `event["request"]["headers"]` AND drops the request body entirely
+  on `/upload` (CSV is likely lead PII).
+- **Frontend init** uses the `@sentry/nextjs@10.53.1` canonical
+  layout: `frontend/instrumentation.ts` (Next.js server hook) →
+  imports `sentry.server.config.ts` (Node) or `sentry.edge.config.ts`
+  (Edge). `instrumentation-client.ts` handles the browser; reads
+  `NEXT_PUBLIC_SENTRY_DSN`. `next.config.ts` wraps with
+  `withSentryConfig(...)` so the webpack plugin uploads source maps
+  at build (`SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT`)
+  with `sourcemaps: { deleteSourcemapsAfterUpload: true }` — maps
+  resolve in Sentry, not on the CDN.
+- **Release tag = git SHA**. Backend: `Dockerfile ARG GIT_SHA` →
+  `ENV RELEASE_SHA`. `.github/workflows/deploy-backend.yml` passes
+  `--build-arg GIT_SHA=${{ github.sha }}`. Frontend: build-time
+  fallback chain in `next.config.ts`
+  (`NEXT_PUBLIC_SENTRY_RELEASE → SENTRY_RELEASE → RENDER_GIT_COMMIT
+  → "unknown"`).
+- **`/_sentry/test`** endpoint (POST, X-API-Key required) gated by
+  `SENTRY_TEST_ENABLED=1`. Returns 404 otherwise. Verification path
+  in the launch checklist.
+- **Tunnel route `/monitoring`** (configured via `tunnelRoute` in
+  `withSentryConfig`) bypasses ad-blockers that hit `*.sentry.io`.
+  Added to the public-path allowlist in
+  `frontend/utils/supabase/middleware.ts` so unauthenticated client
+  errors (crashes on `/login` before sign-in) still ship — exact-
+  match-or-trailing-slash-subpath, same hardening as `/login` /
+  `/auth` / `/api/auth`.
+- **Per-request scope tag**: `_request_context_middleware` calls
+  `sentry_sdk.set_tag("request_id", rid)` + (if email known)
+  `sentry_sdk.set_user({"email": operator_email})` inside the per-
+  request Sentry scope. Events captured during the request are
+  filterable in Sentry UI by `tag:request_id:<rid>`.
+
+## Alerting — Discord (5 signals to one channel)
+
+Sentry handles uncaught exceptions + slow transactions. Five other
+operational signals route to a single Discord channel via a shared
+composite action. Full matrix + setup:
+[docs/alerting.md](docs/alerting.md).
+
+- **Composite action** `.github/actions/discord-notify/action.yml`
+  — pure `curl` + `jq` + `bash`. No third-party action (no extra
+  supply-chain surface). Inputs: `webhook-url`, `title`, `message`
+  (Discord markdown), `severity` (critical/error/warning/info →
+  embed colour), optional `link`. Empty `webhook-url` exits 0 with
+  an actions warning — preview-PR runs without the secret stay
+  green.
+- **Five signals:**
+  1. `synthetic-monitor.yml` — 3 consecutive failures of any of
+     4 checks. State in a gist via
+     `.github/scripts/synthetic-monitor.mjs::postAlert`, which
+     prefers `DISCORD_WEBHOOK_URL` and falls back to
+     `SLACK_WEBHOOK_URL` (the latter works against Discord's
+     `/slack` endpoint too).
+  2. `security.yml::storage-monitor` — `> 70 %` warning OR
+     `> 90 %` critical. Severity decided by grep on the
+     `storage_report.py` stdout for the code-quoted markers
+     `HARD threshold` / `crossing soft threshold` (stable strings,
+     not "70%" wording).
+  3. `mutation-test.yml::aggregate` — kill rate below
+     `MIN_KILL_RATE`. Discord ping + auto-updated tracker issue
+     (label `mutation-coverage`).
+  4. `cold-start-monitor.yml` — daily 04:00 UTC probe of `/`.
+     Alerts on latency `>30 s` (`COLD_START_THRESHOLD_SECONDS`)
+     OR non-2xx.
+  5. `cert-expiry-monitor.yml` — weekly Mon 09:00 UTC.
+     `openssl s_client` extracts `notAfter` from each host; alerts
+     on `<30 days` (`CERT_EXPIRY_MIN_DAYS`) OR unreachable.
+- **`cost-report.yml`** — weekly Mon 08:00 UTC. Runs
+  `src/scripts/cost_report.py` which aggregates per-provider weekly
+  spend (Supabase + Render + Maps + Domain; Gemini approximate
+  until Google ships a billing API — digest has a prominent ⚠️
+  banner noting the exclusion). Markdown digest posts to Discord +
+  uploads as a 365-day-retention artifact for WoW comparison;
+  baseline persisted in `.cost_baseline.json`.
+- **Single secret**: `DISCORD_WEBHOOK_URL`. Optional per-host
+  secrets for `cert-expiry-monitor` (`PROD_FRONTEND_HOST`,
+  `PROD_BACKEND_HOST`) and `cold-start-monitor` (`PROD_BACKEND_URL`).
+
+## Documentation map (operator-facing surface)
+
+Code-as-doc is in this file; operator-facing material lives in
+`docs/`:
+
+- **`docs/runbooks/operator-guide.md`** — day-to-day operations
+  (discover / audit / hunt / draft / campaigns / export), failure
+  recovery, Gemini cost map, full API reference, env var matrix,
+  screenshot-capture appendix.
+- **`docs/runbooks/incidents.md`** — 5 SEV-1/2 scenarios with
+  detection → triage → mitigation → post-mortem template; incident-
+  log file naming (`docs/runbooks/incidents/YYYY-MM-DD-<slug>.md`).
+- **`docs/runbooks/rollback.md`** — Render dashboard / git revert /
+  Render API paths. Quarterly drill protocol +
+  `docs/runbooks/drills/`.
+- **`docs/onboarding.md`** — new dev clone → first PR in under a
+  day. 1-page ASCII architecture. First-day checklist.
+- **`docs/observability.md`** — Sentry wiring + log schema + source
+  maps + alerts + PII scrubbing + verification + tear-down.
+- **`docs/alerting.md`** — Discord routing matrix (5 signals),
+  composite action contract, per-signal config, suppression
+  strategy.
+- **`docs/launch-checklist.md`** — 60+ pre-launch items. Block ship
+  until 100 %. Re-run quarterly.
+- **`docs/support-process.md`** — support email + SLA + ticket
+  lifecycle + canned-response templates + escalation rules.
+- **`docs/faq.md`** — top questions feeding the support auto-reply.
+- **`docs/status-page-setup.md`** — upptime-based status page in a
+  separate `bookbed-status` repo.
+- **`docs/roadmap.md`** — Now / Next / Later / Probably-not.
+- **`docs/legal/{privacy-policy,terms}.md`** — GDPR/CCPA templates
+  ⚠️ **needs lawyer review** before publishing.
+- **`docs/adr/{001..007}.md`** + `README.md` — Architecture Decision
+  Records (single-tenant, FastAPI choice, PostgREST not direct PG,
+  Playwright/aiohttp split, no soft delete, Gemini, Render not
+  Vercel).
+- **`docs/secret-inventory.md`** — 29 secrets, blast-radius-tiered
+  rotation cadence.
+- **`docs/ci-architecture.md`** — 15 GitHub Actions workflows
+  inventory.
+
+`README.md` at repo root is the single breadcrumb; find that and
+the rest is one hop away.
 
 ## AI Router invariants (`src/core/agentic_router.py`)
 - `route_instruction()` attaches a `lead_index` (unique_key + name +
@@ -343,10 +1323,14 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
 - `_generate_outreach_draft()` returns
   `{draft, subject, lead_name, lead_email, operator_name}`. The prompt
   asks Gemini for a "Subject:" first line; the handler parses it out
-  (`re.match("^Subject:..."`) before returning. Operator name comes from
-  `OPERATOR_NAME` env, defaulting to "Your Name". The frontend modal
-  renders subject + body separately and offers an Open-in-Gmail deep-link
-  with both prefilled.
+  with an **atomic-group regex**
+  `^(?>\s*)Subject(?>[ \t]*):(?>[ \t]*)([^\r\n]*)\r?\n` — the previous
+  form `^\s*Subject\s*:\s*(.+?)\s*\n+` was O(n²) on whitespace-padded
+  model output with no trailing newline (a real ReDoS, fixed in this
+  branch). Operator name comes from `OPERATOR_NAME` env, defaulting to
+  "Your Name". The frontend modal renders subject + body separately and
+  offers an Open-in-Gmail deep-link with both prefilled. Linear bound
+  locked in by `tests/test_redos.py::TestSubjectParserReDoSRegression`.
 
 ## Discovery engine invariants (`src/scrapers/discovery_engine.py`)
 - `find_leads(query, location)` is the Google-Maps scrape path. The URL host
@@ -400,6 +1384,45 @@ on 2026-05-21:
   full flow. No exceptions in backend log. Re-run via the same MCP browser
   path if the auth / proxy / orchestrator wiring changes.
 
+## Live perf-test report inventory (2026-05-22, `fix/csp-nonce-rsc-hydration`)
+Live chrome-devtools-mcp sweep against `npm run start` prod build, authed
+as `test-lds4@example.com`. Each report is a 2026-05-22 point-in-time
+snapshot — re-run before claiming the characteristic still holds.
+- `tests/perf/network-waterfall.md` (9.3) — 23 cold requests, 211 KB
+  transfer, FCP 432 ms, 0 third-party, 15/22 disk-cache hits on warm.
+  **Bugs flagged:** `favicon.ico` revalidates every load (26 KB tax);
+  4 `/api/proxy/*` calls fire before any user interaction.
+- `tests/perf/console-sweep.md` (9.4) — **P1**: AI insights refresh
+  passes a non-`AbortSignal` to `fetch({signal})`. **P2**:
+  orchestrator-active poller ~2 calls/sec idle (no
+  visibility-pause/backoff). **P2**: search input no debounce (RSC
+  fetch per keystroke). **P3 a11y**: form field without id/name on
+  `/` + `/campaigns`. Sentry `disableLogger` deprecation warning.
+- `tests/perf/scroll-analysis.md` (9.5) + `scroll-trace-raf.json` —
+  **119.9 FPS, max 9.4 ms frame, 0 dropped frames** across 600-frame
+  5 s continuous scroll. `@tanstack/react-virtual` keeps DOM at ~28
+  row nodes throughout. CLS 0.00.
+- `docs/font-audit.md` (9.7) — confirmed silent fallback: `Inter`
+  declared but zero `.woff*` ship. Body → `system-ui`, form controls
+  → UA `Arial`. Pick: drop the declaration OR wire `next/font/google`.
+- `tests/perf/mobile-real-device.md` (9.9) — iPhone 14 + Slow 4G +
+  CPU 4×: `/login` FCP 628 ms (Good). Pixel 7 + Fast 4G + CPU 2×:
+  FCP 216 ms. **Login UX bug**: no Sign-in spinner; no toast on
+  throttle (`frontend/utils/loginThrottle.ts` 5/60 s).
+- `tests/perf/long-tasks.md` (9.11) + `dashboard-interaction-trace.json`
+  — INP 101 ms (Good, edge; 78 ms presentation delay dominant), CLS
+  0.00, 0 long tasks during a 35 s 5-interaction smoke.
+
+Skipped / deferred:
+- **9.6 Coverage** — `chrome-devtools-mcp` doesn't expose CDP
+  `Coverage`. Re-run via Playwright if needed.
+- **9.8 Live CSP/HSTS** — spec required "live deployed URL"; not
+  available in the agent session.
+- **9.10 Full pipeline live** — real Gemini + Maps scrape ($,
+  operator DB writes). Spec says quarterly cadence; operator-triggered.
+- **9.12 Visual smoke** — `frontend/e2e/__screenshots__/` does not
+  exist; spec files present without baselines.
+
 ## Cross-page navigation contract (`frontend/app/page.tsx` useEffect on mount)
 - Sidebar/Insights/Campaigns all share the same `<Sidebar>` component, but
   the dashboard owns the state for modals (`showSettings`,
@@ -411,13 +1434,24 @@ on 2026-05-21:
   - `/?openSettings=1` → opens Settings modal
   - `/?openDiscovery=1` → opens Discovery modal
   - `/?view=audited|high-risk` → toggles the view-filter
-  - `/?search=<term>` → pre-fills the search input
-- After consuming, `router.replace('/', { scroll: false })` clears the
-  query so a refresh doesn't re-trigger. Setters passed to Sidebar on
+  - `/?search=<term>` → bridge-only; translated to `?q=` on consume so
+    the filter-state sync (below) sees a consistent vocabulary
+- After consuming, the bridge does `router.replace('/?q=<term>')` if
+  search was set, else `'/'`. Setters passed to Sidebar on
   non-dashboard pages must respect the `(open)` argument: `(open) => {
   if (open) router.push('/?openSettings=1') }` — otherwise Sidebar's
   `setShowDiscoveryModal(false)` (called when the user clicks Settings)
   navigates to `/?openDiscovery=1` and the wrong modal opens.
+
+## E2E test suite, filter URL state, offline queue, drag-drop, cross-tab
+See `docs/e2e-and-frontend-contracts.md` for the full surface added in
+the recent test-build session — filter ↔ URL vocabulary
+(`?segment/?status/?min/?q/?sort`), `apiFetch` 401 + offline-queue
+behaviour, `GET /orchestrator/active`, drag-drop ingest, the 18 E2E
+spec files + their projects (chromium/firefox/webkit/iphone-14/pixel-7)
++ required env, the cooperative-cancel pytest, and the ops scripts
+(schema-migration-smoke, auth-smoke, contract-smoke, preview-smoke,
+data-integrity-cron). Fold sections into this file as they stabilize.
 
 ## Frontend handler robustness pattern
 Every state-changing handler that hits `/api/proxy/*` MUST:
@@ -439,15 +1473,40 @@ Pydantic 422 responses come as
 characters" instead of a generic placeholder.
 
 ## Frontend Architecture
-- `frontend/app/page.tsx` — Main dashboard (lead inventory, modals, orchestration)
-- `frontend/app/insights/page.tsx` — Analytics & AI strategic analysis
-- `frontend/app/campaigns/page.tsx` — Outreach campaign management (with sidebar + AI chat)
+- `frontend/app/page.tsx` — Main dashboard. Cursor-pagination state (`leads`,
+  `nextCursor`, `hasMore`) + `loadMoreLeads`. Heavy children lazy-loaded via
+  `next/dynamic`: `HealthChart` (recharts), `AIChat`, `LeadTable`.
+- `frontend/app/insights/page.tsx` — Analytics & AI strategic analysis. Recharts
+  panels extracted to `InsightsCharts` and lazy-loaded; `AIChat` also dynamic.
+  Hits `/leads?limit=200` for client-side aggregation snapshots.
+- `frontend/app/campaigns/page.tsx` — Outreach campaign management. `AIChat`
+  lazy.
+- `frontend/app/components/LeadTable.tsx` — Virtualized lead inventory.
+  `@tanstack/react-virtual`, CSS-grid rows (not `<table>` — virtualizer needs
+  absolute positioning), sticky header, variable row heights via
+  `measureElement`, 20-row overscan. Owns the "Load more" button + the
+  auxiliary `last_error` / `key_offerings` / `pain_points` panel. Defines
+  `cleanMarkdown` + `CollapsibleText` (moved here from page.tsx).
+- `frontend/app/components/InsightsCharts.tsx` — PieChart + BarChart extracted
+  from `/insights` so recharts (~80 KB gz) loads via the lazy chunk, not the
+  initial bundle.
+- `frontend/app/components/WebVitalsReporter.tsx` — `useEffect` registers
+  CLS / INP / LCP / FCP / TTFB callbacks; `navigator.sendBeacon` to
+  `/api/proxy/metrics`. Renders nothing. Mounted in `app/layout.tsx`.
 - `frontend/app/components/AIChat.tsx` — Floating AI chat assistant
 - `frontend/app/components/Sidebar.tsx` — Navigation sidebar with insights widget
 - `frontend/app/components/HealthChart.tsx` — PieChart health breakdown + stats grid
 - `frontend/app/components/StatsCards.tsx` — 4 summary stat cards (Total, Pending, Risk, Healthy)
 - `frontend/app/components/FilterBar.tsx` — Search, segment, status, and score filters
-- `frontend/app/globals.css` — Design tokens and global styles
+- `frontend/app/types/lead.ts` — Shared `Lead` interface. Imported by both
+  `page.tsx` and `LeadTable.tsx`; two identically-named interfaces in
+  different files would be nominally distinct and break callback variance
+  when passed across the file boundary.
+- `frontend/app/globals.css` — Design tokens and global styles. NOTE:
+  `--font-main: 'Inter'` is declared but Inter is NOT actually loaded
+  (no `next/font/google` import, no `.woff*` files). App falls through to
+  `system-ui`. Either drop `'Inter'` from the stack or wire
+  `next/font/google` with `display: 'swap'`.
 - `frontend/utils/apiConfig.ts` — API base URL, API key, and `apiFetch()` authenticated fetch wrapper
 
 ## Frontend Conventions

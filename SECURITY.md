@@ -94,6 +94,106 @@ the proxy (which strips client-supplied XFF). Requests without — or with an
 invalid — key are bucketed by their TCP peer IP, so forged XFF cannot spread
 load across rate-limit buckets even if the FastAPI port is exposed directly.
 
+## Database defence-in-depth (Supabase Postgres)
+
+Pydantic at the FastAPI boundary already validates writes, but a leaked
+`service_role` key, a Supabase Studio operator, or a future endpoint
+that forgets the Pydantic shape would bypass it. The database itself
+enforces a second layer.
+
+### Schema-level guards
+
+| Mechanism | Where | What it stops |
+|-----------|-------|---------------|
+| 10 named `CHECK` constraints | `supabase_schema.sql` | Out-of-range scores (0..100), bad audit/enrichment/orchestration/campaign status enums, malformed `email` shape — bypassing Pydantic still hits the DB |
+| Per-role `statement_timeout` | `ALTER ROLE` (live) | `anon`=3s, `authenticated`=8s, `service_role`=30s. Caps long-running query DoS |
+| `pg_advisory_xact_lock` namespace `0x4EAD` | Documented for code that reads-modifies-writes a lead | Lost-update protection between `ParallelAuditor` and manual UI edits |
+| Hot-path indexes | 3 indexes (`idx_leads_created_at_desc`, `idx_leads_audit_status`, `idx_orchestration_jobs_status`) | Dashboard `ORDER BY created_at DESC LIMIT 200` + `WHERE audit_status=?` stay on index scans even at low row counts |
+
+### Continuous verification (CI gates)
+
+Two workflows verify the DB stays in its declared shape. All gates connect
+via a `SUPABASE_DATABASE_URL` secret (pooler URL, `?sslmode=require`).
+
+**PR-time (`.github/workflows/ci.yml`, fork-PR guarded):**
+
+- `schema-drift` — every column in `supabase_schema.sql` exists in DB +
+  every column in DB is declared; RLS enabled on the 4 tables;
+  `<table>_deny_all` policies present; zero anon/authenticated/PUBLIC
+  grants; `add_lead_column` is `SECURITY DEFINER` + owner=postgres +
+  `search_path` set; 10 named `CHECK` constraints all present.
+- `referential-integrity` — CASCADE works on
+  `campaigns→campaign_messages`; FK rejects bogus
+  `lead_unique_key`. All mutations roll back unconditionally.
+- `query-plans` — `SET LOCAL enable_seqscan=off` + `EXPLAIN` per hot
+  query, asserts no `Seq Scan` node anywhere in the plan tree.
+- `concurrency-tests` — 5 contention tests + the pooler-URL +
+  no-direct-PG-driver contracts.
+
+**Push + daily cron (`.github/workflows/security.yml`):**
+
+- All four PR-time gates re-run (catches Supabase Studio hand-edits).
+- `jsonb-shapes` — `leads.audit_results` (for Completed audits) has
+  the required keys + value types;
+  `orchestration_jobs.filters` matches `{type}` OR `{query,location}`.
+- `null-audit` — HARD fails on NULL in any column with a schema default
+  (`audit_status`, `created_at`, `updated_at`, etc.); advisory report
+  for >90% NULL ("CANDIDATE_DROP") and app-required-but-nullable
+  ("TIGHTEN") columns.
+- `orphans-zombies` — sweeps soft-orphan FK rows, stuck leads,
+  state-machine violations, completed-without-results invariant.
+  **Auto-heals** zombie `orchestration_jobs` (`status='running'` >4h
+  → `'failed'`). Only auto-heal in the suite — every other check is
+  report-only.
+- `statement-timeouts` — verifies the `pg_db_role_setting` values for
+  the 3 roles; runs `SET LOCAL` + `pg_sleep` to prove cancellation
+  fires.
+- `grants-matrix` — full `information_schema.table_privileges`
+  enumeration + `pg_roles` allowlist; flags any unexpected role
+  appearing in the matrix.
+- `function-safety` — only allowlisted public functions exist
+  (`add_lead_column`, `rls_auto_enable`, `update_updated_at_column`);
+  every SECDEF function is owned by `postgres` with `search_path` set;
+  no EXECUTE grants to anon/auth/PUBLIC.
+- `analyze-freshness` — fails when a > 10k-row core table has both
+  `last_analyze` and `last_autoanalyze` >7 days old (autovacuum
+  throttled).
+- `db-bloat` — fails when any non-empty core table has
+  `n_dead_tup / GREATEST(n_live_tup, 1) > 0.20`.
+- `slow-queries` — top-10 by `total_exec_time`, anything with
+  `mean_exec_time > 1s`, hot queries with cache hit ratio < 99%.
+- `jsonb-index-suggestions` — advisory; scans `pg_stat_statements`
+  for `@>`/`?`/`->>` patterns and suggests GIN / expression indexes.
+- `storage-monitor` — `pg_database_size` vs `STORAGE_QUOTA_BYTES`
+  (defaults 8 GiB matching Supabase Pro base disk); WoW baseline diff
+  cached via `actions/cache@v4` keyed on month; >2x WoW any table fails
+  CI.
+
+**Disabled by default (Supabase Pro required to enable):**
+
+- `.github/workflows/backup-verify-deep.yml` — monthly. Creates a
+  Supabase branch restored to `now() - 1h`, runs schema-drift +
+  integrity + row-count diff against it, deletes the branch in
+  `if: always()`. Records RTO as evidence PITR works end-to-end.
+- `.github/workflows/migration-safety.yml` — PR-time on
+  schema-touching PRs. Creates a preview branch, applies the new
+  schema, runs the DB gates against it, deletes the branch. Add to
+  required status checks once enabled.
+
+### Reading the gates as a security posture
+
+- A **passing run** means: the DB shape matches the source-of-truth
+  schema file, the RLS deny-all wall is intact, no role has crept in
+  with unexpected grants, no function has been demoted to a
+  less-trusted owner, no allowlisted enum value is missing a real
+  producer, no FK invariant has been quietly relaxed, no hot query has
+  silently lost its index, no zombie job is leaking orchestrator
+  slots, no completed audit is missing its JSONB payload, no role's
+  DoS-bound statement_timeout has been reset, and the DB is
+  comfortably under its storage quota.
+- A **failing run** points at exactly what regressed and where the
+  fix lives.
+
 ## Reporting
 
 Email security issues privately rather than opening a public issue.
