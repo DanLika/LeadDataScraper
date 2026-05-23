@@ -14,6 +14,21 @@ const baseHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  // Phase D backport from bookbed-website (CLAUDE.md "Cross-repo strategy").
+  // COOP isolates the browsing context group — blocks Spectre-class
+  // cross-window timing attacks and drops `window.opener` from any
+  // other-origin window.
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  // CORP on our responses → other origins can't load them as
+  // <img>/<script>/<iframe>. This site doesn't host cross-origin
+  // embeddable assets; Supabase + Sentry are accessed via same-origin
+  // proxy (/api/proxy/*) and tunnel (/monitoring), so `same-origin` is
+  // safe. Skipped COEP `require-corp` — would demand explicit CORP on
+  // every Supabase / Sentry response; defer until that's proven out.
+  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+  // Legacy Flash / Adobe Reader plugin policy — blocks crossdomain.xml
+  // loading. Zero compatibility cost on a modern SPA.
+  { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
 ];
 
 // HTML pages must not bfcache after sign-out. `_next/static` chunks remain
