@@ -963,7 +963,16 @@ function DashboardInner() {
     setFilterMinScore(0);
     setSearchTerm('');
     setSortKey(DEFAULT_SORT);
-  }, []);
+    // Strip URL params immediately. The bidirectional URL-sync write-effect
+    // below normally handles this, but the read-effect's `filterReadInFlightRef`
+    // suppression can occasionally race with the user clicking Clear right
+    // after a deep-link arrives (Phase 15 finding #2: state cleared, URL
+    // kept stale `?status=Pending&q=pacific&sort=...` and a subsequent reload
+    // re-applied the filters). Calling `router.replace('/')` here bypasses
+    // the race; the write-effect's diff check (line below) then short-
+    // circuits because URL == canonical state.
+    router.replace('/', { scroll: false });
+  }, [router]);
 
   // URL ↔ filter state sync. Bidirectional:
   //   - URL changes (deep-link, back/forward button) → mirror into local state
