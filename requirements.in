@@ -1,0 +1,42 @@
+# Direct (top-level) Python dependencies. The lockfile `requirements.txt`
+# is regenerated from this file via:
+#
+#     pip-compile --generate-hashes --strip-extras requirements.in
+#
+# `--generate-hashes` adds sha256 of every wheel/sdist on PyPI to the
+# lockfile, so a future PyPI compromise that publishes a malicious
+# package with the same VERSION (rare but happens) fails the
+# `pip install --require-hashes` step in CI + Dockerfile.
+#
+# Pin patches conservatively (==) on security-critical libs to avoid
+# implicit minor-version upgrades; use ~= on app-level deps where minor
+# bumps are usually safe. Dependabot bumps both via the `pip` ecosystem
+# in .github/dependabot.yml.
+#
+# Operator one-time setup:
+#   pip install pip-tools
+#   make lock-python   # regenerates requirements.txt with hashes
+
+pandas==2.2.3
+numpy==2.2.3
+requests==2.33.0
+beautifulsoup4==4.13.3
+lxml==6.1.0
+google-genai==1.12.1
+urllib3==2.7.0
+fastapi==0.121.0
+uvicorn==0.34.0
+python-multipart==0.0.27
+supabase==2.29.0
+python-dotenv==1.2.2
+aiohttp==3.13.4
+playwright==1.50.0
+aiofiles==23.2.1
+slowapi==0.1.9
+# Error tracking + APM. Free tier = 5k events/month, plenty for single-
+# operator. `[fastapi]` extra pulls the StarletteIntegration + Pydantic
+# context capture; backend init in backend/main.py. Range pin (not ==)
+# because the current major-2 line is rapidly iterating; `make
+# lock-python` pins the exact resolved version + sha256 hashes into
+# requirements.txt — the lockfile is the actual byte-level guarantee.
+sentry-sdk[fastapi]>=2.20,<3
