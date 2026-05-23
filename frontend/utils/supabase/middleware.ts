@@ -80,7 +80,16 @@ export async function updateSession(
     // those events are exactly the ones an operator most wants to see in
     // Sentry. Public-allowlisting the path keeps the boundary tight (only
     // the tunnel route, not arbitrary /monitoring/*).
-    isPublicPrefix('/monitoring')
+    isPublicPrefix('/monitoring') ||
+    // Web-vitals beacons (`WebVitalsReporter` mounted in `app/layout.tsx`)
+    // fire on EVERY page including `/login` — before a session exists.
+    // Without the allowlist the beacon POST 307→/login and the LCP / INP
+    // for the auth screen are lost (Phase 15 finding #4). Backend gates
+    // `/metrics` with X-API-Key + slowapi rate-limit; the payload is a
+    // bounded Pydantic WebVitalsMetric (Literal-allowlisted name,
+    // bounded value/rating/path/id) so opening the path to anonymous
+    // POST doesn't widen any attack surface.
+    path === '/api/proxy/metrics'
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
