@@ -256,7 +256,6 @@ From the 16-spec ops batch, these are unstarted:
 - 8.8 — observability smoke (Render Logs API + PII grep)
 - 8.9 — backup restore drill (monthly, manual)
 - 8.10 — API-key rotation playbook + verifier
-- 8.11 — visual smoke (overlaps existing `e2e/visual.spec.ts`)
 - 8.13 — cold-start latency tracking
 - 8.14 — disaster-recovery runbook
 
