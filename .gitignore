@@ -43,6 +43,7 @@ data/raw/*
 !data/raw/.gitkeep
 exports/*
 !exports/.gitkeep
+frontend/exports/
 logs/
 
 # Supabase CLI scratch state (project ref, org id, transient files)
