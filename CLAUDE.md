@@ -1979,3 +1979,19 @@ land on the wrong branch. Practical mitigations:
   rather than committing on whichever branch HEAD landed.
 - If a commit lands on the wrong branch, `git reflog` always
   recovers — the SHA is durable; only the branch label moved.
+
+## Drain coverage notes (post-PR-#253 sweep)
+
+- **Inter font drop (A.8) shipped TWICE.** PR #239
+  (`fix/inter-font-drop-2026-05-23`) and PR #240
+  (`chore/inter-font-drop-A8-opus47-v2`) are functionally identical
+  drops of `'Inter'` from `--font-main`. Close one before merging
+  the other — second merge attempts a no-op edit on the same line
+  and Mergify/branch-protection treats it as a stale conflict.
+- **Drag-drop `data-testid` (A.9) NEEDED NO PR.** A prior session
+  already landed `data-testid="drop-overlay"` at
+  `frontend/app/page.tsx:1024` (rendered inside
+  `data-testid="dashboard-root"` only while `isDragging===true`).
+  Phase 16-T1 selector-miss observation was a test-driver bug
+  (event not dispatched on the root before querying overlay), not a
+  missing selector. Recorded so the next drain doesn't re-open it.
