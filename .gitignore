@@ -68,3 +68,9 @@ supabase/.branches/
 skills-lock.json
 .pytest_cache/
 pytest-of-*/
+
+# Performance traces (large JSON, regenerated per session)
+tests/perf/*.json
+
+# context-mode tool configs (local-only)
+frontend/.cx_*.config.mjs
