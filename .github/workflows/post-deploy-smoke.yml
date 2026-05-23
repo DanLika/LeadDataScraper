@@ -1,0 +1,143 @@
+name: post-deploy-smoke
+
+# Triggered by a forwarder (see docs/post-deploy-smoke.md) that translates
+# Render's outgoing deploy webhook into a GitHub `repository_dispatch` call
+# of type `render-deploy`. The forwarder must include the new deploy id and
+# Render service id in the client_payload so this workflow can roll back
+# the *correct* service to the *previous* live deploy on failure.
+#
+# Manual re-runs supported via workflow_dispatch (pass the same fields).
+
+on:
+  repository_dispatch:
+    types: [render-deploy]
+  workflow_dispatch:
+    inputs:
+      backend_service_id:
+        description: 'Render service id of the backend (srv-...)'
+        required: true
+      new_deploy_id:
+        description: 'Render deploy id that just went live (dep-...)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize per-service so two overlapping deploys can't double-rollback.
+  group: post-deploy-smoke-${{ github.event.client_payload.backend_service_id || inputs.backend_service_id }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACKEND_URL:               ${{ secrets.PROD_BACKEND_URL }}
+      FRONTEND_URL:              ${{ secrets.PROD_FRONTEND_URL }}
+      API_SECRET_KEY:            ${{ secrets.PROD_API_SECRET_KEY }}
+      RENDER_API_KEY:            ${{ secrets.RENDER_API_KEY }}
+      BACKEND_SERVICE_ID:        ${{ github.event.client_payload.backend_service_id || inputs.backend_service_id }}
+      NEW_DEPLOY_ID:             ${{ github.event.client_payload.new_deploy_id      || inputs.new_deploy_id }}
+      # Dependency-health needs first-party creds for the upstreams it probes.
+      GEMINI_API_KEY:            ${{ secrets.GEMINI_API_KEY }}
+      SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY:         ${{ secrets.SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SLACK_WEBHOOK_URL:         ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install playwright + chromium
+        run: |
+          npm init -y >/dev/null
+          npm install --no-save playwright@1.49.1
+          npx --yes playwright install --with-deps chromium
+
+      - name: Wait for backend to be reachable
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BACKEND_URL/" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Backend reachable after ${i} attempts."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Backend not reachable after 150s."
+          exit 1
+
+      # Probe external deps BEFORE the code smoke so we can distinguish
+      # "Gemini/Supabase outage" from "our code regressed". Failure here
+      # MUST NOT trigger rollback — code is fine, an upstream is down.
+      # The script alerts Slack inline with which dep degraded.
+      - name: Probe external dependencies
+        id: deps
+        continue-on-error: true
+        env:
+          ALERT_CONTEXT: "during post-deploy smoke for ${{ env.NEW_DEPLOY_ID }}"
+        run: node .github/scripts/dependency-health.mjs
+
+      - name: Run smoke checks
+        id: smoke
+        continue-on-error: true
+        run: node .github/scripts/post-deploy-smoke.mjs
+
+      - name: Resolve previous live deploy
+        # Only roll back if our code smoke failed AND the external deps
+        # were healthy. A dep blip can cascade into a smoke failure
+        # (e.g. Gemini outage breaks /ask); rolling back wouldn't fix
+        # that and would needlessly revert a clean deploy.
+        if: steps.smoke.outcome == 'failure' && steps.deps.outcome == 'success'
+        id: prev
+        run: |
+          set -euo pipefail
+          if [ -z "$RENDER_API_KEY" ] || [ -z "$BACKEND_SERVICE_ID" ]; then
+            echo "Missing RENDER_API_KEY or BACKEND_SERVICE_ID — cannot rollback."
+            exit 1
+          fi
+          # List recent deploys; pick the most recent `live` one that isn't
+          # the deploy we just smoke-tested. Render API returns newest-first.
+          resp=$(curl -fsS \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Accept: application/json" \
+            "https://api.render.com/v1/services/$BACKEND_SERVICE_ID/deploys?limit=20")
+          # After a successful deploy, the *previous* deploy transitions from
+          # `live` to `deactivated` — only one deploy is `live` at any time.
+          # Both states are valid rollback targets (they ran successfully);
+          # exclude transient/failed states (build_failed, canceled, etc.).
+          prev=$(echo "$resp" | jq -r --arg cur "$NEW_DEPLOY_ID" \
+            '[.[] | .deploy | select(.status=="live" or .status=="deactivated") | select(.id != $cur)] | .[0].id // empty')
+          if [ -z "$prev" ]; then
+            echo "No previous live deploy found — cannot rollback."
+            exit 1
+          fi
+          echo "prev_deploy_id=$prev" >> "$GITHUB_OUTPUT"
+          echo "Rolling back to: $prev"
+
+      - name: Rollback via Render API
+        if: steps.smoke.outcome == 'failure' && steps.prev.outputs.prev_deploy_id != ''
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$BACKEND_SERVICE_ID/rollback" \
+            -d "{\"deployId\":\"${{ steps.prev.outputs.prev_deploy_id }}\"}"
+          echo "Rollback POSTed. Render will pull the previous image and redeploy."
+
+      - name: Fail workflow if smoke or deps failed
+        if: steps.smoke.outcome == 'failure' || steps.deps.outcome == 'failure'
+        run: |
+          echo "Post-deploy verification failed for $NEW_DEPLOY_ID."
+          echo "  deps: ${{ steps.deps.outcome }}"
+          echo "  smoke: ${{ steps.smoke.outcome }}"
+          if [ "${{ steps.deps.outcome }}" = "failure" ] && [ "${{ steps.smoke.outcome }}" != "failure" ]; then
+            echo "Note: external dep degraded but code smoke passed — no rollback."
+          fi
+          exit 1

@@ -1,0 +1,36 @@
+# CODEOWNERS — drives "require review from Code Owners" branch protection.
+#
+# Single-operator today (DanLika), but the file is the seam that future
+# contractors get added to. Add a new GitHub login next to the relevant
+# path when onboarding (e.g. `/frontend/ @DanLika @new-contractor`).
+#
+# Rules: more-specific patterns override less-specific ones. The last
+# matching pattern wins per GitHub's spec, so put the catch-all (`*`)
+# FIRST and specifics below it.
+
+# Catch-all — every file requires DanLika's review by default.
+*                               @DanLika
+
+# Backend entrypoint — every API endpoint, dependency wiring, and auth
+# middleware lives here. Touching it carries blast radius.
+/backend/main.py                @DanLika
+
+# SSRF guard — the resolver + assert_safe_url pair gates every outbound
+# HTTP call from the scraper / enrichment / Playwright route guard.
+# Loosening it silently re-opens the metadata-endpoint attack surface.
+/src/utils/ssrf_guard.py        @DanLika
+
+# Prompt-injection / untrusted-data fencing helper. Used by every
+# Gemini call that mixes static prompt text with DB-derived or scraped
+# content. Bypassing the fence lets a lead row hijack the model.
+/src/utils/prompt_safety.py     @DanLika
+
+# Authoritative schema. The schema-drift CI job compares the live
+# Supabase DB against this file; an unreviewed change here can flip
+# RLS posture or column types underneath the running app.
+/supabase_schema.sql            @DanLika
+
+# CI / supply-chain config. Anything under here can bypass the
+# security gates if changed without scrutiny (e.g. removing a
+# required check, weakening a pin, disabling auto-merge guard).
+/.github/                       @DanLika

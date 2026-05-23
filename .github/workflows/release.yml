@@ -1,0 +1,229 @@
+name: release
+
+# Tag-driven release pipeline. Triggers on tags matching `v*` (use
+# semver: v1.2.3, never `latest`).
+#
+# Steps:
+#   1. Re-run CI gates (no shortcut — same gates as PRs).
+#   2. Build + push GHCR image with `:vX.Y.Z` tag in addition to `:sha-…`
+#      (deploy-backend.yml runs on push to main and pushes `:latest`;
+#      this workflow runs on tag and pushes the immutable semver tag).
+#   3. Generate SLSA3 provenance + cosign verify (same chain as
+#      deploy-backend.yml).
+#   4. Run `release-drafter` to produce a CHANGELOG from conventional-
+#      commits since the previous tag.
+#   5. Create a GitHub Release with SBOM (syft) + SLSA attestation
+#      attached as release assets.
+#   6. Trigger Render rollout to the pinned digest.
+#
+# Tag protection (operator action, one-time): GitHub Settings →
+# Tags → "Protected tags" → pattern `v*` → only DanLika may push.
+# Without this, anyone with repo-write could tag and trigger a release.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  # Per-tag concurrency — never cancel a release mid-flight.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/lds-backend
+
+jobs:
+  guard-tag:
+    name: Verify tag pusher = DanLika
+    runs-on: ubuntu-latest
+    # GitHub's "protected tags" setting is the primary gate. This is
+    # the secondary alarm — fails the release if a tag somehow lands
+    # from anyone else. `github.actor` is the user that triggered.
+    steps:
+      - name: Assert release authority
+        run: |
+          if [ "${{ github.actor }}" != "DanLika" ]; then
+            echo "::error::Tag pushed by ${{ github.actor }}, expected DanLika."
+            echo "Tag protection bypassed? Investigate before allowing rollout."
+            exit 1
+          fi
+
+  build-and-sign:
+    name: Build + sign tagged image
+    needs: [guard-tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf  # v6.0.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long,prefix=sha-
+      - id: push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+  provenance:
+    name: SLSA3 provenance (release)
+    needs: [build-and-sign]
+    permissions:
+      actions: read
+      id-token: write
+      packages: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a  # v2.1.0
+    with:
+      image: ghcr.io/${{ github.repository_owner }}/lds-backend
+      digest: ${{ needs.build-and-sign.outputs.digest }}
+      registry-username: ${{ github.actor }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Draft changelog + publish release
+    needs: [build-and-sign, provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the release
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+      DIGEST: ${{ needs.build-and-sign.outputs.digest }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - name: Draft changelog from conventional commits
+        # release-drafter reads `.github/release-drafter.yml` for
+        # category mapping (feat:/fix:/security:/...). Outputs the
+        # rendered body via the action's `body` output, which we then
+        # pass to `gh release create`.
+        id: draft
+        uses: release-drafter/release-drafter@da8b9b696abad2ad997580e49f4c1c2e03cc2bd2  # v7.3.0
+        with:
+          publish: false
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+      - name: Install syft (for SBOM artifact)
+        env:
+          SYFT_VERSION: v1.25.1
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sudo sh -s -- -b /usr/local/bin "${SYFT_VERSION}"
+      - name: Generate SBOM
+        run: syft . -o spdx-json > sbom.spdx.json
+      - name: Update docs/CHANGELOG.md
+        # Prepends the release-drafter body so the file accumulates.
+        # Commits via PR-bot pattern is overkill for a tag-driven flow;
+        # we commit directly to a branch and open a PR for review.
+        run: |
+          set -euo pipefail
+          mkdir -p docs
+          touch docs/CHANGELOG.md
+          {
+            echo "# ${TAG} ($(date -u +%F))"
+            echo ""
+            printf '%s\n' "${{ steps.draft.outputs.body }}"
+            echo ""
+            echo "---"
+            echo ""
+            cat docs/CHANGELOG.md
+          } > docs/CHANGELOG.md.new
+          mv docs/CHANGELOG.md.new docs/CHANGELOG.md
+      - name: Create release with SBOM + image-digest reference
+        run: |
+          set -euo pipefail
+          # `gh release create` uploads files as assets. Provenance lives
+          # on GHCR as an OCI artifact (uploaded by the provenance job),
+          # so we reference it by digest in the release notes rather than
+          # re-uploading.
+          body=$(printf '%s\n\nImage: `%s@%s`\nProvenance: see GHCR OCI attestation on this digest.\n' \
+            "${{ steps.draft.outputs.body }}" "${IMAGE}" "${DIGEST}")
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "$TAG" \
+            --notes "$body" \
+            --verify-tag \
+            sbom.spdx.json
+      - name: Open CHANGELOG update PR
+        # Branch protection on main requires a PR — we can't push the
+        # CHANGELOG.md update directly. Open a PR; CODEOWNERS will gate
+        # it on DanLika's review (DanLika is the author since this is
+        # the tag-pusher).
+        run: |
+          set -euo pipefail
+          branch="release/${TAG}-changelog"
+          git checkout -b "$branch"
+          git config user.name 'release-bot'
+          git config user.email 'release-bot@noreply.github.com'
+          git add docs/CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "No CHANGELOG diff — skipping PR."
+            exit 0
+          fi
+          git commit -m "docs: changelog for ${TAG}"
+          git push origin "$branch"
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head "$branch" \
+            --title "docs: changelog for ${TAG}" \
+            --body "Auto-generated CHANGELOG update for release ${TAG}.\nMerge after the release is verified in prod."
+
+  deploy:
+    name: Render rollout (tagged release)
+    needs: [build-and-sign, provenance, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DIGEST: ${{ needs.build-and-sign.outputs.digest }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: ${{ secrets.RENDER_BACKEND_SERVICE_ID }}
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify SLSA provenance attestation
+        run: |
+          cosign verify-attestation \
+            --type=slsaprovenance \
+            --certificate-identity-regexp='^https://github\.com/slsa-framework/slsa-github-generator/\.github/workflows/generator_container_slsa3\.yml@refs/tags/v2\.[0-9]+\.[0-9]+$' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+            "${IMAGE}@${DIGEST}"
+      - name: Trigger Render rollout
+        run: |
+          set -euo pipefail
+          payload=$(jq -n --arg url "${IMAGE}@${DIGEST}" '{imageUrl: $url}')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+            -d "$payload"

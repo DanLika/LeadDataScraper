@@ -1,0 +1,119 @@
+# Pre-commit hooks — fail fast locally before CI.
+#
+# Install: `make install-hooks` (one-time per clone).
+# Run on all files: `pre-commit run --all-files`.
+# Skip locally (rare): `git commit --no-verify` — but the same hooks
+# run in CI under the `pre-commit` job in `.github/workflows/ci.yml`,
+# so skipping locally only delays the failure.
+#
+# `rev:` pins are 40-char commit SHAs with a trailing `# vX.Y.Z` comment
+# matching the SHA-pin convention in `.github/workflows/*.yml`. Bump
+# both fields together — Dependabot does NOT yet read pre-commit-config
+# (the `pre-commit` ecosystem is being worked on upstream).
+
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+
+# Fail fast on the first hook miss so the developer fixes one thing
+# at a time. Set to `false` if you prefer to see every failure.
+fail_fast: false
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # v6.0.0
+    hooks:
+      - id: detect-private-key
+        # Catches accidental commits of SSH / TLS private keys.
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        # Excludes diff/patch files which legitimately end with trailing
+        # whitespace context lines.
+        exclude: \.(diff|patch)$
+      - id: check-yaml
+        # Workflows + dependabot.yml + lighthouserc-style configs.
+        # `--allow-multiple-documents` for YAML files with `---` separators.
+        args: [--allow-multiple-documents]
+        # GitHub Actions workflows use `on:` which the default safe-load
+        # parser interprets as boolean True. Exclude — actionlint covers
+        # this surface in CI.
+        exclude: ^\.github/workflows/
+      - id: check-json
+        # package.json / tsconfig.json / lighthouserc.json validity.
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 0c7b6c989466a93942def1f84baf36ddfcd60c83  # v0.15.14
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: [--fix]
+      - id: ruff-format
+        name: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: d2823d321df3af8f878f7ee3414dc94d037145b9  # v2.1.0
+    hooks:
+      - id: mypy
+        name: mypy (selective)
+        # Selective scope until `mypy --strict src/` is green. Expand by
+        # adding modules to this regex as they get fully typed.
+        # `ssrf_guard.py` and `csv_helper.py` carry security invariants
+        # locked in by dedicated test files — keep them typed.
+        files: ^src/utils/(ssrf_guard|csv_helper)\.py$
+        # Permissive args until --strict is feasible repo-wide. The CI
+        # `python-lint` job in ci.yml runs `mypy --strict src/` as the
+        # hard gate; this hook just keeps the seam clean.
+        args:
+          - --ignore-missing-imports
+          - --check-untyped-defs
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 43fae355e6fe4d99d2a7b240a224b85e2903aeb4  # v8.21.2
+    hooks:
+      - id: gitleaks
+        # Same version pinned in ci.yml + security.yml secret-scan jobs.
+        # Local hook scans staged diff (fast); CI scans full history.
+
+  - repo: local
+    hooks:
+      - id: workflow-pin-guard
+        name: workflow actions must be SHA-pinned
+        # Catches `uses: org/action@vN` (mutable tag) in workflow files
+        # at commit-time so the SHA-pin invariant never decays. Matches
+        # the same convention enforced repo-wide (see security.yml /
+        # ci.yml headers).
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        # grep -E exits 0 on match. We INVERT: if any match exists,
+        # `! grep -qE` returns true → hook fails. Quiet mode (-q) means
+        # no spam to stdout; on fail we re-run grep -n for diagnostics.
+        entry: bash -c '
+          if grep -qE "uses:[[:space:]]+[^@#]+@v[0-9]+[[:space:]]*$" "$@"; then
+            echo "Unpinned action tags found (use SHA + # vX.Y.Z comment):";
+            grep -nE "uses:[[:space:]]+[^@#]+@v[0-9]+[[:space:]]*$" "$@";
+            exit 1;
+          fi
+        ' --
+        pass_filenames: true
+      - id: prettier-frontend
+        name: prettier (frontend)
+        language: system
+        # `--check` mode — fail without rewriting. Run `make fmt-frontend`
+        # to apply fixes.
+        entry: bash -c 'cd frontend && npx --no-install prettier --check "$@"' --
+        # Only inspect files inside frontend/ so commits to backend/
+        # don't trigger a Node tool start-up.
+        files: ^frontend/.*\.(ts|tsx|js|jsx|mjs|cjs|json|css|md)$
+        # The bash wrapper handles file args; pass them through.
+        pass_filenames: true
+      - id: eslint-frontend
+        name: eslint (frontend, no warnings)
+        language: system
+        # Same invocation as ci.yml `eslint` job — `--max-warnings 0`
+        # so a warning is a hard fail. Forces parity local ↔ CI.
+        entry: bash -c 'cd frontend && npm run lint -- --max-warnings 0'
+        files: ^frontend/.*\.(ts|tsx|js|jsx|mjs|cjs)$
+        # ESLint reads its own file list from .eslintrc + extensions;
+        # passing changed-files list creates inconsistency. Run the
+        # full project lint instead.
+        pass_filenames: false

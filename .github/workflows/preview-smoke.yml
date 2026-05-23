@@ -1,0 +1,116 @@
+name: preview-smoke
+
+# Render creates a preview environment per PR (when configured with
+# previews on the service). This workflow smoke-tests the preview URL,
+# comments results on the PR, and blocks merge on failure. No rollback
+# — it's a preview, not prod, so a failure means "don't merge this PR",
+# not "revert the deploy".
+#
+# Trigger: the same forwarder that fans Render's deploy webhook to the
+# post-deploy-smoke workflow can also emit `render-preview-deploy` for
+# preview deploys; this workflow listens for that. Manual re-run via
+# workflow_dispatch with the preview URL + PR number.
+
+on:
+  repository_dispatch:
+    types: [render-preview-deploy]
+  workflow_dispatch:
+    inputs:
+      preview_backend_url:
+        description: 'Preview env backend URL (https://<srv>-pr-<n>.onrender.com)'
+        required: true
+      preview_frontend_url:
+        description: 'Preview env frontend URL'
+        required: true
+      pr_number:
+        description: 'PR number to comment on'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preview-smoke-${{ github.event.client_payload.pr_number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      BACKEND_URL:    ${{ github.event.client_payload.preview_backend_url  || inputs.preview_backend_url }}
+      FRONTEND_URL:   ${{ github.event.client_payload.preview_frontend_url || inputs.preview_frontend_url }}
+      API_SECRET_KEY: ${{ secrets.PREVIEW_API_SECRET_KEY }}
+      PR_NUMBER:      ${{ github.event.client_payload.pr_number || inputs.pr_number }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install playwright + chromium
+        run: |
+          npm init -y >/dev/null
+          npm install --no-save playwright@1.49.1
+          npx --yes playwright install --with-deps chromium
+
+      - name: Wait for preview backend
+        env:
+          PROBE_URL: ${{ env.BACKEND_URL }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$PROBE_URL/" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Preview backend reachable after ${i} attempts."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Preview backend not reachable after 120s."
+          exit 1
+
+      - name: Run preview smoke (reuses post-deploy-smoke checks)
+        id: smoke
+        continue-on-error: true
+        run: node .github/scripts/post-deploy-smoke.mjs
+
+      - name: Comment results on PR
+        if: always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        env:
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          PR_NUM: ${{ env.PR_NUMBER }}
+          BE: ${{ env.BACKEND_URL }}
+          FE: ${{ env.FRONTEND_URL }}
+        with:
+          script: |
+            const { SMOKE_OUTCOME, PR_NUM, BE, FE } = process.env;
+            const passed = SMOKE_OUTCOME === 'success';
+            const icon = passed ? '✅' : '❌';
+            const body = [
+              `### ${icon} Preview smoke ${passed ? 'passed' : 'failed'}`,
+              ``,
+              `**Backend:** ${BE}`,
+              `**Frontend:** ${FE}`,
+              ``,
+              passed
+                ? '_All 5 post-deploy checks green on this preview env._'
+                : '_One or more checks failed — see the [workflow run](' +
+                  `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` +
+                  ') for details. Merge is blocked until this passes._',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(PR_NUM),
+              body,
+            });
+
+      - name: Block merge on smoke failure
+        if: steps.smoke.outcome == 'failure'
+        run: |
+          echo "Preview smoke failed — blocking merge."
+          exit 1

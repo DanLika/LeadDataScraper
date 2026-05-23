@@ -1,0 +1,189 @@
+name: flakiness-detector
+
+# Nightly job: run pytest 3x in parallel against `main`. Any test that
+# flips outcome across the three runs (or passes only after pytest-
+# rerunfailures retries) is a flake — Gemini API timing, Playwright
+# rendering, Supabase test-branch warmup, and similar timing-sensitive
+# externals are the usual culprits.
+#
+# The output `flaky-tests.json` is written to a tracking gist
+# (FLAKY_TESTS_GIST_ID). A PR-time gate in `ci.yml::flaky-gate` reads
+# the same JSON and blocks merge when the PR's diff touches a file
+# named in any entry with `last_seen` within the last 7 days.
+#
+# A single GitHub issue with label `flaky` is opened on first run and
+# auto-edited on subsequent runs — never accumulates issue noise.
+#
+# Required repo secrets:
+#   - GIST_TOKEN              (existing — `gist` PAT scope)
+#   - FLAKY_TESTS_GIST_ID     (new — make a gist with one file
+#                              `flaky-tests.json` containing `{}`,
+#                              copy its ID)
+# Required repo labels:
+#   - `flaky` (create via Settings → Labels)
+
+on:
+  schedule:
+    # 02:00 UTC nightly — after Dependabot's 06:00 Monday window so
+    # any patch-bumped deps land in main before this fires.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # update the tracker issue
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FLAKE_GIST_FILE: flaky-tests.json
+
+jobs:
+  pytest-runs:
+    name: pytest run-${{ matrix.run }}
+    runs-on: ubuntu-latest
+    strategy:
+      # `fail-fast: false` — we EXPECT some runs to fail; the comparison
+      # logic in the aggregator job is the signal, not the per-run exit.
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install deps + flakiness tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # CI-only: don't pollute requirements.txt.
+          pip install pytest pytest-json-report pytest-rerunfailures
+      - name: Run pytest (capture JSON report)
+        # `--reruns 1` lets pytest-rerunfailures retry once on fail so
+        # we surface "passes-after-rerun" as a flake signal. The
+        # outcome JSON includes rerun stages.
+        # `|| true` — any test failure is normal here; we use the
+        # report, not the exit code.
+        run: |
+          pytest \
+            --reruns 1 \
+            --json-report \
+            --json-report-file=run-${{ matrix.run }}.json \
+            || true
+      - name: Upload report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: pytest-run-${{ matrix.run }}
+          path: run-${{ matrix.run }}.json
+          retention-days: 7
+
+  aggregate:
+    name: Aggregate + publish flaky-tests.json
+    runs-on: ubuntu-latest
+    needs: [pytest-runs]
+    # `if: always()` — even if all 3 pytest jobs were red, the aggregator
+    # must still run (red runs ARE the signal we want to compare).
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+      FLAKY_TESTS_GIST_ID: ${{ secrets.FLAKY_TESTS_GIST_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Download run reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          path: reports/
+      - name: Fetch previous flaky-tests.json from gist
+        # `gh api` against the gist endpoint — preserves history across
+        # nightly runs so the 7-day gate window is honored.
+        run: |
+          set -euo pipefail
+          mkdir -p previous
+          if [ -z "${FLAKY_TESTS_GIST_ID:-}" ]; then
+            echo "FLAKY_TESTS_GIST_ID not set — skipping previous load"
+            echo '{}' > previous/flaky-tests.json
+            exit 0
+          fi
+          # gh api uses GH_TOKEN by default; GIST_TOKEN has read access
+          # but the gist API works fine with either if the gist is owned
+          # by the same account.
+          curl -fsSL \
+            -H "Authorization: Bearer ${GIST_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/gists/${FLAKY_TESTS_GIST_ID}" \
+            | jq -r --arg f "$FLAKE_GIST_FILE" '.files[$f].content' \
+            > previous/flaky-tests.json
+          echo "Previous flaky-tests.json size: $(wc -c < previous/flaky-tests.json) bytes"
+      - name: Aggregate flakes
+        # Custom reporter in scripts/aggregate-flakes.py. Inputs the
+        # 3 run reports + previous tracker. Outputs the updated
+        # flaky-tests.json AND a markdown issue body.
+        run: |
+          python .github/scripts/aggregate-flakes.py \
+            --reports reports/pytest-run-1/run-1.json \
+                      reports/pytest-run-2/run-2.json \
+                      reports/pytest-run-3/run-3.json \
+            --previous previous/flaky-tests.json \
+            --retention-days 14 \
+            --gate-days 7 \
+            --out flaky-tests.json \
+            --issue-body-out issue-body.md
+          echo "---"
+          jq '.flakes | length as $n | "Total flake entries: \($n)"' flaky-tests.json
+      - name: Push updated flaky-tests.json to gist
+        run: |
+          set -euo pipefail
+          if [ -z "${FLAKY_TESTS_GIST_ID:-}" ]; then
+            echo "FLAKY_TESTS_GIST_ID not set — cannot publish"
+            exit 1
+          fi
+          # PATCH the gist with the new file content. Use jq to build
+          # the payload so embedded quotes/newlines in JSON are escaped.
+          payload=$(jq -n \
+            --arg f "$FLAKE_GIST_FILE" \
+            --rawfile content flaky-tests.json \
+            '{files: {($f): {content: $content}}}')
+          curl -fsSL -X PATCH \
+            -H "Authorization: Bearer ${GIST_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/gists/${FLAKY_TESTS_GIST_ID}" \
+            -d "$payload" > /dev/null
+          echo "Published flaky-tests.json to gist ${FLAKY_TESTS_GIST_ID}"
+      - name: Open or update tracker issue (label: flaky)
+        # One canonical issue. Find by label+title; create if missing,
+        # update body otherwise. No issue noise — same number forever.
+        run: |
+          set -euo pipefail
+          export TITLE="Flaky tests tracker (auto-updated nightly)"
+          # gh's jq engine reads shell env via `env.NAME`; export above
+          # makes TITLE visible to it. -L 1 caps the result list.
+          existing=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label flaky \
+            --state open \
+            --json number,title \
+            --jq '.[] | select(.title==env.TITLE) | .number' \
+            -L 1 || echo "")
+          if [ -z "$existing" ]; then
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --body-file issue-body.md \
+              --label flaky
+          else
+            gh issue edit "$existing" \
+              --repo "${{ github.repository }}" \
+              --body-file issue-body.md
+          fi

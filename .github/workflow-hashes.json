@@ -1,0 +1,15 @@
+{
+  "_doc": "Pinned sha256 of every .github/workflows/*.yml file. Drift between this snapshot and the live files is the alarm tripped by workflow-drift.yml. Regenerate via `make workflow-hashes` (see Makefile) after any intentional workflow change. The drift workflow uses this file as ground truth — keep it under CODEOWNERS review like the rest of /.github/.",
+  "files": {
+    "ci.yml": "ea268c508a1cdba8f0900614ede03696091c9707002e6e81a3096770d52b6d40",
+    "dependabot-auto-merge.yml": "eff54c6ab3bd67ea539416da9735be2b23fc21becb7823eab32b33812dbd35cd",
+    "deploy-backend.yml": "650b6be7eb1e35a909f4dd67503ebd7ba405a18bde01a5758c7a4fd9d890b780",
+    "e2e.yml": "bf901996260cdffcabfe451a56cfd941c38f7c7f9a8e6e3fcc3c63c4ee6ae8f0",
+    "flakiness-detector.yml": "db895d897c44972017a85daec7bad3ba1ee7d4660af0c9c30661f9b2167c9dc1",
+    "mutation-test.yml": "aa0500d6d7239a4b977375db444db1f2022a77f57034210aa4d21c5796947735",
+    "post-deploy-smoke.yml": "8da2fa75dcdf4c40c5446eabb5652a25994615de160f8ae2d15f7fbcfadcbbf6",
+    "pr-hygiene.yml": "c8ddafcc64ac3a0b7c59de737d291a8397ab5688921a311c3f7dbe91434c5adc",
+    "security.yml": "6b2deeceb1224a270b15aa2e0aca0646496f77b228f0215dab72913063373a5d",
+    "synthetic-monitor.yml": "2ecf15e2877fe0fdc1d032414aa1cda2a983a5cf9cdf6c5d935f86caeec90cdf"
+  }
+}

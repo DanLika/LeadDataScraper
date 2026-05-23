@@ -3,32 +3,37 @@ name: Security
 on:
   push:
     branches: [main]
-  pull_request:
   schedule:
     # Daily run catches newly-disclosed CVEs in already-pinned deps.
+    # PR-time scanning moved to ci.yml (tighter thresholds, blocks merge).
     - cron: '0 7 * * *'
 
 permissions:
   contents: read
 
-# Skip security jobs on fork PRs. `pip-audit` resolves a (potentially
-# attacker-controlled) requirements.txt and pip has no `--ignore-scripts`
-# equivalent — `setup.py` runs arbitrarily. Same-repo PRs still run; fork
-# contributions get audited after a maintainer merges to a branch on the
-# main repo. Push + schedule are unaffected.
+# Serialize concurrent runs per ref. cancel-in-progress is `false` here
+# (push + schedule only — no PR events fire this workflow) so a daily
+# cron firing while a push-triggered run is in flight queues instead
+# of canceling.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# PR-time runs live in ci.yml (block merge). This file owns the
+# push + daily-cron audit — daily catches newly-disclosed CVEs in
+# already-pinned deps without a code change.
 #
-# Note on action pinning: tags below are mutable. For the strongest
-# supply-chain posture, replace each `@v4`/`@v5` with the 40-char commit
-# SHA of the release tag (kept up-to-date by Dependabot's
-# `package-ecosystem: github-actions`).
+# Actions are pinned to 40-char commit SHAs (mutable `@vN` tags can be
+# hijacked — see Codecov 2021). The trailing `# vX.Y.Z` comment is what
+# Dependabot reads to bump SHA + comment together via
+# `.github/dependabot.yml` (`package-ecosystem: github-actions`).
 jobs:
   pip-audit:
     name: pip-audit (Python deps)
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: '3.12'
           cache: pip
@@ -47,8 +52,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: '20'
           cache: npm
@@ -59,13 +64,353 @@ jobs:
         # `--audit-level=high` keeps the gate at exploitable severities.
         run: npm audit --omit=dev --audit-level=high
 
+  schema-drift:
+    name: schema-drift + RLS posture (Supabase)
+    runs-on: ubuntu-latest
+    # Push-to-main + daily cron. PR-time gate lives in ci.yml. Daily run
+    # catches manual Supabase Studio changes that bypass our migrations.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Verify schema + RLS posture
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.schema_drift_check
+
+  referential-integrity:
+    name: Referential integrity (CASCADE + FK enforcement)
+    runs-on: ubuntu-latest
+    # Push + daily cron. PR-time gate lives in ci.yml. Daily run catches
+    # an FK accidentally dropped (or made DEFERRABLE) via Supabase Studio.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Exercise CASCADE + FK invariants
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        # All mutations wrapped in a transaction that is unconditionally
+        # rolled back — no permanent state change.
+        run: python -m src.scripts.check_referential_integrity
+
+  query-plans:
+    name: Query plans (no Seq Scan on hot paths)
+    runs-on: ubuntu-latest
+    # Push + daily cron. PR-time gate lives in ci.yml. Daily run catches
+    # an index dropped or renamed via Supabase Studio.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Assert hot-path queries use indexes
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.check_query_plans
+
+  jsonb-shapes:
+    name: JSONB shape conformance (daily)
+    runs-on: ubuntu-latest
+    # Push + daily cron only — intentionally NOT a PR-blocking gate.
+    # Shape drift in existing rows shouldn't block unrelated code merges;
+    # the daily run is the right cadence for catching hand-edits in
+    # Supabase Studio or a producer-side regression that landed yesterday.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Validate audit_results + filters JSONB shapes
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        # Asserts: leads.audit_results (where audit_status='Completed')
+        # has {score,is_up,tech_flags,red_flags} with the right
+        # value types, and orchestration_jobs.filters matches either
+        # the pipeline ({type}) or discovery ({query,location}) shape.
+        run: python -m src.scripts.check_jsonb_shapes
+
+  null-audit:
+    name: NULL ratio audit (weekly review)
+    runs-on: ubuntu-latest
+    # Runs on push + daily cron alongside the other Supabase-DB gates.
+    # Per-run cadence is daily; per-human-review cadence is weekly —
+    # operator skims Monday's run to decide CANDIDATE_DROP / TIGHTEN
+    # items. Exits 0 on report-only findings; only HARD invariants
+    # (NULL audit_status / created_at / updated_at / etc.) fail CI.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Audit NULL ratios + hard invariants
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.check_null_audit
+
+  orphans-zombies:
+    name: Orphans + zombies sweep (auto-heals zombies)
+    runs-on: ubuntu-latest
+    # Push + daily cron. WRITES to orchestration_jobs (auto-heals
+    # status='running' rows older than 4h to 'failed') — needs the
+    # SUPABASE_DATABASE_URL role to have UPDATE on orchestration_jobs.
+    # Every other check is read-only and reports without mutating.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Sweep orphans + heal zombies
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        # Soft-orphan FK rows, zombie orchestration_jobs (auto-flip
+        # 'running'→'failed' after 4h), stuck leads, state-machine
+        # violations on campaign_messages, completed-without-results
+        # invariant. Auto-heal happens BEFORE the exit-code decision so
+        # logs show what was healed even on a passing run.
+        run: python -m src.scripts.check_orphans_and_zombies
+
+  statement-timeouts:
+    name: Per-role statement_timeout (DoS guard)
+    runs-on: ubuntu-latest
+    # Push + daily cron. Verifies role-level statement_timeout defaults
+    # haven't been reverted by a Studio "RESET ALL" or similar. Also
+    # proves the cancellation primitive fires (SET LOCAL 2s + pg_sleep
+    # 5s → QueryCanceled). Pure SELECT for the configured check;
+    # cancellation test runs in a self-rolling transaction.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install psycopg
+        run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Verify statement_timeout per role
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        # Optionally set DATABASE_URL_ANON / _AUTHENTICATED /
+        # _SERVICE_ROLE secrets to also exercise per-role enforcement
+        # (script no-ops if not present).
+        run: python -m src.scripts.check_statement_timeouts
+
+  grants-matrix:
+    name: Grants matrix + role enumeration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: '3.12', cache: pip }
+      - run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Assert anon/authenticated/PUBLIC have zero grants + enumerate pg_roles
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.check_grants_matrix
+
+  function-safety:
+    name: Public function safety audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: '3.12', cache: pip }
+      - run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: SECDEF safety + EXECUTE allowlist
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.check_function_safety
+
+  analyze-freshness:
+    name: ANALYZE freshness (planner stats)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: '3.12', cache: pip }
+      - run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Detect tables with stale ANALYZE
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.check_analyze_freshness
+
+  db-bloat:
+    name: DB bloat / dead-tuple ratio (weekly)
+    runs-on: ubuntu-latest
+    # Runs daily; the operator reviews weekly. Failure = bloat > 20%
+    # on a non-empty table. Pure SELECT.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: '3.12', cache: pip }
+      - run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Dead tuple ratio + table sizes
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.check_db_bloat
+
+  slow-queries:
+    name: Slow query report (pg_stat_statements)
+    runs-on: ubuntu-latest
+    # Advisory — fails CI on a slow query so the operator notices,
+    # but the fix is usually an index or a query rewrite (next PR),
+    # not blocking the schema gate.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: '3.12', cache: pip }
+      - run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Top queries + mean>1s + cache hit
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.slow_query_report
+
+  jsonb-index-suggestions:
+    name: JSONB GIN / expression index suggestions
+    runs-on: ubuntu-latest
+    # Advisory only — never fails CI (exit 0 even with suggestions).
+    # Read the run log weekly; a suggestion that appears repeatedly is
+    # the signal to actually CREATE INDEX.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: '3.12', cache: pip }
+      - run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Analyze pg_stat_statements for JSONB hot paths
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.suggest_jsonb_indexes
+
+  storage-monitor:
+    name: Storage size + WoW growth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: '3.12', cache: pip }
+      - run: python -m pip install --upgrade pip "psycopg[binary]>=3.1"
+      - name: Restore storage baseline
+        # Keyed on month so the baseline naturally rolls over once per
+        # month. Lets the WoW comparison persist across daily runs
+        # without each run nuking the prior week's snapshot.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: .storage_baseline.json
+          key: storage-baseline-${{ github.workflow }}-${{ runner.os }}-month-${{ github.run_id }}
+          restore-keys: |
+            storage-baseline-${{ github.workflow }}-${{ runner.os }}-month-
+      # Purge expired account_deletions audit rows (30-day retention
+      # per GDPR Art. 17 — see docs/legal/privacy-policy.md §5).
+      - name: Purge expired GDPR account_deletions audit rows
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: python -m src.scripts.purge_expired_audit_log
+
+      - name: pg_database_size + per-table + WoW
+        id: storage
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+          # Override if your Supabase plan disk is different from 8 GiB.
+          # STORAGE_QUOTA_BYTES: '8589934592'
+        run: |
+          set -uo pipefail
+          out_file="$RUNNER_TEMP/storage_report.out"
+          python -m src.scripts.storage_report 2>&1 | tee "$out_file"
+          status=${PIPESTATUS[0]}
+          # storage_report exits non-zero at 90% (hard cap). Soft-warn
+          # at 70% is stdout-only — grep for the marker so the Discord
+          # step can fire on either level. Marker text comes from
+          # src/scripts/storage_report.py; if the wording changes there,
+          # update the grep.
+          # Severity is decided by which threshold marker the script
+          # emitted, NOT by exit code (the script returns 1 for any
+          # breach — soft + hard alike). Grep for the *exact* text the
+          # script writes: `HARD threshold` (90%+) and
+          # `crossing soft threshold` (70-90%). These are quoted
+          # strings in src/scripts/storage_report.py — if they change
+          # there, update the grep here.
+          if grep -q 'HARD threshold' "$out_file"; then
+            echo "alert_level=critical" >> "$GITHUB_OUTPUT"
+          elif grep -q 'crossing soft threshold' "$out_file"; then
+            echo "alert_level=warning" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -eq 2 ]; then
+            # Misconfigured (DATABASE_URL missing / unreachable).
+            echo "alert_level=critical" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -ne 0 ]; then
+            # WoW anomaly or other finding without an explicit marker.
+            echo "alert_level=warning" >> "$GITHUB_OUTPUT"
+          else
+            echo "alert_level=none" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      - name: Discord alert on storage threshold
+        # always() so the alert fires regardless of whether the previous
+        # step exited 0 (warn-only) or non-zero (hard-fail). The branch
+        # on alert_level decides severity.
+        if: always() && steps.storage.outputs.alert_level != 'none'
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          severity: ${{ steps.storage.outputs.alert_level == 'critical' && 'critical' || 'warning' }}
+          title: ${{ steps.storage.outputs.alert_level == 'critical' && '💾 Supabase storage > 90% of plan limit' || '💾 Supabase storage > 70% of plan limit' }}
+          message: |
+            `storage_report.py` flagged a quota threshold breach.
+            Open the workflow run for the per-table size breakdown +
+            week-over-week growth deltas.
+
+            **Action**: identify the fastest-growing table from the
+            report (usually `audit_results` JSONB at scale) and either
+            archive old rows or upgrade the Supabase plan disk.
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  secret-scan:
+    name: gitleaks (full git history)
+    runs-on: ubuntu-latest
+    # Push + daily cron. PR-time gate lives in ci.yml. Daily run catches
+    # accidental secret commits that landed on main before the PR scan
+    # was wired (or via direct push). Full-history scan every day means
+    # the window between leak and detection is < 24h even if the PR
+    # scan was somehow bypassed.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan full history
+        run: gitleaks detect --no-banner --redact --verbose --exit-code 1
+
   semgrep:
     name: semgrep (SAST)
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: '3.12'
       # Run Semgrep via the official pip package instead of the deprecated
