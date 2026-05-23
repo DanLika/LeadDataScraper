@@ -1559,16 +1559,43 @@ bookbed has 3 — biggest gap). Every ✅ row in the gap table is
 file-verified (spot-checks listed in the appendix). Rows marked ⚠️/`?`
 are hypothesis-only — re-verify before porting.
 
-Phased action plan in that doc: **A** bookbed-website CI hardening
-(~1 day — port LDS's `ci.yml` + `security.yml` + `workflow-drift.yml` +
-dependabot, all action SHAs pinned with `# vX.Y.Z`) → **B** bookbed CF
-email CRLF guards on Resend (~4h — recipient regex with explicit
-CRLF reject, subject/from_name CRLF assert before MIME write) → **C**
-bookbed Flutter Gemini `<UNTRUSTED_DATA>` fence around user chat input
-(~1 day — currently flows raw to `_chatSession.sendMessageStream`,
-only static KB system instruction) → **D** backport newer headers from
-bookbed-website back to LDS (~30min) → **E** long tail (cost report,
-cold-start monitor, synthetic monitor, Firestore orphan sweep).
+Phased action plan in that doc:
+- **A — DONE 2026-05-23** ([bookbed-website#73](https://github.com/DanLika/bookbed-website/pull/73)).
+  Ported LDS `ci.yml` (tsc + npm audit + lockfile-sync + gitleaks + semgrep
+  + license-check), `security.yml`, `workflow-drift.yml`, `pr-hygiene.yml`,
+  `dependabot-auto-merge.yml`, `dependabot.yml`, `CODEOWNERS`,
+  `workflow-hashes.json`, `scripts/workflow-hashes.sh`. All action `uses:`
+  lines SHA-pinned. ESLint job deferred (Next 16 dropped `next lint` + no
+  eslintrc); follow-up PR.
+- **B — DONE 2026-05-23** ([bookbed#454](https://github.com/DanLika/rab_booking/pull/454)).
+  Added `email-guards.ts` (`assertSafeHeader` / `validateRecipient` /
+  `validateRecipientList`) + wired into `sendEmailWithValidation`.
+  101 jest cases ported from `tests/test_crlf_injection.py`. Pinned
+  JS-vs-Python subtlety: JS regex `\s` excludes NEL (U+0085), so guard
+  runs `HEADER_FORBIDDEN.test()` BEFORE the email-shape regex. **19
+  templates still bypass the wrapper** — mechanical migration follow-up
+  PR scheduled.
+- **C** — bookbed Flutter Gemini `<UNTRUSTED_DATA>` fence around user
+  chat input (~1 day — currently flows raw to `_chatSession
+  .sendMessageStream`, only static KB system instruction). Not started.
+- **D — PLAN READY** ([LDS#248](https://github.com/DanLika/LeadDataScraper/pull/248)
+  has the spec at `docs/phase-d-header-backport-plan.md`). Backport 3
+  static headers (COOP / CORP / X-Permitted-Cross-Domain-Policies) +
+  3 CSP directives (manifest-src / worker-src /
+  upgrade-insecure-requests). ~30 min. Execution gated on LDS CI green.
+- **E** — long tail (cost report, cold-start monitor, synthetic monitor,
+  Firestore orphan sweep). Reach for as the surface grows.
+
+**Verification debt resolved 2026-05-23** ([LDS#248](https://github.com/DanLika/LeadDataScraper/pull/248)).
+The 8 ⚠️/? rows in the original crossover-doc appendix are file-checked.
+Three turned out wrong, surfacing real bookbed gaps NOT on the original
+plan: (1) **App Check is NOT enforced on any `onCall(...)`** — zero
+`enforceAppCheck: true` in the codebase (real security gap, pure
+bookbed work, no LDS port needed); (2) **Flutter `LoggingService
+.logDebug` interpolates raw guest content** (`booking_service.dart:97`)
+— audit the sink before assuming low-risk; (3) **bookbed CF outbound
+includes iCal sync** (omitted from the original "only OTAs + Resend"
+claim) — already protected by `validateIcalUrl()` at `icalSync.ts:344`.
 
 **Phase 13 of the LDS roadmap was scoped to a dogfood-only cut on
 2026-05-22**: ship 13.14 (this crossover doc, **DONE**), then 13.1
