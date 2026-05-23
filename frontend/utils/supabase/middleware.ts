@@ -2,9 +2,19 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { hardenCookieOptions } from './cookie-floor.mjs'
 
-export async function updateSession(request: NextRequest) {
+// `requestHeaders` is the (possibly augmented) Headers object that should be
+// forwarded to the downstream Next renderer. `proxy.ts` injects `x-nonce`
+// into it so Next 16 RSC can stamp the per-request nonce onto its
+// auto-emitted inline `<script>` bootstrap blocks. Without the explicit
+// `{ request: { headers: ... } }` shape, mutations to `request.headers` do
+// NOT propagate to RSC — verified empirically (zero `nonce="…"` attrs on
+// the `__next_f.push(...)` tags otherwise).
+export async function updateSession(
+  request: NextRequest,
+  requestHeaders: Headers = request.headers,
+) {
   let supabaseResponse = NextResponse.next({
-    request,
+    request: { headers: requestHeaders },
   })
 
   const supabase = createServerClient(
@@ -23,7 +33,7 @@ export async function updateSession(request: NextRequest) {
           // nosemgrep
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({
-            request,
+            request: { headers: requestHeaders },
           })
           // Cookie floor lives in cookie-floor.mjs (pure helper, unit-tested).
           // Supabase can tighten (Strict / longer maxAge) but never loosen.
@@ -61,7 +71,16 @@ export async function updateSession(request: NextRequest) {
   const isPublic =
     isPublicPrefix('/login') ||
     isPublicPrefix('/auth') ||
-    isPublicPrefix('/api/auth')
+    isPublicPrefix('/api/auth') ||
+    // Sentry tunnel route (configured as `tunnelRoute: '/monitoring'` in
+    // next.config.ts's withSentryConfig). Sentry's @sentry/nextjs creates
+    // this route at build time to proxy client beacons to sentry.io,
+    // bypassing ad-blockers. The route must reach an unauthenticated user
+    // too — errors on /login itself happen BEFORE a session exists, and
+    // those events are exactly the ones an operator most wants to see in
+    // Sentry. Public-allowlisting the path keeps the boundary tight (only
+    // the tunnel route, not arbitrary /monitoring/*).
+    isPublicPrefix('/monitoring')
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

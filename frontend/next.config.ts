@@ -1,36 +1,18 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-// Build a CSP that lets Next.js run (inline styles + dev HMR) and lets the
-// browser talk to Supabase auth/realtime; everything else is blocked.
-const cspDirectives = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  // Next inlines style chunks; allow style-src 'self' + 'unsafe-inline'. CSS
-  // is the only inline asset; scripts run from /_next/static (same-origin).
-  "style-src 'self' 'unsafe-inline'",
-  // 'unsafe-eval' is required by Next dev HMR; drop it in production builds.
-  process.env.NODE_ENV === "production"
-    ? "script-src 'self'"
-    : "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-  // Restrict images to same-origin + inline (data:/blob:) + the Supabase
-  // project host (used for avatars / storage). Blanket `https:` would let a
-  // future feature that renders attacker-controlled URLs exfil the viewer's
-  // IP + Referer via tracking-pixel requests.
-  `img-src 'self' data: blob: ${SUPABASE_URL}`.trim(),
-  "font-src 'self' data:",
-  // /api/proxy is same-origin; Supabase auth/realtime is the only cross-origin call.
-  `connect-src 'self' ${SUPABASE_URL} ${SUPABASE_URL.replace(/^https:/, "wss:")}`.trim(),
-].filter(Boolean);
+// NOTE: Content-Security-Policy is set per-request in `frontend/proxy.ts`
+// so the script-src directive can include a per-request `'nonce-<n>'`
+// alongside `'strict-dynamic'`. Next 16 RSC streams its bootstrap as inline
+// `<script>self.__next_f.push(...)</script>` blocks — a static
+// `script-src 'self'` here would block hydration in prod (sev-1, see
+// docs/findings/2026-05-22-csp-blocks-prod-hydration.md). All other
+// security headers stay static below.
 
 const baseHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Content-Security-Policy", value: cspDirectives.join("; ") },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
@@ -51,7 +33,24 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
+// Release identifier for Sentry. Fallback chain (build-time, lowest to
+// highest priority):
+//   1. RENDER_GIT_COMMIT  — Render auto-injects on every build/deploy
+//   2. SENTRY_RELEASE     — manual override (e.g. semver tag)
+//   3. NEXT_PUBLIC_SENTRY_RELEASE — same, exposed in client bundle
+// Resolved here so both server config + client bundle pick up the same
+// string. `env.*` is the standard Next.js way to make a value available
+// as `process.env.NEXT_PUBLIC_*` at runtime in the client.
+const SENTRY_RELEASE =
+  process.env.NEXT_PUBLIC_SENTRY_RELEASE ??
+  process.env.SENTRY_RELEASE ??
+  process.env.RENDER_GIT_COMMIT ??
+  "unknown";
+
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_SENTRY_RELEASE: SENTRY_RELEASE,
+  },
   poweredByHeader: false,
   async headers() {
     return [
@@ -66,4 +65,28 @@ const nextConfig: NextConfig = {
   productionBrowserSourceMaps: false,
 };
 
-export default nextConfig;
+// Wrap with Sentry's Next.js config so the webpack plugin (a) uploads
+// source maps to Sentry at build time using SENTRY_AUTH_TOKEN +
+// SENTRY_ORG + SENTRY_PROJECT envs, (b) sets the release name to the
+// git SHA via SENTRY_RELEASE / NEXT_PUBLIC_SENTRY_RELEASE, (c) tunnels
+// client beacons through /monitoring so ad-blockers don't drop them.
+//
+// `hideSourceMaps: true` means we upload maps to Sentry but never ship
+// them to the public — stack traces resolve in Sentry only, not in the
+// browser DevTools (matches `productionBrowserSourceMaps: false` above).
+//
+// `silent: !process.env.CI` keeps `npm run build` quiet locally but
+// loud in CI.
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  // Sentry v10 renamed `hideSourceMaps` → `sourcemaps.deleteSourcemapsAfterUpload`.
+  // Maps still upload to Sentry (used for symbolication) but are
+  // deleted from the build output so the public CDN doesn't serve them.
+  sourcemaps: { deleteSourcemapsAfterUpload: true },
+  disableLogger: true,
+  tunnelRoute: "/monitoring",
+  release: { name: SENTRY_RELEASE },
+});
