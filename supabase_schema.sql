@@ -79,20 +79,24 @@ CREATE TABLE IF NOT EXISTS campaigns (
     total_leads INTEGER DEFAULT 0,
     sent_count INTEGER DEFAULT 0,
     reply_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS campaign_messages (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     campaign_id UUID REFERENCES campaigns(id) ON DELETE CASCADE,
-    lead_unique_key TEXT REFERENCES leads(unique_key),
+    -- ON DELETE SET NULL: a lead can be wiped (operator data-export-delete
+    -- / right-to-erasure) but the campaign_message row survives as audit
+    -- history. Explicit beats the prior implicit NO ACTION, which would
+    -- FK-violate mid-deletion.
+    lead_unique_key TEXT REFERENCES leads(unique_key) ON DELETE SET NULL,
     channel TEXT NOT NULL,
     subject TEXT,
     body TEXT,
     status TEXT DEFAULT 'pending', -- pending, sent, delivered, replied, bounced
     sent_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()) NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_campaigns_status                 ON campaigns(status);
@@ -113,9 +117,13 @@ ALTER TABLE campaigns           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE campaign_messages   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orchestration_jobs  ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs, account_deletions FROM anon;
-REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs, account_deletions FROM authenticated;
-REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs, account_deletions FROM PUBLIC;
+REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs FROM anon;
+REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs FROM authenticated;
+REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs FROM PUBLIC;
+-- account_deletions REVOKE statements are deferred until after the table is
+-- created further down (see "GDPR Article 17" section) so the file stays
+-- applicable top-to-bottom on a fresh project — REVOKE on a not-yet-created
+-- relation would error otherwise.
 
 -- Defense-in-depth: deny-all policies declared AS RESTRICTIVE so they AND
 -- with any future PERMISSIVE policy. A future ad-hoc PERMISSIVE qual=true
@@ -164,6 +172,43 @@ ALTER FUNCTION add_lead_column(text) OWNER TO postgres;
 -- table, view) that could collide with built-in identifiers resolved via
 -- search_path inside SECURITY DEFINER functions.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
+-- =============================================================================
+-- updated_at refresh trigger
+--
+-- Lives in the schema file (was previously only in the live DB — fresh apply
+-- produced tables where updated_at never advanced after INSERT). Listed in
+-- src/scripts/check_function_safety.py::EXPECTED_FUNCTIONS, so the daily
+-- function-safety audit asserts ownership + search_path here.
+-- =============================================================================
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  NEW.updated_at = timezone('utc'::text, now());
+  RETURN NEW;
+END
+$$;
+
+ALTER FUNCTION public.update_updated_at_column() OWNER TO postgres;
+REVOKE EXECUTE ON FUNCTION public.update_updated_at_column() FROM anon, authenticated, public;
+
+DROP TRIGGER IF EXISTS leads_updated_at_trg              ON leads;
+DROP TRIGGER IF EXISTS orchestration_jobs_updated_at_trg ON orchestration_jobs;
+DROP TRIGGER IF EXISTS campaigns_updated_at_trg          ON campaigns;
+
+CREATE TRIGGER leads_updated_at_trg
+    BEFORE UPDATE ON leads
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+CREATE TRIGGER orchestration_jobs_updated_at_trg
+    BEFORE UPDATE ON orchestration_jobs
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+CREATE TRIGGER campaigns_updated_at_trg
+    BEFORE UPDATE ON campaigns
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- =============================================================================
 -- Live-state reconciliation (additive, forward-only)
@@ -310,6 +355,12 @@ CREATE INDEX IF NOT EXISTS idx_account_deletions_expires_at
 
 -- RLS: deny-all (matches the 4 core tables — only service_role bypasses).
 ALTER TABLE public.account_deletions ENABLE ROW LEVEL SECURITY;
+
+-- Defense-in-depth GRANT revoke (parity with the upper REVOKE block on the
+-- 4 core tables). Declared after the table exists so the file applies
+-- top-to-bottom on a fresh project.
+REVOKE ALL ON public.account_deletions FROM anon, authenticated, PUBLIC;
+
 DO $$ BEGIN
     CREATE POLICY account_deletions_deny_all ON public.account_deletions
         AS RESTRICTIVE
