@@ -413,77 +413,130 @@ class LeadHunter:
             logger.debug("Subpage scrape failed for %s", url)
             return None
 
-    def calculate_outreach_score(self, lead: dict, socials: Optional[dict] = None) -> int:
-        """
-        Calculates a lead's outreach value score (0-100).
-        """
+    # ---- calculate_outreach_score helpers ---------------------------------
+    # Decomposed from a single 70-line method (CC 37, radon-E) into four
+    # category scorers + two input normalizers. Each helper is independently
+    # testable; the orchestrator is a sum + `min`. Behaviour is preserved
+    # verbatim — see tests/test_outreach_score_properties.py for the
+    # fixed-fixture + hypothesis-fuzzed invariants.
+
+    _UNKNOWN_PLACEHOLDERS = ('Unknown', '', None)
+
+    @staticmethod
+    def _score_contacts(lead: dict, s_data: dict) -> int:
+        """+20 email | +10 phone | +15 any social (max +45)."""
         score = 0
-        s_data = socials or {}
+        if lead.get('email') or lead.get('EXTRACTED_EMAIL'):
+            score += 20
+        if lead.get('phone'):
+            score += 10
+        social_keys = ('facebook', 'instagram', 'linkedin')
+        has_social = any(s_data.get(k) or lead.get(k) for k in social_keys)
+        if has_social:
+            score += 15
+        return score
 
-        # 1. Data Completeness (+60 max)
-        if lead.get('email') or lead.get('EXTRACTED_EMAIL'): score += 20
-        if lead.get('phone'): score += 10
+    @staticmethod
+    def _score_reputation(lead: dict) -> int:
+        """+15 rating<4.0 (pain point) | +10 reviews<20 (growth) (max +25).
 
-        # Check social presence
-        has_social = (
-            s_data.get('facebook') or s_data.get('instagram') or s_data.get('linkedin') or
-            lead.get('facebook') or lead.get('instagram') or lead.get('linkedin')
-        )
-        if has_social: score += 15
-
-        # Reputation (New for Phase 17)
+        Rating string accepts comma decimals (`'3,7'` → 3.7); reviews accept
+        embedded digits (`'12 reviews'` → 12). Malformed values silently
+        contribute 0 — matches the original try/except around the parse."""
         rating = lead.get('rating') or lead.get('Rating')
         reviews = lead.get('reviews') or lead.get('Reviews')
+        score = 0
         try:
             if rating:
                 rating_val = float(str(rating).replace(',', '.'))
-                # Low rating (< 4.0) is a pain point
-                if rating_val < 4.0: score += 15
+                if rating_val < 4.0:
+                    score += 15
             if reviews:
                 num_str = re.sub(r'\D', '', str(reviews))
                 reviews_val = int(num_str) if num_str else 0
-                # Low review count is a growth opportunity
-                if reviews_val < 20: score += 10
+                if reviews_val < 20:
+                    score += 10
         except (ValueError, TypeError):
             pass
+        return score
 
-        # 2. Enrichment & Intent (+20 max)
+    @staticmethod
+    def _resolve_enrichment_data(lead: dict) -> dict:
+        """Normalize `enrichment_data`: dict-typed → return, JSON string →
+        parse-or-empty, falsy → fall through to top-level lead dict when
+        either `company_size` or `leadership_team` is present as a key.
+
+        Preserves the original "key-in-lead" check (not value-truthiness):
+        a `lead = {'leadership_team': None}` still triggers the fall-through;
+        the downstream value check filters the None back out."""
         e_data = lead.get('enrichment_data', {})
-        if not e_data and any(k in lead for k in ['company_size', 'leadership_team']):
+        if not e_data and any(k in lead for k in ('company_size', 'leadership_team')):
             e_data = lead
-
         if isinstance(e_data, str):
-            try: e_data = json.loads(e_data)
-            except Exception: e_data = {}
+            try:
+                e_data = json.loads(e_data)
+            except Exception:
+                e_data = {}
+        return e_data if isinstance(e_data, dict) else {}
 
-        if e_data.get('leadership_team') and e_data['leadership_team'] not in ['Unknown', '', None]:
-            score += 10
-        if e_data.get('company_size') and e_data['company_size'] not in ['Unknown', '', None]:
-            score += 10
+    @classmethod
+    def _score_enrichment(cls, e_data: dict) -> int:
+        """+10 leadership_team set | +10 company_size set (max +20).
 
-        # 3. Urgency / Pain Points (+20 max)
+        'Unknown' / '' / None are treated as absent (placeholder values written
+        by upstream enrichment when the model couldn't extract a value)."""
+        score = 0
+        if e_data.get('leadership_team') and e_data['leadership_team'] not in cls._UNKNOWN_PLACEHOLDERS:
+            score += 10
+        if e_data.get('company_size') and e_data['company_size'] not in cls._UNKNOWN_PLACEHOLDERS:
+            score += 10
+        return score
+
+    @staticmethod
+    def _resolve_audit_data(lead: dict) -> dict:
+        """Normalize `audit_results`: dict → return as-is, JSON string →
+        parse-or-empty, anything else → empty dict. Always returns a dict so
+        callers can `.get(...)` without isinstance guards."""
         audit = lead.get('audit_results', {})
         if isinstance(audit, str):
-            try: audit = json.loads(audit)
-            except Exception: audit = {}
+            try:
+                audit = json.loads(audit)
+            except Exception:
+                audit = {}
+        return audit if isinstance(audit, dict) else {}
 
-        # Coalesce nullable / missing pain_points to an empty container so
-        # `len()` cannot trip on None. The DB column is nullable text; for an
-        # unaudited lead arriving through the hunt path it's None, and the
-        # previous expression's `or [...]` fallback only kicks in when the
-        # value is falsy AND there is no audit dict — when the audit dict
-        # exists but doesn't define `pain_points`, the chain collapses to
-        # None and `len(None)` raises TypeError.
+    @staticmethod
+    def _score_urgency(lead: dict, audit: dict) -> int:
+        """+20 if high-risk OR pain_points present (max +20).
+
+        `pain_points` is coalesced from lead → audit → "" so `len()` cannot
+        trip on None (the DB column is nullable text). Keep the `audit and`
+        short-circuit in the high-risk check as defense-in-depth — if a
+        future change loosens `_resolve_audit_data` to return non-dicts,
+        this still doesn't AttributeError."""
         pain_points = (
             lead.get('pain_points')
             or (audit.get('pain_points') if isinstance(audit, dict) else None)
             or ""
         )
         is_high_risk = lead.get('high_risk_flag') or (audit and audit.get('high_risk_flag'))
-
         if is_high_risk or len(pain_points) > 0:
-            score += 20
+            return 20
+        return 0
 
+    def calculate_outreach_score(self, lead: dict, socials: Optional[dict] = None) -> int:
+        """Lead's outreach value score in [0, 100]. Sum of four category
+        scorers, capped at 100. See helper docstrings for component bands;
+        invariants pinned in tests/test_outreach_score_properties.py."""
+        s_data = socials or {}
+        e_data = self._resolve_enrichment_data(lead)
+        audit = self._resolve_audit_data(lead)
+        score = (
+            self._score_contacts(lead, s_data)
+            + self._score_reputation(lead)
+            + self._score_enrichment(e_data)
+            + self._score_urgency(lead, audit)
+        )
         return min(score, 100)
 
     def _get_reputation_segment(self, lead: dict) -> Optional[str]:
