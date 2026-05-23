@@ -2116,3 +2116,85 @@ the next billing cycle.
   pollers (`audit-status`, 15 s leads refresh) when profiling
   motivates extending it. Locked into the PR description; the surgical
   scope was deliberate to keep #233 reviewable.
+
+# Session 2026-05-23 — drain crossover gaps (#227, #231, #237)
+
+Items shipped during the 2026-05-23 drain that fell outside the
+scope of PR #253 (drain PRs #235–#251) and PR #254 (Phase 15 finding
+matrix). Pinned here so future audits don't re-discover them.
+
+## Cross-origin header backport from bookbed-website (PR #237)
+
+`frontend/next.config.ts::baseHeaders` now stamps three additional
+headers on every response, completing the bookbed-website parity
+gap called out in `docs/bookbed-crossover.md`:
+
+- `Cross-Origin-Opener-Policy: same-origin` — isolates the
+  browsing-context group so cross-window timing attacks (Spectre
+  class) lose access. Drops `window.opener` references from
+  other-origin windows that linked in.
+- `Cross-Origin-Resource-Policy: same-origin` — other origins
+  can't pull our responses as `<img>` / `<script>` / `<iframe>`
+  subresources. Supabase + Sentry are reached via the
+  Next.js proxy / official browser SDK, both same-origin from
+  the dashboard's perspective — no breakage.
+- `X-Permitted-Cross-Domain-Policies: none` — legacy Flash /
+  Adobe Reader gating; defensive against any rehydrated PDF
+  payload on a stale tab.
+
+No middleware change required — the existing `headers()` block in
+`next.config.ts` already covers every route the frontend ships.
+CSP / HSTS / XFO / XCTO / Referrer-Policy stay where they are
+(`frontend/proxy.ts` per-request for CSP, `next.config.ts` static
+for the rest).
+
+## `.gitignore` gap for frontend exports (PR #231)
+
+Root `.gitignore` had `exports/` which (per gitignore glob
+semantics — slash → `FNM_PATHNAME`) matches only the root-level
+`exports/` directory. CSV artifacts written by export scripts run
+from the `frontend/` working dir landed at `frontend/exports/` and
+showed up untracked. PR adds `frontend/exports/` as an additional
+pattern.
+
+Pattern to remember: a gitignore rule with a trailing slash AND a
+slash inside (or implied path from being non-leading) is
+**anchored to the repo root**. `exports/` is anchored;
+`**/exports/` or a bare `exports/` at every depth would match
+nested directories. Surfaced during Phase 16-T1's `git status -s`
+sweep.
+
+## P0a Sign Out retraction (PR #227)
+
+Phase 15 finding #1 ("Sign Out click no-ops on prod") was a
+**false positive from a stale build**, not a real handler bug.
+Root cause:
+
+```bash
+pkill -f "next start" -f "uvicorn backend"
+```
+
+On macOS (BSD `pkill`), only the LAST `-f <pattern>` is honored —
+the previous `next-server` (PID 59710 from 2026-05-22 18:53) was
+never killed and kept serving cached pre-build output instead of
+the rebuild. chrome-devtools-mcp tested the cached build whose
+React tree had no Sign Out handler.
+
+**Operational rule pinned forward**: when restarting multiple
+services, use SEPARATE `pkill` invocations AND verify with
+`pgrep -f "<pattern>"` returning exit 1 before claiming a fresh
+build is under test:
+
+```bash
+pkill -f "next start"; pkill -f "uvicorn backend"
+pgrep -f "next start" || echo "next clean"
+pgrep -f "uvicorn backend" || echo "backend clean"
+```
+
+Re-test path: add `console.log` at the handler entry FIRST,
+rebuild, re-test. Confirms whether the click event reaches the
+handler vs being lost upstream by stale React tree.
+
+Same root cause likely poisoned other Phase 15 findings that
+relied on the same restart command; cross-check before re-running
+any test that was negative on Phase 15 + positive on Phase 16.
