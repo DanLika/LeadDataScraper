@@ -178,18 +178,27 @@ test.describe('visual regression', () => {
 
   test('lead detail (outreach) modal open', async ({ page }) => {
     await mockDashboardPopulated(page)
+    // Handler reads { draft, subject, lead_email } flat off the response —
+    // NOT wrapped in { result: ... }. See page.tsx::handleDraftOutreach.
     await page.route('**/api/proxy/draft-outreach', (r) =>
       r.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          result: {
-            draft: "Hi team at Fixture Co 00,\n\nI noticed your site could use an SEO boost. Let's chat.\n\nBest,\nYour Name",
-            subject: 'Quick win for Fixture Co 00 SEO',
-            lead_name: 'Fixture Co 00',
-            lead_email: 'vis0@example.test',
-            operator_name: 'Your Name',
-          },
+          draft: "Hi team at Fixture Co 00,\n\nI noticed your site could use an SEO boost. Let's chat.\n\nBest,\nYour Name",
+          subject: 'Quick win for Fixture Co 00 SEO',
+          lead_email: 'vis0@example.test',
+        }),
+      }),
+    )
+    // Handler chains a /draft-linkedin call right after — mock it so the
+    // request doesn't fall through to a real proxy round-trip.
+    await page.route('**/api/proxy/draft-linkedin', (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          draft: 'Hi! Saw Fixture Co 00 could use an SEO boost — happy to share a quick teardown if useful.',
         }),
       }),
     )
