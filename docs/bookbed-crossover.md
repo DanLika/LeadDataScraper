@@ -334,6 +334,26 @@ These are the files Read while building the gap table. If you re-verify before p
 Rows marked "verify" / "?" in the gap table were NOT spot-checked; treat them as
 hypothesis-only until re-confirmed.
 
+### Verification debt (rows that still need a spot-check before porting)
+
+Each of these is a hypothesis based on `CLAUDE.md` or inference, not file inspection.
+Re-verify with a Read of the named file before basing a port-PR on the row.
+
+| Row | Claim | File to read |
+|---|---|---|
+| 2.3 (SSRF) — bookbed CF column | "outbound is only OTAs + Resend, both static-allowlisted hosts" | `bookbed/functions/src/availability.ts`; any `functions/src/*ical*.ts`; grep `functions/src/` for `fetch(` / `axios` / `got(` |
+| 2.5 (log CRLF scrub) — bookbed CF column | "Sentry integration in CF — verify no `logger.error('...' + userInput, ...)` pattern" | `bookbed/functions/src/lib/logger.ts` + any caller passing user-controlled strings |
+| 2.5 (log CRLF scrub) — bookbed Flutter column | "`LoggingService.logDebug/logError` is called with user text length only today" | grep `bookbed/lib/` for `LoggingService.log` + assert no second-arg user content |
+| 2.6 (Origin gate) — bookbed CF column | "CF callables get this via Firebase App Check + auth context" | `functions/src/index.ts` callable export config — App Check enforcement on every callable, not just sensitive ones |
+| 2.8 (Pydantic-equivalent input validation) | "CF callables use `data: any` by default" — port `zod` strict schemas | `functions/src/**/*.ts` — grep for `onCall(` to enumerate the surface, then audit each handler's input shape |
+| 2.9 (Upload guard) | "Check `storage.rules` + any client upload handlers" | `bookbed/storage.rules` + any `FirebaseStorage.instance.ref(...).putFile(` in `lib/` |
+| 2.12 (Rate limiting) — bookbed CF | "verify all callable endpoints have it" | `functions/src/lib/rateLimit.ts` (if it exists) + grep `onCall(` handlers for `rateLimit` invocation |
+| 2.13 (Firestore CHECK-equivalent constraints) | "review whether `firestore.rules` enforces equivalent constraints to LDS's 10 CHECKs" | `bookbed/firestore.rules` — look for `request.resource.data.field is string` + allowlist matches |
+
+When porting Phase A (website CI) and Phase B (CF email guards), these rows are
+not on the critical path. When porting Phase C (Flutter Gemini fence) and beyond,
+verify before scoping work.
+
 ---
 
 **Created:** 2026-05-22 — Phase 13.14 of LeadDataScraper roadmap. Sourced from LDS `CLAUDE.md`
