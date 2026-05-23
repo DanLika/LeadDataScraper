@@ -156,6 +156,20 @@ REVOKE EXECUTE ON FUNCTION add_lead_column(text) FROM anon, authenticated, publi
 -- authority can't be downgraded by a re-deploy under a less-trusted role.
 ALTER FUNCTION add_lead_column(text) OWNER TO postgres;
 
+-- =============================================================================
+-- Trigger function: update_updated_at_column()
+--
+-- Supabase ships this as a public-schema helper used by the
+-- `update_orchestration_jobs_updated_at` BEFORE-UPDATE trigger. Postgres
+-- triggers do NOT require the calling user to have EXECUTE on the trigger
+-- function (the function fires with the trigger owner's privileges), so
+-- revoking EXECUTE from anon/authenticated/public is safe — the trigger
+-- keeps firing. Closes the T3 finding from #229: no untrusted role should
+-- be able to call a public function unless explicitly allowlisted in
+-- `EXEC_GRANT_ALLOWLIST` (`src/scripts/check_function_safety.py`, currently
+-- empty). Live state synchronised 2026-05-23.
+REVOKE EXECUTE ON FUNCTION update_updated_at_column() FROM anon, authenticated, public;
+
 -- Block any role from creating shadowing objects in `public` (function,
 -- table, view) that could collide with built-in identifiers resolved via
 -- search_path inside SECURITY DEFINER functions.
