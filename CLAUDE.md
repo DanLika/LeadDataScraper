@@ -1137,9 +1137,16 @@ CI stays green without setup.
   (11 tests) + the existing
   `tests/test_crlf_injection.py::TestLoggingCRLFScrub`.
 - **Request-context middleware**
-  (`backend/main.py::_request_context_middleware`). Runs FIRST
-  inbound (declared BEFORE `_block_logger_middleware`; Starlette
-  stack: first-registered = outermost). For every HTTP request:
+  (`backend/main.py::_request_context_middleware`). Declared
+  BEFORE `_block_logger_middleware`; under Starlette the LAST
+  `@app.middleware('http')` decorator becomes the OUTERMOST wrapper
+  (BaseHTTPMiddleware inserts at index 0), so `_block_logger`
+  actually wraps `_request_context` at runtime. Functional outcome
+  is unchanged: ContextVars set in the inner middleware are
+  visible to the outer (Python ContextVars propagate down the
+  async-call stack), and the slow-handler log emitted by
+  `_block_logger` still carries `request_id` because the request
+  Task hasn't ended yet. For every HTTP request:
   honours valid inbound `X-Request-ID` (`[A-Za-z0-9_-]{1,64}`),
   mints `uuid.uuid4().hex` otherwise; binds the three ContextVars
   (`request_id_var` / `user_id_var` / `route_var`); tags Sentry's
