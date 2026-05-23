@@ -2,17 +2,30 @@ import { test, expect, type Page } from '@playwright/test'
 
 // Visual regression baselines. All upstream API responses are mocked so
 // the screenshots only reflect frontend rendering — not Supabase data
-// drift. Baselines live in e2e/__screenshots__/. Update intentionally
-// via `npm run e2e -- --update-snapshots e2e/visual.spec.ts`.
+// drift. Baselines live next to this file in e2e/visual.spec.ts-snapshots/.
+// Update intentionally via
+// `npm run e2e -- --update-snapshots e2e/visual.spec.ts`.
 //
 // maxDiffPixelRatio: 0.01 (≤1% pixels may differ) covers anti-aliasing
 // and font-rendering jitter without masking real layout regressions.
+//
+// **macOS-only by design.** Baselines are pixel-locked to macOS chromium
+// (Inter→SF Pro fallback). Linux runners render via DejaVu/Liberation
+// which blows past the 1% diff budget on body text alone. CI ubuntu-
+// latest auto-skips this file via the platform guard below; visual
+// regression is a LOCAL contract — dev runs `npm run e2e` on macOS,
+// inspects the diff in __snapshots__, regenerates with --update-snapshots,
+// commits the PNGs. See README in e2e/visual.spec.ts-snapshots/.
 //
 // Required env: E2E_BASE_URL, E2E_EMAIL, E2E_PASSWORD.
 
 const EMAIL = process.env.E2E_EMAIL || ''
 const PASSWORD = process.env.E2E_PASSWORD || ''
 test.skip(!EMAIL || !PASSWORD, 'E2E_EMAIL and E2E_PASSWORD must be set')
+test.skip(
+  process.platform !== 'darwin',
+  'visual baselines are pixel-locked to macOS chromium; CI Linux runs would diff on font fallback',
+)
 
 const SNAP_OPTS = {
   maxDiffPixelRatio: 0.01,
