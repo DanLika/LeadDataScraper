@@ -24,7 +24,9 @@ function buildCsp(nonce: string): string {
       ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
       : `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'nonce-${nonce}'`,
     `img-src 'self' data: blob: ${SUPABASE_URL}`.trim(),
-    "font-src 'self' data:",
+    // No data: fonts are shipped (verified via grep for data:woff/data:font).
+    // Tighter than the bookbed-website default to shrink XSS-in-CSS surface.
+    "font-src 'self'",
     `connect-src 'self' ${SUPABASE_URL} ${SUPABASE_URL.replace(/^https:/, 'wss:')}`.trim(),
   ]
   return directives.join('; ')
