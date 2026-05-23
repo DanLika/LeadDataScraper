@@ -128,9 +128,9 @@ screenshot.
 
 | Project | Devices | Spec scope |
 |---|---|---|
-| `chromium` | Desktop Chrome | all except mobile.spec.ts |
-| `firefox` | Desktop Firefox | all except full-flow + mobile |
-| `webkit` | Desktop Safari | all except full-flow + mobile |
+| `chromium` | Desktop Chrome | all except mobile.spec.ts (visual.spec.ts macOS-only via `test.skip(process.platform !== 'darwin')` at spec top) |
+| `firefox` | Desktop Firefox | all except full-flow + mobile + visual |
+| `webkit` | Desktop Safari | all except full-flow + mobile + visual |
 | `iphone-14` | `devices['iPhone 14']` | mobile.spec.ts only |
 | `pixel-7` | `devices['Pixel 7']` | mobile.spec.ts only |
 
@@ -165,7 +165,7 @@ screenshot.
 | `locale.spec.ts` | en-US / hr-HR / bs-BA contexts: diacritics, Intl number grouping, date order |
 | `navigation.spec.ts` | Scroll restoration on back, campaigns detail→list→detail, reload rehydrates from URL, modal-state-on-refresh contract |
 | `full-flow.spec.ts` | Discover→audit→hunt→outreach→campaign→CSV→`/leads/clear` (~20 min, chromium only, real backend) |
-| `visual.spec.ts` | 7 `toHaveScreenshot` baselines with `maxDiffPixelRatio: 0.01`; mocked APIs; update via `--update-snapshots` |
+| `visual.spec.ts` | 7 `toHaveScreenshot` baselines (`/login`, dashboard empty + populated, `/insights`, `/campaigns`, outreach modal, AI plan card) with `maxDiffPixelRatio: 0.01`; all upstream APIs mocked via `page.route`; baselines at `frontend/e2e/visual.spec.ts-snapshots/` (chromium-darwin only — `test.skip` on non-darwin platforms, `testIgnore` on Firefox/WebKit projects); `.gitignore` exception lets PNGs commit. Regenerate locally on macOS via `npm run e2e -- --update-snapshots e2e/visual.spec.ts`. See the snapshots dir README for capture env + when to regen |
 | `memory-soak.spec.ts` | 50-cycle heap delta <50 MB + detached-node delta <500. Chromium-only CDP. ~15 min |
 
 ### CI

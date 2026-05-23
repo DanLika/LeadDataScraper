@@ -1420,8 +1420,30 @@ Skipped / deferred:
   available in the agent session.
 - **9.10 Full pipeline live** — real Gemini + Maps scrape ($,
   operator DB writes). Spec says quarterly cadence; operator-triggered.
-- **9.12 Visual smoke** — `frontend/e2e/__screenshots__/` does not
-  exist; spec files present without baselines.
+- **9.12 Visual smoke** — **shipped 2026-05-23 (PR #260)**. 7 PNG
+  baselines at `frontend/e2e/visual.spec.ts-snapshots/`
+  (Playwright's default `{specFile}-snapshots/` path, NOT the
+  `__screenshots__/` the earlier spec referenced) cover `/login`,
+  dashboard empty + populated (20 fixture leads), `/insights`,
+  `/campaigns`, the outreach modal, and the AI plan card. Total
+  548 KB; each PNG 17-118 KB. All upstream HTTP traffic is mocked
+  via `page.route` so the snapshots reflect only frontend render —
+  not Supabase / Gemini / backend drift. `maxDiffPixelRatio: 0.01`
+  absorbs anti-aliasing jitter; `animations: 'disabled'` +
+  `caret: 'hide'` + a stylesheet override in `settleForSnapshot`
+  kill CSS motion. **macOS-only by design** — Linux fontconfig
+  resolves `Inter → DejaVu Sans` (macOS resolves `→ SF Pro`), and
+  that fallback alone exceeds the 1% diff budget on body text.
+  `test.skip(process.platform !== 'darwin', …)` at file top makes
+  CI ubuntu auto-skip; `playwright.config.ts` also excludes
+  `visual.spec.ts` from the Firefox + WebKit projects
+  (`testIgnore: /(full-flow|mobile|visual)\.spec\.ts$/`).
+  `.gitignore` carries an explicit
+  `!frontend/e2e/visual.spec.ts-snapshots/*.png` exception to the
+  global `*.png` ignore. Regenerate locally on macOS via
+  `npm run e2e -- --update-snapshots e2e/visual.spec.ts`; the
+  baseline README documents the exact capture env + when to
+  regenerate.
 
 ## Cross-page navigation contract (`frontend/app/page.tsx` useEffect on mount)
 - Sidebar/Insights/Campaigns all share the same `<Sidebar>` component, but
