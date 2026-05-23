@@ -47,6 +47,7 @@ const FIXTURE_LEADS_20 = Array.from({ length: 20 }, (_, i) => ({
   high_risk_flag: i % 5 === 0,
   retry_count: 0,
   lead_source: 'visual_fixture',
+  email_hook: `Quick SEO win for Fixture Co ${i.toString().padStart(2, '0')}`,
   created_at: `2026-05-01T00:00:${(i % 60).toString().padStart(2, '0')}Z`,
 }))
 
