@@ -522,16 +522,36 @@ class AgenticRouter:
         if not self.client:
             return {"error": "AI model not initialized."}
 
-        # Fetch recent leads with audit results
+        # Fetch recent leads with audit results. SELECT list pinned at 5 fields
+        # (CLAUDE.md pinned finding #3). DB-wide total is fetched separately as
+        # a scalar so the prompt can ground Gemini against the real population
+        # size instead of letting it confuse the sample count for the total —
+        # the latter was hallucinating "180" against 521 in the live DB.
         response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(200).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:
             return {"summary": "No data yet to analyze. Try importing some leads!", "insights": [], "top_priorities": []}
 
+        try:
+            count_resp = self.db.client.table("leads").select("unique_key", count="exact").limit(1).execute()
+            total_leads = int(getattr(count_resp, "count", None) or 0)
+        except Exception as e:
+            # Best-effort: if the count call fails we fall back to the sample
+            # size and disclose that in the prompt so the model treats the
+            # number as a floor, not an authoritative total.
+            logger.warning("Insights total-count failed, falling back to sample size: %s", e)
+            total_leads = 0
+        sample_size = len(leads)
+        total_for_prompt = total_leads if total_leads > 0 else sample_size
+
         prompt = (
             "You are a Database Analyst for a Lead Generation agency.\n"
             "Analyze the following lead data (including SEO audit results) and provide 3 key strategic insights.\n\n"
+            f"GROUND TRUTH (do NOT contradict): the database holds {total_for_prompt} leads in total. "
+            f"The sample below contains {sample_size} of those rows. Any number you cite as a count "
+            "MUST be derived from the sample or explicitly described as 'in the sample of "
+            f"{sample_size}'. Never invent a total.\n\n"
             "Focus on:\n"
             "- Critical vulnerabilities (missing SSL, title, etc).\n"
             "- Industry patterns (if detectable).\n"
