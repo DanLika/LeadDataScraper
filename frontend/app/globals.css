@@ -119,7 +119,11 @@
   --z-mobile-header: 80;
 
   --touch-target-min: 44px;
-  --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Inter was declared here but never loaded (no next/font, no .woff* shipped),
+   * which silently fell through to system-ui in every browser. Faza 9.7
+   * documented the gap; option A from #226 = drop Inter and own system-ui.
+   * Wire next/font/google if/when brand requires Inter. */
+  --font-main: system-ui, -apple-system, sans-serif;
   --transition-default: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 
