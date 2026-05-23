@@ -1,6 +1,6 @@
 # Use the official Microsoft Playwright image which comes with all necessary dependencies
 # This avoids complicated dependency installation for browser automation on Linux
-FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
 
 # Build-time release tag for Sentry. Defaults to "unknown" if the build
 # context didn't pass --build-arg GIT_SHA (e.g. `docker build .` locally).
