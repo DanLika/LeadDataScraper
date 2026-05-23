@@ -1,0 +1,40 @@
+{
+  "_meta": {
+    "captured_at": "2026-05-22",
+    "captured_by": "scripts/capture-quality-baselines.sh",
+    "_doc": "Per-metric ceilings. CI's quality-ratchet workflow fails if any current value EXCEEDS the baseline (regressions). Lower-is-better; values can drop freely and the workflow auto-suggests updating this file when it sees a sustained improvement.",
+    "_update_policy": "Manual. Lower values mean 'we improved'. The author of an improvement-PR may update this file in the same commit; reviewers verify the new baseline matches the actual measurement (see scripts/capture-quality-baselines.sh). Never raise a value to silence a new finding — fix the finding first.",
+    "_argv_doc": "Each entry's `argv` is the exact argv passed to subprocess.run with shell=False. Splitting at JSON level (vs `shell=True` on a single command string) keeps the tool-spawn surface free of shell-injection vectors per CWE-78."
+  },
+  "ruff": {
+    "value": 90,
+    "argv": ["ruff", "check", "src/", "backend/", "tests/"],
+    "cwd": ".",
+    "note": "Total errors. Most are auto-fixable via `ruff check --fix` — that's a free PR worth landing."
+  },
+  "mypy_strict": {
+    "value": 401,
+    "argv": ["mypy", "--strict", "src/"],
+    "cwd": ".",
+    "note": "Tracked weekly in tests/quality/type-coverage-progress.md. Drops as each Phase 1-6 PR lands."
+  },
+  "pylint_score": {
+    "value": 10.00,
+    "operator": "gte",
+    "argv": ["pylint", "src/", "backend/", "--disable=all", "--enable=E,F", "--reports=n"],
+    "cwd": ".",
+    "note": "Higher-is-better. Scoped to ERROR + FATAL severities only (--enable=E,F); style rules excluded since ruff covers them. Operator override of 'gte' inverts the comparison."
+  },
+  "eslint": {
+    "value": 0,
+    "argv": ["npx", "--no-install", "eslint", "app/**/*.{ts,tsx}", "utils/**/*.{ts,tsx,mjs}", "--max-warnings", "0"],
+    "cwd": "frontend",
+    "note": "Must stay at 0 — CLAUDE.md invariant. Any non-zero turns CI red regardless of baseline."
+  },
+  "semgrep": {
+    "value": 0,
+    "argv": ["semgrep", "--config=p/python", "--config=p/typescript", "--config=p/owasp-top-ten", "src/", "backend/", "frontend/app/", "frontend/utils/", "--json", "--no-error"],
+    "cwd": ".",
+    "note": "Must stay at 0. Same invariant as eslint — never weaken; fix the finding."
+  }
+}
