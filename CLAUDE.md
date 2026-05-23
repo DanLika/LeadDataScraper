@@ -2198,3 +2198,78 @@ handler vs being lost upstream by stale React tree.
 Same root cause likely poisoned other Phase 15 findings that
 relied on the same restart command; cross-check before re-running
 any test that was negative on Phase 15 + positive on Phase 16.
+
+## Docs-PR stack via sequential rebase
+
+When two or more docs PRs append to the same insertion point in
+CLAUDE.md (every session uses "after the last existing section"),
+naive parallel branches all conflict on the same diff hunk. The
+2026-05-23 session resolved three colliding PRs (#253 + #254 + #258)
+into a deterministic merge stack:
+
+```
+main ← #253 ← #254 ← #258
+```
+
+Each PR is rebased onto the previous PR's tip, so its append now
+lands AFTER the prior block. When the bottom of the stack merges to
+main, GitHub auto-rebases the next PR; the diff collapses to that
+PR's own additions only.
+
+Recipe per PR (worked example for #254 onto #253):
+
+```bash
+# 1. Dedicated worktree off the PR's remote branch
+git worktree add /tmp/lds-254-fix \
+  origin/docs/claude-md-phase15-session-2026-05-23
+cd /tmp/lds-254-fix
+git checkout -b docs-254-fix
+
+# 2. Rebase onto the previous PR in the stack
+git fetch origin --quiet
+git rebase origin/docs/claude-md-drain-2026-05-23-opus47-v2
+
+# 3. Resolve conflict — keep BOTH blocks
+#    (CLAUDE.md "Session …" headings stack vertically)
+# 4. git add + git rebase --continue
+
+# 5. Push with safety net — fail if remote moved since last fetch
+git push --force-with-lease=docs/claude-md-phase15-session-2026-05-23:<remote-tip-sha> \
+  origin docs-254-fix:docs/claude-md-phase15-session-2026-05-23
+```
+
+Key invariants:
+
+- **`--force-with-lease=<branch>:<expected-tip>` not bare `--force`.**
+  If a parallel session pushed to the same remote branch since the
+  local fetch, lease comparison fails and aborts — your unseen
+  collaborator's commits are NOT clobbered. Bare `--force` would
+  overwrite silently.
+- **Resolve in the rebased branch, not the base.** Don't touch the
+  base PR you're stacking on — it stays exactly as its author left
+  it. The rebase only affects YOUR PR's commits.
+- **Comment the stack order on every PR.** When #253 merges,
+  GitHub auto-rebases #254 onto main; if a reviewer merges #254
+  first by mistake, the auto-rebase target is wrong and #253's
+  content goes to main via #254's PR. Make the order visible in the
+  description AND a top-comment.
+- **Worktree, not main checkout.** The parallel-session contention
+  problem (CLAUDE.md "Multi-session worktree race" — same session
+  block) bites if you rebase in the shared `~/git/LeadDataScraper`
+  worktree while another session has a HEAD there.
+
+What to do if the stack contains a PR you don't own (parallel
+session): leave its base alone, don't change `gh pr edit --base`,
+don't force-push the parallel session's branch unless you control
+that session. Only ever rebase the PRs YOU created. For someone
+else's PR, the comment + merge-order documentation IS the fix.
+
+What this does NOT fix:
+
+- If the base PR is **rejected** instead of merged, the stacked PRs
+  still carry its content. Inspect each PR's diff against main
+  before merging — if base content is unwanted, revert the rebase
+  with `git reset --hard origin/<your-branch>@{1}` (use reflog).
+- Stack-of-3 was manageable; stack-of-N for large N gets fragile.
+  Beyond 3-4, switch to a single combined PR or a docs-only train
+  branch.
