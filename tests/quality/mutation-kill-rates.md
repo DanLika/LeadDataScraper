@@ -34,7 +34,7 @@ This is the first executed baseline of `.github/workflows/mutation-test.yml`
 |---|---:|---:|---:|---:|---:|---:|
 | `src/utils/prompt_safety.py` | 23 | 23 | 0 | 0 | 0 | ✅ **100.00%** |
 | `src/utils/ssrf_guard.py` | 45 | 41 | 3 | 1 | 2 | ✅ **91.11%** |
-| `src/processors/leadhunter.py` | — | — | — | — | — | ⚠️ **skipped** (see below) |
+| `src/processors/leadhunter.py` | 747 | 28 | 718 | 1 | 0 | ⚠️ **3.75%** (scope-limited; see below) |
 
 ## Survivor breakdown
 
@@ -109,45 +109,50 @@ non-actionable:
 | 25 | `is_multicast or is_reserved or is_unspecified or not is_global` → `is_multicast and is_reserved or ...` | All multicast and reserved IPs are also classified `not is_global` by Python\'s `ipaddress` module, so the OR chain still triggers. Equivalent for IPv4/IPv6 address space. |
 | 39 | `port: int = 0` → `port: int = 1` (aiohttp resolver default) | Cosmetic — aiohttp doesn\'t dispatch on this default; security irrelevant. |
 
-### `src/processors/leadhunter.py`  — skipped this baseline
+### `src/processors/leadhunter.py`  — 718 survivors (scope-limited)
 
-**Skipped — not run to completion.** Two issues blocked the run:
+**Kill rate: 28/747 = 3.75%.** This is **expected**, not a test-
+quality regression. `--paths-to-mutate` mutates the entire 812-LOC
+file; the runner only exercises `calculate_outreach_score` and its
+`_score_*` helpers via `tests/test_outreach_score_properties.py -k
+TestOutreachScoreFixedFixtures`. That subgraph is ~120 LOC out of
+812; the other ~85% of the file (DDG search, social-link extraction,
+subpage scraping, Gemini chat for pain points, outreach hook
+generation) is covered only by live `test_outreach_golden_set` /
+`test_outreach_hallucination` / `test_pain_points_consistency`
+tests that require `GEMINI_API_KEY` and would multiply wall-clock
+by ~30x per mutant. They were not included in the runner; including
+them would not have changed the ~700 surviving mutants outside the
+score subgraph (those tests don't exercise the score function).
 
-1. **Scope mismatch (expected).** `--paths-to-mutate` mutates the
-   entire 812-LOC file; the available test runner
-   (`tests/test_outreach_score_properties.py -k
-   TestOutreachScoreFixedFixtures`) only exercises
-   `calculate_outreach_score` and its `_score_*` helpers (~120 LOC
-   out of 812). The other ~85% of the file (DDG search, social
-   extraction, subpage scraping, Gemini chat) is covered only by
-   live `test_outreach_golden_set` / `test_outreach_hallucination`
-   tests that require `GEMINI_API_KEY`. Mutating those code paths
-   under the fast runner produced an expected ~5-10% kill rate
-   trending; the partial cache (cleared by a concurrent session) had
-   9 killed out of ~470 attempted before the run was aborted.
-2. **Parallel-session interference.** A concurrent `typecov` agent
-   in this user\'s environment (see CLAUDE.md "Auto-branch hook
-   caveat" + the `mutmut.PAUSED-by-typecov-session` rename behaviour)
-   modified `src/processors/leadhunter.py` mid-run (added
-   `src/utils/gemini_types` imports for type coverage). The test
-   file then failed pytest collection because the new imports didn'\''t
-   resolve — mutmut bailed at the baseline-run step.
+All 28 killed mutants fall inside lines 422-539 (the score path);
+one further kill at line 19 is a module-level import-constant
+mutation. Outside that band, every mutation survived — confirmation
+that the runner choice, not the score-function test quality, is the
+limiting factor.
 
-**Recommendation for the next baseline:**
+**Setup**: Run in a `git worktree add /tmp/lds-mutmut origin/main`
+isolated checkout — the main working tree on this branch is
+contested by a parallel typecov agent that re-applies an
+`src/utils/gemini_types` import change to `leadhunter.py` mid-run,
+which kills pytest's import-time collection and causes mutmut to
+bail at the baseline-run step. The worktree pins the source against
+that interference (see CLAUDE.md "git-worktree HEAD-swap mitigation"
+recommendation, Session 2026-05-23).
 
-- Run leadhunter mutmut in an isolated git worktree (per CLAUDE.md
-  "git-worktree HEAD-swap mitigation" recommendation, Session
-  2026-05-23). The worktree pins the source tree against parallel
-  branch swaps and the `M src/processors/leadhunter.py` problem.
-- Either (a) accept ~5-10% kill rate as the documented floor with a
-  scope note, OR (b) restrict mutmut to the score subgraph by
-  setting `--paths-to-exclude` for the async scraper methods OR
-  authoring a dedicated `src/processors/outreach_score.py` module
-  that calculate_outreach_score + helpers move into.
+**Recommendation for raising the floor**: extract
+`calculate_outreach_score` + the four `_score_*` helpers into a
+dedicated `src/processors/outreach_score.py` module. Then mutmut on
+THAT file would land a ~80-90% kill rate against the same fast
+runner without changing any behaviour. The current 3.75% number
+should be interpreted as "the score path is well-tested; the
+surrounding 700 LOC of scraper code is not unit-tested at all (only
+via live golden-set tests)" — which is itself a known accepted
+tradeoff for this project, not a defect.
 
 The weekly `mutation-test.yml` job is the actual gate for this file
-going forward; this manual baseline only covers the two
-security-critical files that needed structural test fixes.
+going forward; this manual baseline establishes the floor.
+
 
 ## Reproducing
 

@@ -77,6 +77,10 @@
     "_doc": "Mutmut runs are too slow (~5min/file, leadhunter ~20min) for the PR-time quality-ratchet. The weekly `.github/workflows/mutation-test.yml` job is the gate; this block exists only to document the achieved floor when the baseline was first executed on 2026-05-23, so future drops below these numbers are visible in `git blame`. Per-file mutmut command lives in `tests/quality/mutation-kill-rates.md`.",
     "_threshold": "Workflow MIN_KILL_RATE=80 is the actual gate. Leadhunter is intentionally excluded \u2014 see scope-mismatch note in the report.",
     "src/utils/prompt_safety.py": 100.0,
-    "src/utils/ssrf_guard.py": 91.11
+    "src/utils/ssrf_guard.py": 91.11,
+    "src/processors/leadhunter.py": 3.75,
+    "_per_file_notes": {
+      "src/processors/leadhunter.py": "Scope-limited - fast runner only exercises calculate_outreach_score + helpers (~120 of 812 LOC). 28/747 killed. See report section on leadhunter for the structural recommendation."
+    }
   }
 }
