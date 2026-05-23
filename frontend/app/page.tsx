@@ -327,30 +327,86 @@ function DashboardInner() {
 
   // Cross-tab job visibility — adopts a running orchestration job started
   // in another tab so the operator's second tab also shows the spinner +
-  // progress instead of looking idle. Polls every 5s when this tab has no
-  // job of its own; once adopted, the existing per-job poller (next
-  // useEffect) takes over and this loop pauses until the job clears.
+  // progress instead of looking idle.
+  //
+  // Cadence: starts at 5s, exponentially backs off to 10s then 30s once the
+  // tab has been idle for several consecutive ticks (no job adopted, no
+  // visibility change). Resets to 5s the moment the tab regains focus, on
+  // hard backend errors (so a transient blip doesn't push us straight to
+  // 30s), or once a job is adopted (next useEffect takes over the polling).
+  // Phase 15 observation: idle dashboards were issuing ~12 /orchestrator
+  // /active calls per minute (one fixed 5s setInterval × visible tab).
+  // Backoff brings that to ~2/min once the tab has been idle for ~30s.
+  //
+  // Visibility pause: when the tab is hidden, we skip the actual fetch but
+  // keep the setTimeout running so the loop is alive — the next tick is
+  // also short-circuited until visibility returns, at which point we fire
+  // immediately and reset the backoff.
   useEffect(() => {
     if (orchestratorJob) return;
     let cancelled = false;
+    let idleTicks = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const POLL_DELAYS_MS = [5_000, 10_000, 30_000] as const;
+    const computeDelay = (idle: number): number => {
+      if (idle < 2) return POLL_DELAYS_MS[0];
+      if (idle < 4) return POLL_DELAYS_MS[1];
+      return POLL_DELAYS_MS[2];
+    };
+
+    const schedule = () => {
+      if (cancelled) return;
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      timeoutId = setTimeout(tick, computeDelay(idleTicks));
+    };
+
     const tick = async () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        // Skip the fetch but keep the chain alive — visibility return
+        // re-fires immediately via the listener below.
+        schedule();
+        return;
+      }
       try {
         const res = await apiFetch(`${API_BASE_URL}/orchestrator/active`);
-        if (!res.ok) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          // Transient HTTP error — don't widen the backoff window on it;
+          // keep the current `idleTicks` and re-schedule.
+          schedule();
+          return;
+        }
         const data = await res.json();
         if (cancelled) return;
         if (data?.job && (data.job.status === 'running' || data.job.status === 'starting')) {
+          // Job adopted — the effect's deps change next render and this
+          // poller stops cleanly via the return below.
           setOrchestratorJob(data.job);
+          idleTicks = 0;
+          return;
         }
+        idleTicks += 1;
       } catch {
-        /* transient — next tick will retry */
+        /* network blip — re-schedule, don't widen backoff */
+      }
+      schedule();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        idleTicks = 0; // returning operator gets fast feedback
+        void tick();
       }
     };
+
     void tick();
-    const interval = setInterval(tick, 5000);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [orchestratorJob]);
 
