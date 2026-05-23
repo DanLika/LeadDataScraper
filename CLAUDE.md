@@ -1995,3 +1995,100 @@ land on the wrong branch. Practical mitigations:
   Phase 16-T1 selector-miss observation was a test-driver bug
   (event not dispatched on the root before querying overlay), not a
   missing selector. Recorded so the next drain doesn't re-open it.
+
+# Session 2026-05-23 — Phase 15 audit + 6 fix PRs (parallel to dogfood prep)
+
+Full-stack chrome-devtools-mcp verification of every shipped feature
+against local prod + Render prod, followed by a P0 retraction and six
+surgical fix PRs. Source of truth: `tests/perf/phase15-findings.md`
+(PR #226). Phase 16 retraction + post-session PR map: PR #227.
+
+## Outcome summary
+
+| Phase 15 finding | Status |
+| --- | --- |
+| #1 Sign Out click no-ops (P0) | **RETRACTED** Phase 16 — false positive from a stale build cache (`pkill -f "next start" -f "uvicorn backend"` only kills the second pattern on macOS, so the old `next-server` kept serving cached output) |
+| #2 Clear filters doesn't strip URL | **PR #235** — `router.replace('/')` in `clearFilters` bypasses the read-effect race |
+| #3 `TOTAL LEADS` shows page-load count | **PR #241** — rename → `LOADED` (honest cursor-pagination semantics) |
+| #4 Pre-login vitals 307→/login | **PR #234** — `/api/proxy/metrics` exact-match in middleware public-path allowlist |
+| #5 Vitals only flush on visibility-change | **No fix** — default `web-vitals` behaviour; opt into `{reportAllChanges:true}` later if eager flush worth the extra beacons |
+| #6 AI Insights hallucinated counts | **No fix yet** — needs Gemini test fixtures (`test_insights_quality.py::no-invented-numbers`) to validate a `total_count` prompt-pin without regressing other insights |
+| #7 `/orchestrator/active` polling storm | **PR #233** — `document.hidden` guard + `visibilitychange` re-fire on the 5 s cross-tab poller |
+| #8 ForcedReflow on reload trace | **Re-trace after #233** — coincided with the polling re-render window; visibility-pause likely halves the affected duration on its own |
+| #9 `/leads` refetched 3× in 30 s idle | **Covered by #233** — same poller cascade |
+| #10 Inter font silent fallback | **PR #239** — drop `'Inter'` from `--font-main` (literal never loaded) |
+| #11 Missing X-Origin headers | **PR #237** — COOP / CORP / X-Permitted-Cross-Domain-Policies stamps |
+| #12 Drag-drop selector | **RETRACTED** — `data-testid="drop-overlay"` IS present (`page.tsx:1024`), only renders while `isDragging===true`; a proper MCP test must dispatch `dragenter` on `[data-testid="dashboard-root"]` first |
+| #13 Prod unreachable + ALL CI failing | **Operator action** — every workflow on `main` since 2026-05-23 07:39 UTC failed (env-level: likely a single missing/expired secret); Render outage is downstream of the gated deploy chain not running |
+
+## Lessons-learned (locked into the canonical doc so the next Phase
+doesn't repeat)
+
+- **`pkill -f X -f Y` only honors the LAST `-f` on macOS.** Phase 15's
+  setup used the single-command form and never killed the previous
+  `next-server`, so the dashboard the run tested was the prior
+  session's cached build. Always run separate `pkill -f X; pkill -f Y`
+  calls AND verify with `pgrep -f "X|Y"` returning exit 1 before
+  claiming a fresh build is under test. If this had been done, the P0a
+  Sign Out finding would never have shipped.
+- **chrome-devtools-mcp `.click()` on a freshly-hydrated React tree can
+  silently no-op** when the React handler is bound to a different DOM
+  node than the accessibility-tree representation expects. Phase 15
+  saw 0 signout requests on click and concluded the handler was
+  broken; the real cause was that the test session reused a stale build
+  whose React tree had no handler at all. Add `console.log` at the
+  handler entry FIRST, rebuild, and re-test — confirms whether the
+  click event is reaching the handler or being lost upstream.
+- **Render `x-render-routing: no-server` ≠ free-tier sleep.** Our
+  services run `plan: starter`, which doesn't auto-suspend. A 404
+  `no-server` therefore means manual pause, deletion, billing lapse, or
+  failed deploy. Check the dashboard + status.render.com first; don't
+  assume the wake-attempt loop will help.
+- **`gh run view --log-failed` only surfaces step names when the
+  failure is at job-setup level.** Open the run page in the GitHub UI
+  to read actual step logs when every job in a workflow run failed
+  simultaneously (signal for env-level breakage: expired secret, broken
+  `pip install`, runner config).
+
+## Auto-branch hook caveat
+
+Multiple auto-agents ran during this session on parallel branches
+(`chore/phase16-t*`, `chore/backend-security-headers-*`,
+`chore/i18n-scaffold-13.1`, `docs/claude-md-dogfood-prep-*`,
+`docs/crossover-verification-*`, etc.). The branch-switching hook
+silently moved `HEAD` between branches mid-tool-call, occasionally
+injecting unrelated diffs (e.g. a `backend/main.py` security-headers
+middleware addition) into the working tree of a separate fix PR.
+
+**Defensive pattern when this happens:** stage + commit + push in a
+single Bash heredoc with all edits done inline (e.g. via `python3
+<<PY ... PY`) so no PostToolUse hook fires between Edit and commit.
+The `docs(phase15-findings)` post-session snapshot commit (PR #227,
+`f1f428e`) was added this way after the same hook reverted three
+earlier Edit attempts.
+
+## Outstanding for the operator
+
+1. Restore CI green on `main` — every run since 2026-05-23 07:39 UTC
+   has failed. Most-likely a single missing/expired secret (per CLAUDE.md
+   "Secret inventory + rotation", `SUPABASE_DATABASE_URL` is the
+   fail-closed common case in schema-drift + referential-integrity +
+   query-plans jobs).
+2. Confirm Render prod state once CI is green. `plan: starter`
+   doesn't auto-suspend; 404 `no-server` implies manual pause /
+   re-provision / billing. The tagged-release deploy chain
+   (`deploy-backend.yml` + `release.yml`) needs CI green to run.
+3. Re-run Phase 15 prod tier (`15.13`–`15.17`) once both restored.
+4. Audit the auto-branch hook configuration if the
+   parallel-agent-on-every-task behaviour wasn't intentional.
+
+## Cross-session deltas
+
+- Phase 16 sign-out verification used a 4/4 sweep across `/` clean,
+  `/` after AI chat, `/insights`, and `/campaigns`. All redirect to
+  `/login` cleanly. The relevant source is unchanged since 2026-05-15
+  (commit `c67fdf16`, `Sidebar.tsx:211-226`).
+- Visibility-pause pattern in PR #233 is a template for the OTHER
+  pollers (`audit-status`, 15 s leads refresh) when profiling
+  motivates extending it. Locked into the PR description; the surgical
+  scope was deliberate to keep #233 reviewable.
