@@ -61,7 +61,12 @@ class SMTPEmailSender(EmailSenderBase):
         # headers via `victim@x.com\r\nBcc: attacker@evil.com`. Recipient
         # passes through `msg["To"] = to` and SMTP RCPT verbatim, so the
         # boundary check has to be strict.
-        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', to):
+        #
+        # `\Z` (not `$`) anchors the end strictly. `$` in Python's `re`
+        # also matches BEFORE a trailing `\n`, so `victim@x.com\n` would
+        # otherwise smuggle CR/LF into the RCPT envelope. Locked in by
+        # `tests/test_crlf_injection.py`.
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+\Z', to):
             return {"status": "error", "error": "Invalid email format."}
 
         if to in self.bounced_emails:

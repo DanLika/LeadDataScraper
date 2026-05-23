@@ -1,8 +1,8 @@
 import asyncio
 import os
 
-from typing import List, Dict, Any
-from playwright.async_api import async_playwright
+from typing import List, Dict, Any, Optional
+from playwright.async_api import async_playwright, Browser, Playwright
 from google import genai
 from dotenv import load_dotenv
 from src.utils.json_helper import extract_json_from_response
@@ -53,8 +53,56 @@ class EnrichmentEngine:
             self.client = None
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
 
-        # Resource pooling: Limit max concurrent browsers to 5 regardless of orchestrator concurrency
+        # One Chromium process per engine instance, shared across all
+        # per-lead enrichments. `browser_semaphore` caps how many contexts
+        # can be open concurrently inside that browser — Chromium's
+        # incognito-context model isolates cookies/storage per context so
+        # reuse is safe across unrelated leads.
         self.browser_semaphore = asyncio.Semaphore(5)
+        self._pw: Optional[Playwright] = None
+        self._browser: Optional[Browser] = None
+        self._browser_lock = asyncio.Lock()
+        self._closed = False
+
+    async def _get_browser(self) -> Browser:
+        """Lazy-init the shared Chromium process. Double-checked locking
+        keeps the launch in the slow path; subsequent callers see the
+        already-launched browser and skip the lock entirely.
+
+        After `aclose()` further calls raise — the engine is single-use
+        post-teardown, matching the orchestrator's per-batch lifecycle.
+        """
+        if self._closed:
+            raise RuntimeError("EnrichmentEngine is closed; create a new instance.")
+        if self._browser is not None:
+            return self._browser
+        async with self._browser_lock:
+            if self._browser is None:
+                self._pw = await async_playwright().start()
+                self._browser = await self._pw.chromium.launch(headless=True)
+        return self._browser
+
+    async def aclose(self) -> None:
+        """Tear down the shared browser + playwright runtime.
+
+        Idempotent — orchestrator's `finally:` can call it on the happy
+        path and on the exception path without double-close errors.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        if self._browser is not None:
+            try:
+                await self._browser.close()
+            except Exception as exc:  # noqa: BLE001 — teardown must not raise
+                logger.warning("Browser close raised: %s", exc)
+            self._browser = None
+        if self._pw is not None:
+            try:
+                await self._pw.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Playwright stop raised: %s", exc)
+            self._pw = None
 
     async def extract_page_content(self, url: str) -> str:
         """
@@ -69,41 +117,44 @@ class EnrichmentEngine:
             logger.warning("Blocked extract_page_content URL %s: %s", url, e)
             return ""
 
-        # Set a strict 60s timeout for the whole enrichment operation
-        async with async_playwright() as p:
-            browser = None
-            try:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                    viewport={'width': 1280, 'height': 800}
-                )
-                await _install_ssrf_route_guard(context)
-                page = await context.new_page()
+        try:
+            browser = await self._get_browser()
+        except Exception as e:
+            logger.error("Browser launch failed: %s", e, exc_info=True)
+            return ""
 
-                try:
-                    # Navigation timeout and wait_until refinement
-                    await asyncio.wait_for(
-                        page.goto(url, wait_until="domcontentloaded", timeout=45000),
-                        timeout=50.0
-                    )
-                    # Get the body text, stripping scripts and styles
-                    text = await page.evaluate("() => document.body.innerText")
-                    return text[:10000] # Cap text for AI context limits
-                except asyncio.TimeoutError:
-                    logger.warning("Enrichment Timeout: Operation took > 50s for %s", url)
-                    return ""
-                except Exception as e:
-                    logger.error("Navigation/Content error for %s: %s", url, e)
-                    return ""
-                finally:
-                    await context.close()
-            except Exception as e:
-                logger.error("Browser enrichment context error: %s", e)
+        context = None
+        try:
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                viewport={'width': 1280, 'height': 800}
+            )
+            await _install_ssrf_route_guard(context)
+            page = await context.new_page()
+
+            try:
+                # Navigation timeout and wait_until refinement
+                await asyncio.wait_for(
+                    page.goto(url, wait_until="domcontentloaded", timeout=45000),
+                    timeout=50.0
+                )
+                text = await page.evaluate("() => document.body.innerText")
+                return text[:10000]  # Cap text for AI context limits
+            except asyncio.TimeoutError:
+                logger.warning("Enrichment Timeout: Operation took > 50s for %s", url)
                 return ""
-            finally:
-                if browser:
-                    await browser.close()
+            except Exception as e:
+                logger.error("Navigation/Content error for %s: %s", url, e)
+                return ""
+        except Exception as e:
+            logger.error("Browser enrichment context error: %s", e)
+            return ""
+        finally:
+            if context is not None:
+                try:
+                    await context.close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Context close raised: %s", exc)
 
     async def deep_ai_parse(self, content_blocks: List[str], lead_name: str) -> Dict[str, Any]:
         """
@@ -188,10 +239,15 @@ class EnrichmentEngine:
         content_blocks = []
 
         async with self.browser_semaphore:
-            async with async_playwright() as p:
+            try:
+                browser = await self._get_browser()
+            except Exception as e:
+                logger.error("Browser launch failed: %s", e, exc_info=True)
                 browser = None
+
+            context = None
+            if browser is not None:
                 try:
-                    browser = await p.chromium.launch(headless=True)
                     context = await browser.new_context(
                         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
                         viewport={'width': 1280, 'height': 800}
@@ -229,8 +285,11 @@ class EnrichmentEngine:
                 except Exception as e:
                     logger.error("Browser failure: %s", e, exc_info=True)
                 finally:
-                    if browser:
-                        await browser.close()
+                    if context is not None:
+                        try:
+                            await context.close()
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("Context close raised: %s", exc)
 
         if content_blocks:
             enrichment_data = await self.deep_ai_parse(content_blocks, lead.get("name", "Unknown"))
@@ -249,8 +308,11 @@ async def test_enrichment():
         "name": "Example Dental",
         "website": "https://www.google.com" # Just a placeholder
     }
-    result = await engine.enrich_lead(test_lead)
-    logger.info("Test result: %s", result)
+    try:
+        result = await engine.enrich_lead(test_lead)
+        logger.info("Test result: %s", result)
+    finally:
+        await engine.aclose()
 
 if __name__ == "__main__":
     asyncio.run(test_enrichment())

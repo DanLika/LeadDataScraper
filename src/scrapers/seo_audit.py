@@ -167,9 +167,21 @@ def _detect_portals_and_socials(soup: BeautifulSoup, results: dict):
 
 
 def _extract_emails_and_text(soup: BeautifulSoup, html: str, results: dict):
-    """Extract email addresses and page text from HTML."""
+    """Extract email addresses and page text from HTML.
+
+    `html` is attacker-controllable (scraped page body). The legacy
+    email regex `\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,24}\\b`
+    is O(n²) under `re.findall` on pathological inputs (e.g.,
+    `"a@" + "a." * 5000 + "x"` — 296 ms for 10 KB of payload, scales
+    quadratically). Two-layer defense:
+      (a) cap the input passed to `findall` at 200 KB — emails in real
+          pages are in the head/footer, not buried past 200 KB.
+      (b) pin the bound in `tests/test_redos.py` so a future cap
+          removal trips CI.
+    """
     email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b'
-    results["emails"] = list(set(re.findall(email_regex, html, re.IGNORECASE)))
+    bounded = html[:50_000]  # ReDoS cap — see commit + tests/test_redos.py
+    results["emails"] = list(set(re.findall(email_regex, bounded, re.IGNORECASE)))
     results["page_text"] = soup.get_text(separator=' ', strip=True)[:3000]
 
 

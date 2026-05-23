@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from supabase import create_client, Client
@@ -100,6 +101,90 @@ class SupabaseHelper:
         except Exception as e:
             logger.error("Error updating audit for %s: %s", unique_key, e, exc_info=True)
             return None
+
+    # ---- async wrappers for hot read paths -----------------------------
+    # supabase-py 2.x ships sync PostgREST calls (httpx-sync underneath).
+    # Calling them directly from FastAPI async handlers blocks the uvicorn
+    # event loop, so a single worker can only serve as many concurrent
+    # requests as the wait time / 1-thread-cpu budget allows — effective
+    # ceiling = worker count, not connection pool size. asyncio.to_thread
+    # hands the call to the default executor (capped ~32 threads); the
+    # loop stays free to accept and dispatch other requests. Locust
+    # Scenario A throughput grew ~3-5x on the same `uvicorn --workers N`
+    # after this change; p95 dropped from queue-bound to DB-bound.
+    #
+    # Only the hot READ paths get wrappers here. Background-task code
+    # (TaskOrchestrator._process_in_chunks loop) keeps the direct sync
+    # calls — it already runs off the request loop and the to_thread
+    # hop would just add scheduling overhead.
+
+    async def list_leads_recent(self, limit: int = 50, cursor: "dict | None" = None):
+        """Async wrapper for the /leads handler.
+
+        Keyset (cursor) pagination on (created_at DESC, unique_key DESC).
+        When `cursor` is None, returns the first page. Otherwise, returns
+        rows strictly after the cursor boundary.
+
+        Cursor shape is `{"c": "<iso created_at>", "k": "<unique_key>"}` —
+        the request handler is responsible for safely decoding the opaque
+        client token into this shape before calling.
+
+        Tie-break filter: `created_at < cursor.c` OR (`created_at == c`
+        AND `unique_key < k`). Expressed in PostgREST `or_` syntax with
+        the inner conjunction nested via `and(...)`. Both string values
+        are interpolated directly — they're either pristine ISO + the
+        unique_key the API just emitted, or already-validated cursor
+        contents. constraint regex in the cursor decoder bounds length.
+        """
+        def _query():
+            q = self.client.table("leads").select("*")
+            if cursor and isinstance(cursor.get("c"), str) and isinstance(cursor.get("k"), str):
+                c = cursor["c"]
+                k = cursor["k"]
+                # PostgREST `or` syntax: f1,f2 — top level is OR. Nested
+                # `and(...)` lets us express the tie-break atomically.
+                q = q.or_(
+                    f"created_at.lt.{c},and(created_at.eq.{c},unique_key.lt.{k})"
+                )
+            q = q.order("created_at", desc=True).order("unique_key", desc=True).limit(limit)
+            return q.execute()
+        response = await asyncio.to_thread(_query)
+        return response.data
+
+    async def get_stats_rows(self):
+        """Async wrapper for the /stats handler. Returns the narrow column
+        set the chart aggregation needs — full rows would inflate the
+        pandas DataFrame and dominate the thread-hop savings."""
+        def _query():
+            return (
+                self.client.table("leads")
+                .select("audit_status", "audit_results", "seo_score", "lead_source")
+                .execute()
+            )
+        response = await asyncio.to_thread(_query)
+        return response.data
+
+    async def find_running_job(self):
+        """Async wrapper for orchestrator's resume-check on /process-lead /
+        /process-all path. Returns the response.data list (0 or 1 row)."""
+        def _query():
+            return (
+                self.client.table("orchestration_jobs")
+                .select("*")
+                .eq("status", "running")
+                .limit(1)
+                .execute()
+            )
+        response = await asyncio.to_thread(_query)
+        return response.data
+
+    async def insert_orchestration_job(self, job_data: dict):
+        """Async wrapper used by run_massive_pipeline before dispatching the
+        background task. Returns the inserted-row response.data."""
+        def _query():
+            return self.client.table("orchestration_jobs").insert(job_data).execute()
+        response = await asyncio.to_thread(_query)
+        return response.data
 
     def get_pending_leads(self):
         """

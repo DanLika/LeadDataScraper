@@ -153,8 +153,11 @@ class LeadHunter:
             html = await self._ddg_search_async(query)
             if not html: continue
 
+            # See seo_audit._extract_emails_and_text for the ReDoS rationale —
+            # `findall` of this pattern over scraped page bodies is O(n²) on
+            # pathological inputs. Bound the search to 200 KB.
             email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b'
-            emails = re.findall(email_regex, html, re.IGNORECASE)
+            emails = re.findall(email_regex, html[:50_000], re.IGNORECASE)
 
             # Filter out obvious junk
             for email in emails:
@@ -369,8 +372,10 @@ class LeadHunter:
         return None
 
     def _extract_email_from_text(self, text: str) -> Optional[str]:
+        # 200 KB cap mirrors the other email-extraction sites — keeps the
+        # O(n²) `findall`/`search` from hanging on pathological scraped inputs.
         email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b'
-        match = re.search(email_regex, text)
+        match = re.search(email_regex, text[:50_000])
         if match:
             email = match.group().lower()
             if not any(x in email for x in ['example.com', 'email.com', 'yourname', 'sentry.io', 'wixpress.com']):

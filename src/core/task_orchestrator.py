@@ -9,6 +9,7 @@ from src.utils.supabase_helper import SupabaseHelper
 from src.core.parallel_auditor import ParallelAuditor
 from src.scrapers.enrichment_engine import EnrichmentEngine
 from src.utils.logging_config import get_logger
+from src.utils.stats_cache import stats_cache
 
 logger = get_logger(__name__)
 
@@ -123,11 +124,15 @@ class TaskOrchestrator:
             tasks = ["audit", "enrich", "hunt"]
 
         async with self._job_lock:
-            # 1. Check if there's already a running job
+            # 1. Check if there's already a running job. /process-lead and
+            #    /process-all both flow through here on the request thread,
+            #    so the PostgREST round-trip must NOT block the uvicorn
+            #    event loop — see SupabaseHelper.find_running_job /
+            #    insert_orchestration_job for the asyncio.to_thread hop.
             if not lead_ids:
-                existing_job = self.db.client.table("orchestration_jobs").select("*").eq("status", "running").limit(1).execute()
-                if existing_job.data:
-                    job_id = existing_job.data[0]["id"]
+                rows = await self.db.find_running_job()
+                if rows:
+                    job_id = rows[0]["id"]
                     logger.info("Resuming existing job: %s", job_id)
                     asyncio.create_task(self._process_in_chunks(job_id, filters=filters, tasks=tasks))
                     return job_id
@@ -142,7 +147,7 @@ class TaskOrchestrator:
                 "current_phase": "initialization",
                 "filters": filters
             }
-            self.db.client.table("orchestration_jobs").insert(job_data).execute()
+            await self.db.insert_orchestration_job(job_data)
 
         # 3. Start background task (outside lock)
         asyncio.create_task(self._process_in_chunks(job_id, filters=filters, lead_ids=lead_ids, tasks=tasks))
@@ -302,6 +307,18 @@ class TaskOrchestrator:
             # after the job has exited. pop with default to be defensive against
             # double-finally invocations or unexpected job_id collisions.
             self._active_auditors.pop(job_id, None)
+            # Tear down the shared Chromium process the enricher held open
+            # across the batch. Without this the playwright Node subprocess
+            # outlives the job and accumulates with every pipeline run.
+            try:
+                await enricher.aclose()
+            except Exception as exc:  # noqa: BLE001 — must not mask job result
+                logger.warning("EnrichmentEngine.aclose raised: %s", exc)
+            # Lead rows are written chunk-by-chunk, so even a failed/stopped
+            # job has mutated audit_status / seo_score / lead_source on at
+            # least a partial chunk. Drop the cached /stats payload so the
+            # next request sees fresh aggregations.
+            stats_cache.invalidate()
 
     async def _process_single_lead(self, lead: Dict[str, Any], auditor: ParallelAuditor, enricher: EnrichmentEngine, tasks: List[str] = None) -> Dict[str, Any]:
         """

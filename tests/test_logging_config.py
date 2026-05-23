@@ -5,45 +5,37 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
-def test_setup_logging(tmp_path):
+def test_setup_logging(tmp_path, monkeypatch):
     """Test that setup_logging configures the root logger correctly."""
-    # We need to import AFTER patching to ensure our mocks take effect,
-    # but the module is already loaded. Instead, test the actual effects.
     from src.utils.logging_config import setup_logging
 
     root = logging.getLogger()
     original_handlers = root.handlers[:]
     original_level = root.level
 
+    log_file = tmp_path / "app.log"
+    monkeypatch.setenv("LOG_FILE", str(log_file))
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+
     try:
         root.handlers.clear()
         root.setLevel(logging.WARNING)
 
-        # Redirect log output to tmp_path
-        log_dir = os.path.join(str(tmp_path), "logs")
+        setup_logging()
 
-        # Patch the __file__-relative log directory calculation
-        with patch("src.utils.logging_config.os.path.dirname", return_value=str(tmp_path)):
-            setup_logging()
+        assert root.level == logging.INFO, \
+            f"Root logger level should be INFO (20), got {root.level}"
 
-        # 1. Root logger should be DEBUG
-        assert root.level == logging.DEBUG, \
-            f"Root logger level should be DEBUG (10), got {root.level}"
-
-        # 2. Should have 2 handlers (StreamHandler + RotatingFileHandler)
         assert len(root.handlers) == 2, \
-            f"Expected 2 handlers, got {len(root.handlers)}: {root.handlers}"
+            f"Expected 2 handlers (stream + file), got {len(root.handlers)}: {root.handlers}"
 
-        # 3. Check handler types
         handler_types = {type(h).__name__ for h in root.handlers}
         assert "StreamHandler" in handler_types
         assert "RotatingFileHandler" in handler_types
 
-        # 4. Third-party loggers suppressed
         for name in ("httpx", "httpcore", "urllib3", "playwright", "aiohttp"):
             assert logging.getLogger(name).level == logging.WARNING
     finally:
-        # Clean up: close any file handlers we opened and restore state
         for h in root.handlers[:]:
             if hasattr(h, 'close'):
                 h.close()
