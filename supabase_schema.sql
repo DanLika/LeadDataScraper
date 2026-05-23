@@ -113,21 +113,25 @@ ALTER TABLE campaigns           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE campaign_messages   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orchestration_jobs  ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON leads,              campaigns, campaign_messages, orchestration_jobs FROM anon;
-REVOKE ALL ON leads,              campaigns, campaign_messages, orchestration_jobs FROM authenticated;
+REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs, account_deletions FROM anon;
+REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs, account_deletions FROM authenticated;
+REVOKE ALL ON leads, campaigns, campaign_messages, orchestration_jobs, account_deletions FROM PUBLIC;
 
--- Defense-in-depth: even if a future ad-hoc GRANT in Supabase Studio re-adds
--- access to anon/authenticated, these explicit deny-all policies still block
--- every read/write. service_role bypasses RLS so the backend is unaffected.
+-- Defense-in-depth: deny-all policies declared AS RESTRICTIVE so they AND
+-- with any future PERMISSIVE policy. A future ad-hoc PERMISSIVE qual=true
+-- policy added in Supabase Studio cannot OR over a RESTRICTIVE qual=false
+-- (whereas a default PERMISSIVE deny-all could). service_role bypasses RLS
+-- so the backend is unaffected. account_deletions uses the same mode (see
+-- block below) so all 5 core tables share identical defense-in-depth.
 DROP POLICY IF EXISTS leads_deny_all              ON leads;
 DROP POLICY IF EXISTS campaigns_deny_all          ON campaigns;
 DROP POLICY IF EXISTS campaign_messages_deny_all  ON campaign_messages;
 DROP POLICY IF EXISTS orchestration_jobs_deny_all ON orchestration_jobs;
 
-CREATE POLICY leads_deny_all              ON leads              FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
-CREATE POLICY campaigns_deny_all          ON campaigns          FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
-CREATE POLICY campaign_messages_deny_all  ON campaign_messages  FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
-CREATE POLICY orchestration_jobs_deny_all ON orchestration_jobs FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY leads_deny_all              ON leads              AS RESTRICTIVE FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY campaigns_deny_all          ON campaigns          AS RESTRICTIVE FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY campaign_messages_deny_all  ON campaign_messages  AS RESTRICTIVE FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY orchestration_jobs_deny_all ON orchestration_jobs AS RESTRICTIVE FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
 
 -- =============================================================================
 -- Narrow schema-migration RPC (replaces generic exec_sql)
