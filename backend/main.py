@@ -600,6 +600,15 @@ async def _request_context_middleware(request: Request, call_next):
     route_path = request.url.path
 
     bind_request_context(rid, operator_email, route_path)
+    # Also stash on request.state so middlewares that run in a child task
+    # (Starlette's BaseHTTPMiddleware spawns the inner chain via anyio
+    # task_group; ContextVars set in the outer scope only propagate to
+    # the child at spawn time — log lines emitted in the inner finally
+    # were observed losing request_id / route). request.state is bound
+    # to the request object, not the task, and survives the hop.
+    request.state.request_id = rid
+    request.state.route = route_path
+    request.state.operator_email = operator_email
     if _SENTRY_DSN:
         # `sentry_sdk` is imported at module load inside the
         # `if _SENTRY_DSN:` init block, so the name is bound here.
@@ -649,9 +658,14 @@ async def _block_logger_middleware(request: Request, call_next):
             # method + path as top-level envelope fields — greppable
             # and queryable in Logtail/Loki. Path only — query string
             # may contain user input we don't want in logs (filter
-            # values, cursor tokens, etc.). request_id + route ride
-            # along via the contextvars set by
-            # `_request_context_middleware`.
+            # values, cursor tokens, etc.). request_id + route are
+            # read off `request.state` (set by
+            # `_request_context_middleware`) rather than via ContextVar
+            # — BaseHTTPMiddleware spawns this middleware in a child
+            # task, so ContextVars only carry values that were bound
+            # at spawn time and are then read-only from this scope's
+            # perspective. `request.state` is request-scoped and not
+            # subject to that race.
             logger.warning(
                 "slow handler",
                 extra={
@@ -659,6 +673,9 @@ async def _block_logger_middleware(request: Request, call_next):
                     "path": request.url.path,
                     "duration_ms": round(elapsed_ms, 2),
                     "threshold_ms": SLOW_HANDLER_THRESHOLD_MS,
+                    "request_id": getattr(request.state, "request_id", None),
+                    "route": getattr(request.state, "route", None),
+                    "user_id": getattr(request.state, "operator_email", None),
                 },
             )
 
