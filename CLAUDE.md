@@ -1842,3 +1842,140 @@ origin/main and every session branch — root logger expected DEBUG,
 observed INFO. Test-ordering issue (an earlier test in the suite
 resets the root logger). Not caused by any session refactor; defer
 to a focused fix.
+
+# Session 2026-05-23 — drain PRs (#235–#251)
+
+A bug-drain pass against findings from #226 (Phase 15), #228/#230
+(Phase 16-T3), #229 (Phase 16-T1), and #232 (Phase 16-T2). Each fix
+landed as its own atomic PR. Patterns worth pinning forward:
+
+## Backend security headers middleware (PR #238)
+
+`backend/main.py` ships a third middleware `_security_headers_middleware`
+that stamps `X-Frame-Options: DENY` + `X-Content-Type-Options: nosniff`
++ `Referrer-Policy: strict-origin-when-cross-origin` on every backend
+response via `response.headers.setdefault(...)`. Defense in depth for
+the case where FastAPI is reached directly, bypassing the Next.js
+proxy that already stamps these on HTML routes. CSP intentionally
+omitted (backend serves no HTML); HSTS intentionally omitted (Render
+edge already adds it on the frontend hostname; stamping it on a
+JSON-only API host pollutes the HSTS preload list). `setdefault()` so
+any future per-handler override still wins.
+
+## WebVitals: `reportAllChanges: true` on LCP/CLS (PR #242)
+
+`frontend/app/components/WebVitalsReporter.tsx` passes
+`{reportAllChanges: true}` to `onCLS` and `onLCP`. Without it,
+web-vitals only finalises those metrics when the page enters the
+hidden state — empirically observed as 10s+ on a still-active
+dashboard with zero metric beacons. INP/FCP/TTFB resolve eagerly by
+the spec and are left untouched. The lib still installs its own
+`pagehide` + `visibilitychange` listeners internally, so the final
+snapshot also ships at session end.
+
+## Dashboard TOTAL LEADS binds to `/stats`, not paginated array (PR #244)
+
+`StatsCards` accepts an optional `totalLeads` prop populated from
+`/stats.total_leads` and rendered on the TOTAL card; falls back to
+`leads.length` until the first /stats response lands. Cursor
+pagination otherwise showed "50" while the DB held 521.
+`page.tsx` adds `fetchStats` alongside `fetchLeads` and polls both on
+the existing 15s tick — /stats is 60s-TTL-cached server-side with a
+stampede lock, so the extra round-trip is at most one PostgREST call
+per worker per minute. **Outstanding asymmetry**: PENDING / HIGH
+RISK / HEALTHY still derive from the loaded slice; fixing them
+requires `/stats` to ship `pending_count` / `high_risk_count` /
+`healthy_count` and `StatsCards` to consume them.
+
+## Insights prompt: DB-wide total as GROUND TRUTH (PR #245)
+
+`_get_strategic_insights` in `src/core/agentic_router.py` now fetches
+the DB-wide count via a separate `select("unique_key", count="exact")
+.limit(1)` PostgREST call (one scalar, no SELECT-list expansion —
+keeps CLAUDE.md pinned finding #3 intact) and embeds it in the prompt
+as a `GROUND TRUTH` block: "the database holds N leads in total. The
+sample below contains M. Any number you cite as a count MUST be
+derived from the sample or labelled 'in the sample of M'." Closes
+the hallucinated-total observation (180 vs actual 521).
+
+**CI side-effect**: this changes the prompt body, so
+`tests/test_prompt_snapshots.py` fails until the SHA256 fixture is
+regenerated via `UPDATE_PROMPT_SNAPSHOTS=1 pytest
+tests/test_prompt_snapshots.py`. That's the intentional-review knob.
+
+## `request.state` hop for slow-handler log context (PR #246)
+
+Starlette's `BaseHTTPMiddleware` spawns the inner middleware function
+in a child task via anyio. ContextVars set in the outer
+`_request_context_middleware` only propagate to the child as a
+spawn-time snapshot, and the empirical observation was that the
+slow-handler envelope in `_block_logger_middleware` dropped
+`request_id` / `route` at runtime.
+
+Two-layer fix:
+1. `_request_context_middleware` also stashes the per-request values
+   on `request.state` (`request_id`, `route`, `operator_email`).
+   `request.state` is request-scoped, not task-scoped — survives the
+   BaseHTTPMiddleware task hop unconditionally.
+2. `_block_logger_middleware` reads off `request.state` and passes
+   the values into `extra={...}`. `JsonFormatter` now merges extras
+   BEFORE filling in ContextVar defaults via `setdefault`, so
+   explicit extras win when the ContextVar leg is unreliable.
+
+Behavioural preserved: `logger.warning()` with no extras still gets
+`request_id` from the ContextVar via `setdefault`; `extra={"job_id":
+…}` still merges; CRLF scrub runs before the formatter sees the
+record.
+
+## REVOKE on `update_updated_at_column` (PR #250)
+
+Supabase ships `public.update_updated_at_column()` with EXECUTE
+granted to PUBLIC + anon + authenticated by default. `check_function
+_safety.py::EXEC_GRANT_ALLOWLIST` is empty — any untrusted-role
+EXECUTE on a public function should fail CI, but the gate evidently
+isn't running on a cadence that caught this one (separate follow-up).
+Live REVOKE applied 2026-05-23, mirrored in `supabase_schema.sql`.
+
+Postgres triggers do **not** require the calling user to hold EXECUTE
+on the trigger function — the function fires with the trigger owner's
+privileges. Empirically verified: a no-op UPDATE on
+`orchestration_jobs` advances `updated_at` post-REVOKE (09:21 →
+14:25). `service_role` + `postgres` retain EXECUTE; that's the only
+access path left.
+
+## Orchestrator poller: visibility pause + exp backoff (PRs #233, #251)
+
+`/orchestrator/active` cross-tab poller in `frontend/app/page.tsx`
+(no-job branch) replaces fixed `setInterval(5000)` with a
+`setTimeout` chain at 5s → 10s → 30s. `idleTicks` widens after 2
+then 4 consecutive idle responses. Resets to 5s on:
+- tab regaining focus (`visibilitychange → visible` reset path)
+- job adopted
+- effect remount (`orchestratorJob` changes)
+
+When `document.visibilityState !== 'visible'` the tick short-
+circuits the fetch but keeps the chain alive — `visibilitychange`
+re-fires `tick()` immediately on return. HTTP non-2xx and network
+blips re-schedule **without** advancing `idleTicks` so a flaky
+network doesn't push the operator straight to the 30s window. Idle
+60s went from ~12 calls (#226 observation) to ~2.
+
+## Multi-session worktree race + branch-collision recovery
+
+When several claude sessions share one worktree, `git checkout -b`
+into a name another session expects to use produces silent races:
+HEAD can flip between two checkouts mid-edit, and `Edit` writes can
+land on the wrong branch. Practical mitigations:
+- Suffix every drain branch with a per-session tag, e.g.
+  `chore/<scope>-<task>-opus47-v2`. Two sessions can still pick the
+  same name by coincidence; pick something the parallel set won't.
+- Run drain work in a dedicated worktree (`git worktree add /tmp
+  /lds-drain-<tag> origin/main`). HEAD is per-worktree; parallel
+  sessions in `~/git/LeadDataScraper` can't flip the drain's HEAD.
+  `git worktree remove …` cleans up after push.
+- After every `git checkout -b` AND before every `git commit`,
+  re-check `git branch --show-current` against the branch you
+  intended. If it differs, cherry-pick or `git branch -f` to recover
+  rather than committing on whichever branch HEAD landed.
+- If a commit lands on the wrong branch, `git reflog` always
+  recovers — the SHA is durable; only the branch label moved.
