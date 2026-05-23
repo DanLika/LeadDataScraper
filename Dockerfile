@@ -28,8 +28,14 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Playwright browsers (chromium is enough for our scraper)
-RUN playwright install chromium
+# Install Playwright browsers (chromium is enough for our scraper).
+# Cache lands in /ms-playwright by default; chown so the later USER pwuser
+# can launch chromium (root-installed files would otherwise be readable but
+# parts of the cache need write access for first-launch). The Microsoft
+# Playwright image already has /ms-playwright; we chown the path that
+# `playwright install` writes to.
+RUN playwright install chromium \
+    && chown -R pwuser:pwuser /ms-playwright /home/pwuser 2>/dev/null || true
 
 # Copy project files
 # We copy everything, including src/, backend/, and the root files
@@ -50,8 +56,10 @@ ENV PYTHONPATH=/app
 # Container-level liveness — Render's external probe still owns prod
 # health, but this lets `docker run` / local orchestrators detect a
 # wedged uvicorn worker. `/` is the unauthenticated liveness probe.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).status==200 else 1)" || exit 1
+# retries=2 + timeout=3s = wedged worker marked unhealthy in ~36s instead
+# of ~90s under retries=3, while still tolerating one transient miss.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=2 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2).status==200 else 1)" || exit 1
 
 # Start the FastAPI application via uvicorn.
 # --no-server-header suppresses "Server: uvicorn" — avoids stack fingerprint leakage.
