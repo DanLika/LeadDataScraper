@@ -1,5 +1,34 @@
 # Git State Audit — 13 commits ahead of `origin/main`
 
+> ## Status — 2026-05-23 update
+>
+> **All 13 ahead-commits are now in `main`.** Local + `origin/main` are even (0 ahead, 0 behind). Branch `fix/csp-nonce-rsc-hydration` is gone (no longer in local or remote branch list).
+>
+> Per-commit verification (`git log -1 --format=%h <sha>` against current `main`):
+>
+> | SHA | Subject | In main? |
+> |---|---|---|
+> | `5a9f0c5` | test(coverage): real-behavior unit tests + fix clean_phone ++ bug | ✅ |
+> | `9024e06` | test(security): lock SMTP header-injection guards in email_sender | ✅ |
+> | `ac174af` | test(security): direct unit coverage for the SSRF guard core logic | ✅ |
+> | `a004970` | test(security): regression coverage for session-audit security helpers | ✅ |
+> | `b6abfe8` | refactor(frontend): extract ensureProtocol to a tested utils/url.mjs | ✅ |
+> | `3ebeeb7` | refactor(frontend): move sanitizeNext into tested utils/url.mjs | ✅ |
+> | `926721a` | docs(claude.md): update sanitizeNext location + record url.mjs module | ✅ |
+> | `863142f` | docs(test): exhaustive AI crawler + feature scenario audit | ✅ |
+> | `f048746` | docs(pentest): AI crawler ingestion penetration test — 0 vulns | ✅ |
+> | `dabede3` | docs(pentest): Round 3 — session/JWT/race-condition vectors, 0 vulns | ✅ |
+> | `c2c2f8f` | docs(pentest): Round 4 — direct Supabase attack, backend bypassed, 0 vulns | ✅ |
+> | `ecc4859` | fix(orchestrator): non-UUID job_id → clean not_found, not 500 | ✅ |
+> | `814bd9b` | test(security): endpoint auth/validation/rate-limit matrix | ⚠ tip SHA differs (likely rebased on push; content present) |
+>
+> **Plus a bonus commit** that resolved Bucket S1's Sev-1 — direct to `main`:
+> - `d3a90ff` `fix(csp): per-request nonce + strict-dynamic for RSC hydration`
+>
+> This doc is preserved as the planning record. The execution diverged slightly from Option A (extracted feature branch) — the 13 commits + CSP fix landed via direct pushes to `main` rather than a single feature-branch PR. End-state is equivalent.
+>
+> ---
+
 **Generated:** 2026-05-22
 **Current branch:** `fix/csp-nonce-rsc-hydration`
 **Divergence:** 13 commits ahead, 0 commits behind `origin/main`

@@ -1,5 +1,33 @@
 # PR Merge Plan — Phase 12.1
 
+> ## Status — 2026-05-23 update
+>
+> **Original #185–#200 stack: all 16 PRs still open.** The planned Stage 1/2/3 sequence has NOT been executed. Instead, the overnight session ran the *parallel* track from `dirty-file-triage.md` — drain PRs #201–#210 landed 8 new buckets of dirty-tree work directly to `main`, bypassing the existing PR queue.
+>
+> **Current open PR count: 29** (was 30). The –1 is from one merge of original `#171–#200` cohort — verify which via:
+> ```bash
+> gh pr list --state merged --search "merged:>=2026-05-22 head:main" --limit 50
+> ```
+> *(Drain PRs #201–#210 are separate, see `dirty-file-triage.md` 2026-05-23 status block.)*
+>
+> **Implication for this plan:**
+>
+> 1. The Stage 1 / Stage 2 / Stage 3 ordering still applies to the unmerged #185–#200 cohort.
+> 2. The `CLAUDE.md` conflict warning for PR #200 is now **much worse** — drain PR #205 (`chore(B+L)`) already landed massive CLAUDE.md edits to `main`. #200's base is now further behind than it was at planning time. Expect a significant rebase.
+> 3. Drafts #171–#184 remain unreviewed — same plan as the original.
+> 4. The "13 ahead-commits" conflict-source rows in this doc are obsolete — those commits are in `main` now (see `git-state-2026-05.md` 2026-05-23 status). The remaining conflict surface is just drain-PR overlap (e.g. anything touching `frontend/app/components/*` collides with #202).
+>
+> **Recommended re-prioritisation:**
+>
+> | Priority | Action |
+> |---|---|
+> | 1 | Rebase + land #200 first (its `CLAUDE.md` content will increasingly diverge from main otherwise) |
+> | 2 | Run original Stage 1 (#185 #187 #188 #190 #193 #197 #198 → docs first per original sub-order) |
+> | 3 | Then #186 #194 #199 (refactors), then Stage 2 stacks |
+> | 4 | Triage drafts last |
+>
+> ---
+
 **Generated:** 2026-05-22
 **Scope:** All open PRs (#171–#200) on `main` base
 **Source:** `gh pr list --state open --json number,title,baseRefName,headRefName,isDraft,mergeable`
