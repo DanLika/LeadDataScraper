@@ -90,7 +90,7 @@ Status legend: ✅ already implemented · ⚠️ partial · ❌ missing · N/A t
 
 | Pattern | LDS source | bookbed-website | bookbed CF | Notes |
 |---|---|---|---|---|
-| SSRFGuardResolver: reject private/loopback/link-local/multicast IPs + cloud metadata hostnames | `src/utils/ssrf_guard.py` | ✅ **verified** — `app/[locale]/tools/ical-checker/actions.ts`: `https:`-only, credential strip, `dns.lookup` all-records private-IP reject (incl. CGNAT 100.64/10 + IPv6 ULA/link-local/mapped), double-resolve rebind guard, `redirect: "manual"`. Self-noted residual: undici may re-resolve post-guard (TOCTOU) — acceptable for a validator. | N/A — CF outbound is only OTAs + Resend, both static-allowlisted hosts. | If bookbed CF ever adds operator-provided URLs (webhooks, custom iCal feeds), port the LDS SSRF helper — or copy this `actions.ts` resolver, which is already close to LDS parity. |
+| SSRFGuardResolver: reject private/loopback/link-local/multicast IPs + cloud metadata hostnames | `src/utils/ssrf_guard.py` | ✅ **verified** — `app/[locale]/tools/ical-checker/actions.ts`: `https:`-only, credential strip, `dns.lookup` all-records private-IP reject (incl. CGNAT 100.64/10 + IPv6 ULA/link-local/mapped), double-resolve rebind guard, `redirect: "manual"`. Self-noted residual: undici may re-resolve post-guard (TOCTOU) — acceptable for a validator. | ✅ **verified 2026-05-23** — outbound surfaces: Twilio SMS (static `api.twilio.com`), Resend (static `api.resend.com`), iCal sync (`icalSync.ts:344` uses `validateIcalUrl()` SSRF guard + `maxRedirects: 5` cap on owner-supplied `ical_url`). iCal was the open question — already covered. | If a NEW outbound surface lands (operator webhooks, custom .well-known fetchers), port the LDS SSRF helper — or extend the existing `validateIcalUrl` resolver, which is already close to LDS parity. |
 | Playwright route guard re-runs SSRF check on every subresource | `enrichment_engine.py` | N/A — no Playwright | N/A | |
 | Block scheme allowlist (`http://`/`https://` only) | `frontend/utils/url.mjs::ensureProtocol` | ⚠️ probably implicit; verify on `safeHref` per CLAUDE.md | ⚠️ ? CF callable URLs | Worth porting `ensureProtocol` pattern if user-content links exist in `bookbed/` (booking confirmation pages, etc.). |
 
@@ -113,7 +113,7 @@ Status legend: ✅ already implemented · ⚠️ partial · ❌ missing · N/A t
 
 | Pattern | LDS source | bookbed-website | bookbed CF | Notes |
 |---|---|---|---|---|
-| Fail-closed Origin allowlist on state-changing POSTs | `frontend/app/api/proxy/[...path]/route.ts` + `frontend/app/api/auth/signout/route.ts` | N/A — no auth state-change POSTs | ⚠️ CF callables get this via Firebase App Check + auth context; **but `/tools/ical-checker` Server Action is a state-change-shaped POST** — review whether its in-process rate limit + DNS guard cover the threat. | LDS gates Origin in code; CF gates via Firebase auth context. |
+| Fail-closed Origin allowlist on state-changing POSTs | `frontend/app/api/proxy/[...path]/route.ts` + `frontend/app/api/auth/signout/route.ts` | N/A — no auth state-change POSTs | ❌ **VERIFIED 2026-05-23 — App Check is NOT enforced.** All `onCall({...})` configs (audit across `availability.ts`, `emailVerification.ts`, `passwordReset.ts`, others) use `cors: true` only — ZERO `enforceAppCheck: true`. Per-handler `request.auth` checks exist; App Check (anti-bot, anti-script-runner) does not. **Real security gap, not a port — pure bookbed work**. Adjacent: `/tools/ical-checker` Server Action's in-process rate limit + DNS guard already cover its threat. | LDS gates Origin in code; CF gates via Firebase auth context. |
 | Strip client-controlled XFF, re-emit from trusted proxy header | `frontend/app/api/proxy/[...path]/route.ts` + `_rate_limit_key` in `backend/main.py` (XFF only honored when API key valid) | ✅ `getClientIp()` rewrites trust the rightmost XFF (Cloud Run pattern) | N/A — App Check / auth.uid not IP-based | bookbed-website pattern is correct for App Hosting / Cloud Run. |
 
 ### 2.7 — Cookies / session
@@ -334,25 +334,31 @@ These are the files Read while building the gap table. If you re-verify before p
 Rows marked "verify" / "?" in the gap table were NOT spot-checked; treat them as
 hypothesis-only until re-confirmed.
 
-### Verification debt (rows that still need a spot-check before porting)
+### Verification debt (spot-checked 2026-05-23 — was hypothesis, now resolved)
 
-Each of these is a hypothesis based on `CLAUDE.md` or inference, not file inspection.
-Re-verify with a Read of the named file before basing a port-PR on the row.
+The 8 rows below were marked ⚠️/? in the original 2026-05-22 doc — file inspection
+during Phase A+B execution resolved every one. Three turned out wrong; one is
+better than hypothesized; the rest match the hypothesis but with path
+corrections worth noting. Re-verify any of these before basing a port-PR
+on the row.
 
-| Row | Claim | File to read |
+| Row | Original claim | Verified status (2026-05-23) |
 |---|---|---|
-| 2.3 (SSRF) — bookbed CF column | "outbound is only OTAs + Resend, both static-allowlisted hosts" | `bookbed/functions/src/availability.ts`; any `functions/src/*ical*.ts`; grep `functions/src/` for `fetch(` / `axios` / `got(` |
-| 2.5 (log CRLF scrub) — bookbed CF column | "Sentry integration in CF — verify no `logger.error('...' + userInput, ...)` pattern" | `bookbed/functions/src/lib/logger.ts` + any caller passing user-controlled strings |
-| 2.5 (log CRLF scrub) — bookbed Flutter column | "`LoggingService.logDebug/logError` is called with user text length only today" | grep `bookbed/lib/` for `LoggingService.log` + assert no second-arg user content |
-| 2.6 (Origin gate) — bookbed CF column | "CF callables get this via Firebase App Check + auth context" | `functions/src/index.ts` callable export config — App Check enforcement on every callable, not just sensitive ones |
-| 2.8 (Pydantic-equivalent input validation) | "CF callables use `data: any` by default" — port `zod` strict schemas | `functions/src/**/*.ts` — grep for `onCall(` to enumerate the surface, then audit each handler's input shape |
-| 2.9 (Upload guard) | "Check `storage.rules` + any client upload handlers" | `bookbed/storage.rules` + any `FirebaseStorage.instance.ref(...).putFile(` in `lib/` |
-| 2.12 (Rate limiting) — bookbed CF | "verify all callable endpoints have it" | `functions/src/lib/rateLimit.ts` (if it exists) + grep `onCall(` handlers for `rateLimit` invocation |
-| 2.13 (Firestore CHECK-equivalent constraints) | "review whether `firestore.rules` enforces equivalent constraints to LDS's 10 CHECKs" | `bookbed/firestore.rules` — look for `request.resource.data.field is string` + allowlist matches |
+| 2.3 (SSRF) — bookbed CF | "outbound is only OTAs + Resend, both static-allowlisted hosts" | ⚠️ **PARTIAL — claim incomplete.** Real outbound: Twilio (`smsService.ts`, static `api.twilio.com`), Resend (static `api.resend.com`), **AND iCal sync** (`icalSync.ts` fetches owner-provided `ical_url` — *the* SSRF vector). The CF already has `validateIcalUrl()` SSRF guard + `maxRedirects: 5` cap at `icalSync.ts:344` — covered, but the doc previously claimed iCal wasn't an outbound surface. Update: bookbed CF already meets Phase A-level SSRF parity here. |
+| 2.5 (log CRLF) — bookbed CF | "Sentry integration in CF — verify no `logger.error('...' + userInput, ...)` pattern" | ⚠️ **GAP.** Module is at `functions/src/logger.ts` (NOT `lib/logger.ts`). `Logger.info/debug/warn` proxies to `functions.logger.*` which emits JSON to Cloud Logging — JSON encodes `\r\n` literally, so log-line forge does NOT work on the JSON wire. But any downstream gcloud-CLI text-format consumer would re-decode. Worth porting `_CRLFScrubFilter`-equivalent if any text-format consumer ever reads CF logs. **Lower-risk than LDS file logger today.** |
+| 2.5 (log CRLF) — bookbed Flutter | "`LoggingService.logDebug/logError` is called with user text length only today" | ❌ **WRONG.** Verified: `lib/core/services/booking_service.dart:97` calls `LoggingService.logDebug('   Guest: $guestName ($guestEmail)')` — interpolates raw `guestName` + `guestEmail` directly. If LoggingService writes to any text-format consumer (file, server-side log forward), CR/LF in `guestName` smuggles. Audit LoggingService.logDebug's sink before assuming "low-risk". |
+| 2.6 (Origin gate) — bookbed CF | "CF callables get this via Firebase App Check + auth context" | ❌ **WRONG.** Verified across `availability.ts`, `emailVerification.ts`, `passwordReset.ts`, others: all `onCall({...})` configs use `cors: true` only. **ZERO `enforceAppCheck: true`** in the codebase. App Check is NOT enforced on any callable. Auth (`request.auth`) is checked individually per-handler, but App Check (anti-bot, anti-script-runner) is not. **Real security gap — Phase B+ priority to enable App Check on every authenticated callable.** |
+| 2.8 (Input validation) | "CF callables use `data: any` by default" — port `zod` strict schemas | ✅ **CONFIRMED.** No `zod` / `joi` / structural validation library present. Handlers destructure `request.data?.field` with defaults; some `parseIsoDate(...)` per-field parsers (e.g. `availability.ts:124`). Worth porting Pydantic-equivalent strict schemas. |
+| 2.9 (Upload guard) | "Check `storage.rules` + any client upload handlers" | ✅ **VERIFIED — strong.** `storage.rules` enforces: `request.auth != null`, `request.auth.uid == userId` (or property `owner_id` lookup for property images), `request.resource.size < 10 * 1024 * 1024` (10 MB cap), `request.resource.contentType.matches('image/.*')`. iCal exports locked SF-025 (2026-05-22). All Flutter `putData` call sites (`storage_service.dart`, `firebase_owner_properties_repository.dart`) upload images consistent with the rules. **No port needed.** |
+| 2.12 (Rate limiting) — bookbed CF | "verify all callable endpoints have it" | ✅ **VERIFIED but path correction.** Module is at `functions/src/utils/rateLimit.ts` (NOT `lib/rateLimit.ts` as doc said). 18 callable sites import it: `atomicBooking`, `authRateLimit`, `customEmail`, `stripe*`, `bookingAccessToken`, `verifyBookingAccess`, `emailVerification`, `guestCancelBooking`, etc. Coverage is wide but not necessarily 100% — a follow-up audit can confirm "every authenticated callable rate-limited". |
+| 2.13 (Firestore CHECK-equivalents) | "review whether `firestore.rules` enforces equivalent constraints to LDS's 10 CHECKs" | ⏸️ **DEFERRED — 441-line file requires dedicated audit.** File exists at the expected path; spot-grep did not return the canonical type-check patterns (`is string` / `is number`) — implies bookbed uses a different invariant style. Schedule a focused read pass rather than including in this verification sweep. |
 
-When porting Phase A (website CI) and Phase B (CF email guards), these rows are
-not on the critical path. When porting Phase C (Flutter Gemini fence) and beyond,
-verify before scoping work.
+### Action items surfaced by this verification pass (not in original plan)
+
+1. **Enable Firebase App Check** on every `onCall(...)` in `bookbed/functions/src/` — pass `enforceAppCheck: true` in the options object. Mitigates bot/script-runner abuse on every authenticated callable. **Real gap, no port from LDS needed (LDS has no equivalent surface) — pure bookbed work.**
+2. **Audit Flutter `LoggingService.logDebug` sink** — if it forwards to a text-format consumer, port the LDS `_CRLFScrubFilter` pattern. If it only stays in-process / structured-JSON, this is informational only.
+3. ~~Update Section 2.3 in this doc~~ — done in this commit (row inline corrected).
+4. **Schedule a focused `firestore.rules` audit pass** — 441 lines, not in scope here. The rules-drift CI workflow already gates schema changes; one-time audit of the constraint set is the gap.
 
 ---
 
