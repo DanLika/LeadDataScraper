@@ -2388,3 +2388,146 @@ tree stays reserved for the original session.
 Cleanup when the session ends: `git worktree remove
 ../<sibling-dir>`. If the branch has unpushed commits, push first
 or the remove refuses without `--force`.
+
+# Session 2026-05-23 — phase16-t3 data & observability sweep
+
+## T3 sweep report — `tests/perf/phase16-t3-data-obs.md` (PR #228)
+
+21-sub-task live audit of the Supabase project
+(`kbtkxpvchmunwjykbeht`, Postgres 17.6) via Supabase MCP
+`execute_sql`. Three pre-flight techniques validated once and then
+relied on for every subsequent check: `to_regclass` for table
+existence, `set_config('role','anon',true)` for RLS context switch
+inside a single execute_sql call, `SET LOCAL statement_timeout='1500ms';
+SELECT pg_sleep(3)` to prove cancellation primitive isn't masked by
+MCP-side timeouts. The full report carries the SQL for each task so
+operator can re-run any check verbatim.
+
+Five locked-in invariants (no findings):
+- 7/7 CHECK constraints fire `23514` on attempted violations.
+- anon SELECT/INSERT/RPC all deny on every core table;
+  `exec_sql` regression intact (function does not exist).
+- FK cascade `campaign → campaign_messages` verified end-to-end
+  (`23503` rejection on bad parent UUID + 3 → 0 messages on
+  parent DELETE).
+- Per-role `statement_timeout` in `pg_db_role_setting` exact match:
+  anon=3s, authenticated=8s, service_role=30s.
+- WAL archival live (`pg_stat_archiver.archived_count=590,
+  failed_count=0`) — PITR ready at the WAL layer; retention
+  window is plan-dependent (Supabase dashboard).
+
+## T3 fixes — PR #230
+
+`fix(security): revoke account_deletions grants + add seo_score index`
+
+Closes the two actionable findings from the sweep:
+
+- **T3.8-A (HIGH)** — `REVOKE ALL ON public.account_deletions FROM
+  anon, authenticated, PUBLIC;` applied to live DB + mirrored in
+  `supabase_schema.sql`. Supabase grants the full privilege set to
+  anon/authenticated by default on every new public-schema table;
+  RLS `account_deletions_deny_all` (RESTRICTIVE, `USING(false)`)
+  already blocked read/write, but a future regression that dropped
+  the policy would silently expose the GDPR audit log. Now both
+  layers must fail before exposure. Verified: post-REVOKE
+  `information_schema.table_privileges` shows only `postgres` +
+  `service_role` rows; `service_role` SELECT still works.
+  `schema_drift_check.py::TABLES` already covers `account_deletions`
+  in its 5-table tuple, and `check_table_grants()` will stay green
+  against the REVOKE'd state — no code change needed there.
+- **T3.1-A (MEDIUM)** — `CREATE INDEX IF NOT EXISTS
+  idx_leads_seo_score ON public.leads (seo_score) WHERE seo_score
+  IS NOT NULL;` added. `WHERE seo_score BETWEEN 50 AND 100` used
+  to fall through `enable_seqscan=off` to a Seq Scan because no
+  index covered the column; now picks `Index Scan
+  idx_leads_seo_score`. Partial form because `seo_score` is NULL
+  on every pre-audit row — keeps writes cheap. Plain btree handles
+  both `BETWEEN` and `<` operators (Forward / Backward scan); no
+  DESC variant needed.
+- `HOT_PATH_QUERIES` in `src/scripts/check_query_plans.py`
+  extended from 4 to 5 probes with the `seo_score BETWEEN` query
+  — a future schema drop trips the gate red.
+
+## T3 findings dispositioned as no-action
+
+Documented in `tests/perf/phase16-t3-followups.md`:
+
+- **T3.8-B (LOW)** — `account_deletions_deny_all` is RESTRICTIVE
+  while the 4 core deny-all policies are PERMISSIVE. RESTRICTIVE +
+  `USING(false)` and PERMISSIVE + `USING(false)` are semantically
+  equivalent for pure deny-all (both block). RESTRICTIVE is
+  strictly stronger (a future permissive policy can't override it),
+  so the mismatch errs on the safer side for the GDPR audit log
+  specifically. Standardizing all 5 tables on RESTRICTIVE would be
+  defensible cleanup, but no security gain on the 4 core tables
+  today and not worth churning the schema-drift baseline.
+- **T3.9-A (LOW)** — `update_updated_at_column` has EXECUTE granted
+  to PUBLIC + anon + authenticated. It's a trigger function (not
+  SECURITY DEFINER, returns `NEW`, not callable via PostgREST RPC),
+  so not exploitable. Standard Supabase trigger glue. When
+  `check_function_safety.py` is wired into CI, this function will
+  need to land in its `EXEC_GRANT_ALLOWLIST`.
+
+## T3 still-deferred (no infra to exercise live)
+
+- **T3.2** — JSONB shape on `audit_results`: zero `Completed` rows in
+  the live DB. Static gate `check_jsonb_shapes.py` continues to
+  enforce the contract once data exists.
+- **T3.12 / T3.13 / T3.14** — cooperative cancel, /stats stampede,
+  browser pool: need a running backend + workload. Static contracts
+  verified; live repros documented in the main report.
+- **T3.15 / T3.16 / T3.17 live tail** — Sentry capture, Web Vitals
+  aggregation, JsonFormatter stdout sample: need Render-side log
+  access (Supabase MCP only sees Postgres logs).
+
+## Operational state hit during this session
+
+- **GitHub Actions CI is fully red on every PR right now** —
+  account-level billing block ("recent account payments have failed
+  or your spending limit needs to be increased"). Every job fails
+  in 1-3s with empty `steps[]` because GH never starts them. Not
+  code, not secrets, not flaky — billing gate fires before job
+  startup. Resolve via GitHub Settings → Billing & plans, then
+  re-trigger PRs. Until resolved, treat the per-PR fail list as
+  noise: any "real" failures will only surface once jobs actually
+  run.
+- **Render prod services unreachable** —
+  `https://lead-scraper-frontend.onrender.com` returns HTTP/2 404
+  with `x-render-routing: no-server` (DNS resolves to Render
+  Cloudflare edge `216.24.57.7/251`, but the Render router has no
+  service registered at that hostname). Backend probe returns
+  nothing. Investigate via Render dashboard: services suspended,
+  deleted, or renamed. If renamed, update `render.yaml` +
+  `docs/secret-inventory.md` to match.
+
+## CLAUDE.md invariants to remember when re-running similar audits
+
+- The 5 RLS-protected tables are `leads`, `campaigns`,
+  `campaign_messages`, `orchestration_jobs`, **and**
+  `account_deletions` (5, not 4 — every doc still saying "4 core
+  tables" was written before the GDPR Article 17 audit table
+  landed and should be re-read with that in mind).
+- The schema-drift gate (`schema_drift_check.py::TABLES`) and the
+  grants gate (`check_grants_matrix.py`) both must include
+  `account_deletions`; verified intact 2026-05-23.
+- The query-plans gate (`check_query_plans.py::HOT_PATH_QUERIES`)
+  now has 5 probes (created_at, audit_status, unique_key,
+  campaign_messages.campaign_id, seo_score range).
+- The two `..on grants` defenses (RLS deny-all + zero anon
+  GRANTs) must BOTH hold for the 5 tables; a single-layer failure
+  is the threshold for a HIGH finding even when the other layer
+  still blocks.
+
+## Branch hygiene gotcha (encountered twice this session)
+
+Parallel concurrent sessions share the same git working tree.
+Operating sequences like `git checkout -b new-branch origin/main &&
+<edit files> && git commit` may **land the commit on whichever
+branch was checked out last by any session**, not the one you
+just created. Recovery: `git cherry-pick <sha>` from the correct
+branch + `git reset --hard <prior-head>` on the wrong branch (the
+commit is preserved by the cherry-pick; the reset just drops the
+duplicate). When this happens twice in one session it's the
+parallel-session pattern, not a hook bug. The fix lands on the
+right branch and the wrong branch returns to its prior origin
+head.
