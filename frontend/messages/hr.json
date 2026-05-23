@@ -1,0 +1,81 @@
+{
+  "_meta": {
+    "note": "Initial Croatian translations seeded for dogfood. Every string below should be reviewed by a native speaker before any external user touches the app — machine translations may carry register / case / gender slips that won't be caught by automated checks. Mark verified strings by removing the `// REVIEW` comment from the equivalent en.json line history once a human has signed off."
+  },
+  "nav": {
+    "dashboard": "Nadzorna ploča",
+    "insights": "Uvidi",
+    "campaigns": "Kampanje",
+    "settings": "Postavke",
+    "signOut": "Odjava"
+  },
+  "common": {
+    "save": "Spremi",
+    "saveAndClose": "Spremi i zatvori",
+    "cancel": "Odustani",
+    "close": "Zatvori",
+    "loading": "Učitavanje...",
+    "search": "Pretraži",
+    "clear": "Očisti",
+    "delete": "Obriši",
+    "confirm": "Potvrdi",
+    "yes": "Da",
+    "no": "Ne"
+  },
+  "dashboard": {
+    "title": "Nadzorna ploča",
+    "totalLeads": "Ukupno potencijala",
+    "pending": "Na čekanju",
+    "highRisk": "Visoki rizik",
+    "healthy": "Zdravi",
+    "prospectInventory": "Inventar prospekata",
+    "searchLeads": "Pretraži potencijale...",
+    "allSegments": "Svi segmenti",
+    "allStatuses": "Svi statusi",
+    "completed": "Završeno",
+    "failed": "Neuspjelo",
+    "hideDemoData": "Sakrij demo podatke",
+    "clearFilters": "Očisti filtere",
+    "newestFirst": "Najnovije prvo",
+    "seoScoreDesc": "SEO ocjena: visoka → niska",
+    "seoScoreAsc": "SEO ocjena: niska → visoka",
+    "outreachScoreDesc": "Ocjena pristupa: visoka → niska",
+    "nameAZ": "Naziv A→Ž",
+    "nameZA": "Naziv Ž→A"
+  },
+  "leadTable": {
+    "company": "Tvrtka",
+    "segment": "Segment",
+    "outreachScore": "Ocjena pristupa",
+    "seoScore": "SEO ocjena",
+    "status": "Status",
+    "actions": "Akcije"
+  },
+  "actions": {
+    "processAll": "Obradi sve",
+    "deepHunt": "Duboka pretraga",
+    "discover": "Otkrij",
+    "auditNow": "Revidiraj odmah",
+    "draftOutreach": "Nacrtaj pristup",
+    "viewDetails": "Pogledaj detalje"
+  },
+  "settings": {
+    "title": "Postavke",
+    "dangerZone": "Opasna zona",
+    "clearAllLeads": "Obriši sve potencijale",
+    "removeAllDemoData": "Ukloni sve demo podatke",
+    "downloadMyData": "Preuzmi moje podatke"
+  },
+  "login": {
+    "title": "Prijava",
+    "email": "E-pošta",
+    "password": "Lozinka",
+    "submit": "Prijavi se",
+    "submitting": "Prijavljivanje..."
+  },
+  "localeSwitcher": {
+    "label": "Jezik",
+    "english": "English",
+    "croatian": "Hrvatski"
+  }
+}

@@ -1,5 +1,12 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import createNextIntlPlugin from "next-intl/plugin";
+
+// next-intl plugin wires getRequestConfig (./i18n/request.ts) into the
+// build so every server render can resolve the per-request locale +
+// load its messages JSON. The wrapper is the outermost layer below so
+// the Sentry config is applied first, then next-intl wraps the result.
+const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 // NOTE: Content-Security-Policy is set per-request in `frontend/proxy.ts`
 // so the script-src directive can include a per-request `'nonce-<n>'`
@@ -77,16 +84,18 @@ const nextConfig: NextConfig = {
 //
 // `silent: !process.env.CI` keeps `npm run build` quiet locally but
 // loud in CI.
-export default withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  silent: !process.env.CI,
-  widenClientFileUpload: true,
-  // Sentry v10 renamed `hideSourceMaps` → `sourcemaps.deleteSourcemapsAfterUpload`.
-  // Maps still upload to Sentry (used for symbolication) but are
-  // deleted from the build output so the public CDN doesn't serve them.
-  sourcemaps: { deleteSourcemapsAfterUpload: true },
-  disableLogger: true,
-  tunnelRoute: "/monitoring",
-  release: { name: SENTRY_RELEASE },
-});
+export default withNextIntl(
+  withSentryConfig(nextConfig, {
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    silent: !process.env.CI,
+    widenClientFileUpload: true,
+    // Sentry v10 renamed `hideSourceMaps` → `sourcemaps.deleteSourcemapsAfterUpload`.
+    // Maps still upload to Sentry (used for symbolication) but are
+    // deleted from the build output so the public CDN doesn't serve them.
+    sourcemaps: { deleteSourcemapsAfterUpload: true },
+    disableLogger: true,
+    tunnelRoute: "/monitoring",
+    release: { name: SENTRY_RELEASE },
+  }),
+);
