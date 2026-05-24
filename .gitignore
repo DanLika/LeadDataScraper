@@ -83,5 +83,14 @@ pytest-of-*/
 # Performance traces (large JSON, regenerated per session)
 tests/perf/*.json
 
+# Per-run transcript dumps from tests/test_refusal_boundaries.py.
+# CLAUDE.md "Live tier" notes: "Full transcript JSON dumped to a
+# tempfile; path printed each run." Pattern is
+# `refusal-boundaries-<timestamp>-<short-id>.json` and the files
+# land at repo root via `tempfile.NamedTemporaryFile(...)`. They're
+# debugging artifacts — keep on disk for forensics, ignore for
+# tracking.
+refusal-boundaries-*.json
+
 # context-mode tool configs (local-only)
 frontend/.cx_*.config.mjs
