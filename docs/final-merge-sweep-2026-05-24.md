@@ -164,3 +164,76 @@ drop them.**
 - [ ] `~/.claude/projects/.../memory/session_2026-05-24_final-sweep.md`
 - [ ] Open PR list reduced to: deps majors + email PRs 3-5 + operator decision items
 - [ ] Smoke verdict (GO / NO-GO for dogfood Day 1) at end of smoke doc
+
+## Mid-session progress log
+
+### Phase 2 (jules-bot triage) — completed 2026-05-24 ~10:55 UTC
+
+Background agent verified each of the 7 stale draft PRs against existing
+test coverage in `tests/`. Six closed-superseded with per-PR reasoning;
+#138 left open (asyncio.gather in AI router) with a triage comment
+asking for `asyncio.Semaphore` cap + `gemini_budget.check()` pre-gate
+before any cherry-pick — neither present in current diff.
+
+  Closed: #130 (function still tested, removal would break CI),
+          #131, #132 (brittle sys.modules monkeypatch corrupts suite),
+          #133 (4 existing test files already exercise error_response),
+          #135 (handler branches already cover _is_table_missing_error),
+          #136 (test_endpoint_hardening already × 7 concerns matrix).
+
+  Open with operator comment: #138 (cost-risk per M3 memory).
+
+### Phase 3 (real-PR triage) — partial completion 2026-05-24 ~11:05 UTC
+
+Background agent triaged the 29 remaining non-jules non-dependabot PRs.
+
+  merge-clean (12)     — agent verdict
+  rebase-needed (7)    — CONFLICTING per gh; needs rebase before merge
+  superseded (2)       — close-with-reference
+  held-for-operator (5) — touches schema / RLS / GRANTs / secrets
+  defer (3)            — stacked on conflicting parents OR design overlap
+
+Actioned this turn:
+
+  Closed superseded: #247 (by #285), #248 (by #255).
+  Merged 10 (squash + delete-branch): #228, #229, #231, #239, #242,
+                                       #255, #262, #272, #280, #284.
+  Skipped from merge-clean: #259 (mutmut baseline — memory says
+                                  already-shipped; verify before
+                                  merging duplicate),
+                            #279 (CLAUDE.md churn — sibling sessions
+                                  active, defer to avoid 3-way
+                                  conflict).
+
+Main HEAD: bd4dab5 → 5f9c451 → 3affadc → d402911 → ... → **8dfbaed**.
+
+Open PR count: 45 → **27**.
+
+### Remaining 27 open PRs
+
+| Category | Count | PRs |
+|---|---|---|
+| Dependabot | 9 | #213, #215, #216, #217, #218, #219, #220, #221, #222 |
+| Rebase-needed (CLAUDE.md churn cluster) | 5 | #236, #252, #256, #257, #260 |
+| Rebase-needed (other) | 2 | #277 (bot-blocked test mock), #261 (typecov gemini-types) |
+| Held-for-operator | 5 | #230, #250, #281, #285, #286 |
+| Defer / stacked | 3 | #227, #238, #273 |
+| Jules-bot left open | 1 | #138 (AI router asyncio.gather) |
+| Re-verify | 2 | #259 (mutmut baseline dup?), #279 (Phase 9.10 docs) |
+
+### Operator decisions queued
+
+1. Pick a strategy for the CLAUDE.md churn cluster (#236, #252, #256, #257, #260): consolidate into a single drain PR, or sequentially rebase one-by-one.
+2. **#286 (email dispatch schema)**: apply Supabase migration LIVE first → then merge.
+3. **#285 (Phase 13.3 demo data)**: same — schema change needs live application.
+4. **#230, #250 (GRANT changes)**: review the SQL before merging.
+5. **#281 (Resend sender)**: depends on #286 dispatch chain — order matters.
+6. **#138 (asyncio.gather)**: bounded variant requires real review.
+
+### Render restore (parallel, operator-blocked)
+
+| Surface | State as of 11:05 UTC |
+|---|---|
+| Backend | HTTP 000 — restart loop exited at 10:27Z; needs Manual Deploy of `d402911` |
+| Frontend | HTTP 500 — env vars `NEXT_PUBLIC_SUPABASE_*` mismatch suspected; verify against canonical values pasted earlier |
+| Supabase Auth | Single user `duskolicanin1234@gmail.com`, tokens normalised to empty strings, single-tenancy invariant satisfiable once backend boots |
