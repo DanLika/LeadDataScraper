@@ -618,8 +618,16 @@ class AgenticRouter:
                     })
                 )
 
-            # Run tasks concurrently
-            draft_results = await asyncio.gather(*draft_tasks, return_exceptions=True)
+            # Run tasks concurrently using a semaphore to limit concurrent AI calls
+            # to prevent potential rate limiting (e.g., if leads are more than 5)
+            semaphore = asyncio.Semaphore(5)
+
+            async def generate_with_semaphore(task):
+                async with semaphore:
+                    return await task
+
+            bounded_tasks = [generate_with_semaphore(task) for task in draft_tasks]
+            draft_results = await asyncio.gather(*bounded_tasks, return_exceptions=True)
 
             campaign_leads = []
             for i, lead in enumerate(leads):
