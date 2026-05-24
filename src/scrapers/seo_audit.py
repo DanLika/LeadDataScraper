@@ -39,17 +39,26 @@ def calculate_seo_score(results: dict) -> int:
 
 def _check_meta_tags(soup: BeautifulSoup, results: dict):
     """Check title, meta description, and canonical URL."""
-    results["title"] = soup.title.string.strip() if soup.title else None
+    # ``soup.title.string`` can be None even when ``soup.title`` exists —
+    # an empty ``<title></title>`` or ``<title><br></title>`` both yield
+    # None, then ``.strip()`` raises ``AttributeError: 'NoneType' object
+    # has no attribute 'strip'`` and the whole audit crashes. Phase 9.10
+    # (PR #274 Finding B) caught this on Sotheby's homepage.
+    title_text = soup.title.string if soup.title else None
+    results["title"] = title_text.strip() if title_text else None
     if results["title"]:
         results["title_length"] = len(results["title"])
         if results["title_length"] < 30 or results["title_length"] > 70:
             results["red_flags"].append(f"Title Length Warning ({results['title_length']} chars)")
-    else: 
+    else:
         results["red_flags"].append("Missing Title Tag")
         results["title_length"] = 0
-        
+
     desc = soup.find('meta', attrs={'name': 'description'})
-    results["meta_description"] = desc['content'].strip() if desc and 'content' in desc.attrs else None
+    # Same NoneType guard for ``<meta name="description" content="">`` —
+    # ``'content' in desc.attrs`` is True but the value is empty/None.
+    desc_content = desc['content'] if (desc and 'content' in desc.attrs) else None
+    results["meta_description"] = desc_content.strip() if desc_content else None
     if results["meta_description"]:
         results["meta_length"] = len(results["meta_description"])
         if results["meta_length"] < 70 or results["meta_length"] > 160:
