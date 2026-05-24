@@ -160,13 +160,53 @@ class TaskOrchestrator:
         """
         self.db.client.table("orchestration_jobs").update(updates).eq("id", job_id).execute()
 
-    def _get_total_leads(self, lead_ids: List[str], filters: Dict[str, Any]) -> int:
+    @staticmethod
+    def _status_predicates_for_tasks(tasks: Optional[List[str]]) -> str:
+        """Comma-joined OR predicate for PostgREST `.or_(...)`. Selects leads
+        where AT LEAST ONE requested task still needs to run.
+
+        Without task-awareness, a job started with ``tasks=['audit']`` re-fetches
+        every lead whose ``enrichment_status`` is still ``PENDING`` even after
+        ``audit_status`` flipped to ``Completed`` — and re-bills Gemini for the
+        audit it already finished. The Phase 9.10 live-pipeline run
+        (PR #274, Finding A) caught this multiplying spend by 3× per lead.
+
+        Status values written by the engines:
+        - ``audit_status``: 'Pending' → 'Completed' or 'Failed'
+          (plus a handful of error-reason variants the schema allowlists).
+        - ``enrichment_status``: 'PENDING' → 'COMPLETED' / 'FAILED'
+          / 'FAILED_NO_CONTENT'.
+        - 'hunt' has no dedicated status column today; it populates social
+          fields directly. Fall back to a broad predicate when only hunt
+          is requested.
+        """
+        tasks = list(tasks or ["audit", "enrich"])
+        parts: List[str] = []
+        if "audit" in tasks:
+            parts.append("audit_status.not.in.(Completed,Failed)")
+        if "enrich" in tasks:
+            parts.append(
+                "enrichment_status.not.in."
+                "(COMPLETED,FAILED,FAILED_NO_CONTENT)"
+            )
+        if "hunt" in tasks and not parts:
+            # No hunt_status column; fall back to the historical predicate.
+            parts.append("audit_status.neq.Completed")
+            parts.append("enrichment_status.neq.COMPLETED")
+        if not parts:
+            # Unknown tasks list — fail-safe to the historical predicate so we
+            # don't accidentally select every row in the table.
+            parts.append("audit_status.neq.Completed")
+            parts.append("enrichment_status.neq.COMPLETED")
+        return ",".join(parts)
+
+    def _get_total_leads(self, lead_ids: List[str], filters: Dict[str, Any], tasks: Optional[List[str]] = None) -> int:
         """Count total leads to process, either from explicit IDs or via DB query."""
         if lead_ids:
             return len(lead_ids)
 
         query = self.db.client.table("leads").select("unique_key", count="exact")
-        query = query.or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED").lt("retry_count", 3)
+        query = query.or_(self._status_predicates_for_tasks(tasks)).lt("retry_count", 3)
 
         for k, v in _sanitize_filters(filters).items():
             query = query.eq(k, v)
@@ -174,7 +214,7 @@ class TaskOrchestrator:
         response = query.execute()
         return response.count if hasattr(response, 'count') else 0
 
-    def _fetch_chunk(self, lead_ids: List[str], processed_count: int, chunk_size: int, total_leads: int) -> List[Dict[str, Any]]:
+    def _fetch_chunk(self, lead_ids: List[str], processed_count: int, chunk_size: int, total_leads: int, tasks: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """Fetch the next chunk of leads from DB or explicit ID list."""
         if lead_ids:
             slice_start = processed_count
@@ -186,7 +226,7 @@ class TaskOrchestrator:
             chunk_resp = self.db.client.table("leads").select("*").in_("unique_key", current_ids).execute()
         else:
             chunk_resp = self.db.client.table("leads").select("*") \
-                .or_("audit_status.neq.Completed,enrichment_status.neq.COMPLETED") \
+                .or_(self._status_predicates_for_tasks(tasks)) \
                 .lt("retry_count", 3) \
                 .order("last_processed_at", nullsfirst=True) \
                 .limit(chunk_size).execute()
@@ -245,7 +285,7 @@ class TaskOrchestrator:
             tasks = ["audit", "enrich"]
 
         try:
-            total_leads = self._get_total_leads(lead_ids, filters)
+            total_leads = self._get_total_leads(lead_ids, filters, tasks=tasks)
 
             await self._update_job_status(job_id, {
                 "status": "running",
@@ -267,7 +307,7 @@ class TaskOrchestrator:
                 if status_check.get("status") in ["stopped", "failed"]:
                     return
 
-                chunk = self._fetch_chunk(lead_ids, processed_count, chunk_size, total_leads)
+                chunk = self._fetch_chunk(lead_ids, processed_count, chunk_size, total_leads, tasks=tasks)
                 if not chunk:
                     break
 
