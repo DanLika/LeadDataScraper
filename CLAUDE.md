@@ -1563,12 +1563,17 @@ Phased action plan in that doc: **A** bookbed-website CI hardening
 (~1 day — port LDS's `ci.yml` + `security.yml` + `workflow-drift.yml` +
 dependabot, all action SHAs pinned with `# vX.Y.Z`) → **B** bookbed CF
 email CRLF guards on Resend (~4h — recipient regex with explicit
-CRLF reject, subject/from_name CRLF assert before MIME write) → **C**
-bookbed Flutter Gemini `<UNTRUSTED_DATA>` fence around user chat input
-(~1 day — currently flows raw to `_chatSession.sendMessageStream`,
-only static KB system instruction) → **D** backport newer headers from
-bookbed-website back to LDS (~30min) → **E** long tail (cost report,
-cold-start monitor, synthetic monitor, Firestore orphan sweep).
+CRLF reject, subject/from_name CRLF assert before MIME write) →
+**C ✅ shipped 2026-05-23** ([DanLika/rab_booking#460](https://github.com/DanLika/rab_booking/pull/460))
+— bookbed Flutter Gemini `<UNTRUSTED_DATA>` fence via new
+`lib/core/utils/prompt_safety.dart` wired at 3 sites in
+`ai_chat_provider.dart` (system instruction, history rebuild,
+`sendMessageStream`); 14-test unit corpus locks the fence helper.
+Snapshot test for `bookbed_knowledge_base.md` + live judge-classifier
+deferred to a follow-up — operator end-to-end verification still
+pending — → **D** backport newer headers from bookbed-website back
+to LDS (~30min) → **E** long tail (cost report, cold-start monitor,
+synthetic monitor, Firestore orphan sweep).
 
 **Phase 13 of the LDS roadmap was scoped to a dogfood-only cut on
 2026-05-22**: ship 13.14 (this crossover doc, **DONE**), then 13.1
