@@ -37,6 +37,13 @@ aiohttp==3.13.4
 # explicitly so the lockfile satisfies --require-hashes in the Docker
 # build regardless of the host Python that ran `make lock-python`.
 async-timeout==5.0.1
+# Same root cause as async-timeout: py3.11+ has these in stdlib, so a
+# pip-compile run on the host py3.11 won't lock them, but the py3.10
+# Docker base needs them at install time.
+#   exceptiongroup — transitive of anyio (stdlib ExceptionGroup on 3.11+)
+#   tomli          — transitive of various build/test tools (stdlib tomllib on 3.11+)
+exceptiongroup==1.3.1
+tomli==2.4.1
 playwright==1.50.0
 aiofiles==23.2.1
 slowapi==0.1.9
