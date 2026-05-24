@@ -15,6 +15,10 @@ from src.utils.prompt_safety import (
     _UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
     fenced_json,
 )
+from src.utils.gemini_call import (
+    estimate_tokens_from_text,
+    guarded_generate_content_async,
+)
 from src.utils.ssrf_guard import SSRFGuardResolver
 
 logger = get_logger(__name__)
@@ -660,12 +664,16 @@ class LeadHunter:
         """
 
         try:
-            response = await self.client.aio.models.generate_content(
+            response = await guarded_generate_content_async(
+                self.client,
                 model=self.model_id,
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
+                    max_output_tokens=4096,
                 ),
+                estimate_input=estimate_tokens_from_text(prompt),
+                estimate_output=4096,
             )
             text = response.text.strip()
             return text
@@ -728,12 +736,16 @@ class LeadHunter:
         }}
         """
         try:
-            response = await self.client.aio.models.generate_content(
+            response = await guarded_generate_content_async(
+                self.client,
                 model=self.model_id,
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
+                    max_output_tokens=2048,
                 ),
+                estimate_input=estimate_tokens_from_text(prompt),
+                estimate_output=2048,
             )
             text = response.text.strip()
             result = extract_json_from_response(text)
@@ -784,12 +796,16 @@ class LeadHunter:
         """
 
         try:
-            response = await self.client.aio.models.generate_content(
+            response = await guarded_generate_content_async(
+                self.client,
                 model=self.model_id,
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
+                    max_output_tokens=2048,
                 ),
+                estimate_input=estimate_tokens_from_text(prompt),
+                estimate_output=2048,
             )
             text = response.text.strip()
             # Basic JSON extraction in case Gemini adds markdown boilerplate

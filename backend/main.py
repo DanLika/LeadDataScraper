@@ -45,6 +45,7 @@ from src.utils.logging_config import (
     clear_request_context,
 )
 from src.utils.stats_cache import stats_cache
+from src.utils.gemini_budget import BudgetExceededError, get_state as _get_gemini_budget_state
 from fastapi.responses import FileResponse
 
 
@@ -480,6 +481,27 @@ async def _json_exception_handler(request: Request, exc: Exception):
         )
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(content={"error": "Internal server error"}, status_code=500)
+
+
+@app.exception_handler(BudgetExceededError)
+async def _budget_exceeded_handler(request: Request, exc: BudgetExceededError):
+    """Map daily-Gemini-budget breaches to HTTP 503.
+
+    503 (service unavailable, retry later) is the right code: the
+    breaker resets at UTC midnight, so the call IS expected to
+    succeed eventually.  ``used_today`` + ``ceiling`` are logged for
+    operator triage but never surfaced in the response body — the
+    explicit ``/admin/gemini-budget`` endpoint is the gated observability
+    surface for those numbers.
+    """
+    logger.warning(
+        "Gemini daily budget exceeded on %s %s — used=%s ceiling=%s",
+        request.method, request.url.path, exc.used_today, exc.ceiling,
+    )
+    return JSONResponse(
+        content={"error": "AI daily budget exhausted"},
+        status_code=503,
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -1094,6 +1116,13 @@ async def ask_ai(request: Request, payload: AskRequest, background_tasks: Backgr
 
         # 4. Process-heavy tasks: return the plan for UI confirmation.
         return {"plan": plan, "response": "I've analyzed your request. Should I proceed with the task: " + plan.get("task", "Unknown") + "?"}
+    except BudgetExceededError:
+        # Daily Gemini token budget tripped — let the registered
+        # `@app.exception_handler(BudgetExceededError)` map this to a
+        # 503 with the canonical body.  Without the re-raise the
+        # generic catch below would surface a 500 "Failed to process
+        # instruction" instead.
+        raise
     except Exception as e:
         logger.error("Error in /ask: %s", e, exc_info=True)
         return error_response("Failed to process instruction")
@@ -1111,6 +1140,10 @@ async def get_insights(request: Request):
         if isinstance(result, dict) and result.get("error"):
             return error_response(result["error"], status_code=503)
         return result
+    except BudgetExceededError:
+        # See /ask handler — re-raise so the global budget handler
+        # maps to a 503 instead of the generic "Insights unavailable" 500.
+        raise
     except Exception as e:
         logger.error("Error getting insights: %s", e, exc_info=True)
         return error_response("Insights currently unavailable")
@@ -2053,6 +2086,31 @@ async def export_campaign_messages(request: Request, campaign_id: str):
     except Exception as e:
         logger.error("Error exporting campaign messages: %s", e, exc_info=True)
         return error_response("Failed to export campaign messages")
+
+
+# -----------------------------------------------------------------------------
+# Admin observability — Gemini daily budget snapshot
+#
+# Read-only window into the runtime circuit breaker that bounds Gemini
+# spend.  Two factors required (same gate posture as `/leads/clear`):
+# X-API-Key for the authed surface + X-Admin-Token for the admin
+# subspace.  The handler never mutates the counter — the SQLite-level
+# UPSERT inside `get_state` for today's row is idempotent.
+# -----------------------------------------------------------------------------
+@app.get(
+    "/admin/gemini-budget",
+    dependencies=[Depends(verify_api_key), Depends(verify_admin_token)],
+)
+@limiter.limit("60/minute")
+async def admin_gemini_budget(request: Request):
+    """Return today's Gemini-token usage snapshot.
+
+    Body shape: ``{date, used_today, input_today, output_today,
+    ceiling, remaining, reset_at_utc}``.  No PII.  Two-factor gated
+    (X-API-Key + X-Admin-Token) so a leaked API key alone can't
+    observe the runtime budget.
+    """
+    return _get_gemini_budget_state()
 
 
 if __name__ == "__main__":
