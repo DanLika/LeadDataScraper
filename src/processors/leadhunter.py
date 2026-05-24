@@ -346,8 +346,17 @@ class LeadHunter:
             if tag and tag.get('content'):
                 business_name = tag.get('content').strip()
                 break
-        # Fallback to Title
-        if not business_name and soup.title:
+        # Fallback to Title — guard against `<title>` with empty body or
+        # nested children. `soup.title.string` returns None when the
+        # `<title>` tag exists but is empty (`<title></title>`) or contains
+        # multiple children (`<title>Foo<span>bar</span></title>`); the
+        # subsequent `.strip()` then raises
+        # `AttributeError: 'NoneType' object has no attribute 'strip'`.
+        # Verified live 2026-05-24 against sothebysrealty.com — the
+        # post-load DOM exposes an empty <title> while JS-rendered text
+        # populates later. Fall through to the H1 path instead of
+        # crashing the audit (Phase 9.10 Finding B).
+        if not business_name and soup.title and soup.title.string:
             business_name = soup.title.string.strip()
         # Fallback to H1
         if not business_name:
