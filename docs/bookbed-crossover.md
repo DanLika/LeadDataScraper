@@ -67,6 +67,14 @@ Status legend: ✅ already implemented · ⚠️ partial · ❌ missing · N/A t
 
 ### 2.1 — HTTP / response-header hardening
 
+> **Verified on prod 2026-05-23** — every ✅ in this table re-checked
+> against live `https://bookbed.io/` via `curl -sIL`. Zero drift; all
+> claims match the response headers. Audit + raw curl output:
+> [DanLika/bookbed-website#74](https://github.com/DanLika/bookbed-website/pull/74)
+> (`tests/lighthouse/headers.md`). COEP is intentionally NOT in this
+> table — would break Mux / Vercel / Tawk / view.bookbed.io (none of
+> which ship matching CORP), so the absence is correct.
+
 | Pattern | LDS source | bookbed-website | bookbed CF | Notes |
 |---|---|---|---|---|
 | CSP `script-src 'self'` (prod) | `frontend/next.config.ts` | ⚠️ `'unsafe-inline'` retained (SSG nonces impossible) — boundary closed at JsonLd escape | N/A (CF returns JSON only) | Different threat model; bookbed-website pattern is correct for its constraint. |
@@ -84,7 +92,7 @@ Status legend: ✅ already implemented · ⚠️ partial · ❌ missing · N/A t
 
 | Pattern | LDS source | bookbed-website | bookbed Flutter | Notes |
 |---|---|---|---|---|
-| JSON-LD escape (`<`, `>`, `&`, U+2028, U+2029) before injection | LDS doesn't emit JSON-LD | ✅ `components/ui/json-ld.tsx` — verified | N/A | bookbed-website is AHEAD here. LDS adds no JSON-LD to public HTML, so N/A. |
+| JSON-LD escape (`<`, `>`, `&`, U+2028, U+2029) before injection | LDS doesn't emit JSON-LD | ✅ `components/ui/json-ld-escape.mjs` — verified + 12-test regression suite (`node --test`) added in [#74](https://github.com/DanLika/bookbed-website/pull/74) | N/A | bookbed-website is AHEAD here. LDS adds no JSON-LD to public HTML, so N/A. |
 
 ### 2.3 — Outbound HTTP / SSRF
 
