@@ -12,8 +12,8 @@
     "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
   },
   "insights": {
-    "contents_hash": "3a2a09bdcfbcd540cb283217928399575f0ea7d53137a58ceb0d18d487c9909e",
-    "contents_preview": "You are a Database Analyst for a Lead Generation agency.\nAnalyze the following lead data (including SEO audit results) and provide 3 key strategic insights.\n\nFocus on:\n- Critical vulnerabilities (missing SSL, title, etc).\n- Industry patterns (if detectable).\n- Recommended priorities for outreach.\n\nL",
+    "contents_hash": "2dad307cf52193da5e9eeef4b22e84c6d5257bdf83121fe571685fce0a172a32",
+    "contents_preview": "You are a Database Analyst for a Lead Generation agency.\nAnalyze the following lead data (including SEO audit results) and provide 3 key strategic insights.\n\nGROUND TRUTH (do NOT contradict): the database holds 2 leads in total. The sample below contains 2 of those rows. Any number you cite as a cou",
     "fixture_description": "leads=fixed-2-rows",
     "system_instruction_hash": "cb3502c415ff38d2226c5cce7119cf66aba53fbe3c1382f97ddb824755313d9a"
   },

@@ -273,9 +273,15 @@ class AgenticRouter:
         if not unique_key:
             return {"error": "unique_key is required for DEEP_HUNT"}
 
-        from src.utils.supabase_helper import SupabaseHelper
-        db = SupabaseHelper()
-        response = db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
+        # Use the constructor-shared SupabaseHelper (self.db) — matches every
+        # other handler in this file. The previous local-`db` instantiation
+        # spun up a fresh helper per call: harmless in prod but in a test
+        # context where env vars are scoped to the AgenticRouter fixture, the
+        # fresh helper's `.client` is None and the next attribute access
+        # raises AttributeError("'NoneType' object has no attribute 'table'")
+        # — exactly the failure shape locked in by
+        # `tests/test_agentic_router_behavior.py::test_every_allowlisted_task_dispatches_or_errors_cleanly`.
+        response = self.db.client.table("leads").select("*").eq("unique_key", unique_key).execute()
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:
