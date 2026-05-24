@@ -504,8 +504,17 @@ class TestAdminTokenGuard(unittest.IsolatedAsyncioTestCase):
         """DELETE /leads/demo shares the same triple gate as /leads/clear
         (API key + admin token + typed Pydantic body). Probing without the
         admin token must short-circuit at 403 before Pydantic even sees
-        the JSON body."""
-        res = await self.http.delete(
+        the JSON body.
+
+        httpx note: `AsyncClient.delete()` does NOT accept a `json=` kwarg
+        (only `headers` / `params`). DELETE-with-body must go through
+        `request("DELETE", ..., json=...)` — the asymmetry is documented
+        upstream as a guard against accidental body-on-DELETE in idempotent
+        contexts. Our handler explicitly accepts a typed Pydantic body,
+        so we route via `request(...)`.
+        """
+        res = await self.http.request(
+            "DELETE",
             "/leads/demo",
             headers={"X-API-Key": API_KEY},
             json={"confirmation": "REMOVE DEMO"},
@@ -515,8 +524,10 @@ class TestAdminTokenGuard(unittest.IsolatedAsyncioTestCase):
     async def test_leads_demo_wrong_confirmation_returns_422(self):
         """With both keys present, a body that doesn't carry the exact
         Literal["REMOVE DEMO"] must 422 via Pydantic — the handler never
-        runs and no rows are deleted."""
-        res = await self.http.delete(
+        runs and no rows are deleted. See sibling test's docstring for
+        the `httpx.request("DELETE", ...)` rationale."""
+        res = await self.http.request(
+            "DELETE",
             "/leads/demo",
             headers={"X-API-Key": API_KEY, "X-Admin-Token": ADMIN_TOKEN},
             json={"confirmation": "remove demo"},
