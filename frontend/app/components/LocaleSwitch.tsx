@@ -12,6 +12,19 @@ function isLocale(value: string): value is Locale {
   return (LOCALES as readonly string[]).includes(value);
 }
 
+// Module-scope helper: keeps `document.cookie =` outside the component body
+// so React Compiler's purity lint doesn't flag the assignment as a render-
+// time external mutation. SameSite=Lax matches the Supabase session cookie
+// floor; Secure rides on prod only. HttpOnly isn't settable from JS — this
+// is a non-secret UI preference, so that's fine.
+function writeLocaleCookie(next: Locale): void {
+  const secure =
+    typeof window !== 'undefined' && window.location.protocol === 'https:'
+      ? '; Secure'
+      : '';
+  document.cookie = `NEXT_LOCALE=${next}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+}
+
 export default function LocaleSwitch({ compact = false }: { compact?: boolean }) {
   const current = useLocale();
   const router = useRouter();
@@ -20,11 +33,7 @@ export default function LocaleSwitch({ compact = false }: { compact?: boolean })
 
   function select(next: Locale) {
     if (next === current) return;
-    // Year-long persistence; SameSite=Lax matches Supabase session cookie
-    // floor; Secure in prod only (httpOnly cannot be set from JS — fine,
-    // this is a non-secret UI preference).
-    const secure = typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : '';
-    document.cookie = `NEXT_LOCALE=${next}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+    writeLocaleCookie(next);
     startTransition(() => {
       router.refresh();
     });
