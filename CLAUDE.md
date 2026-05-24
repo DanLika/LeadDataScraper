@@ -2324,3 +2324,503 @@ What this does NOT fix:
 - Stack-of-3 was manageable; stack-of-N for large N gets fragile.
   Beyond 3-4, switch to a single combined PR or a docs-only train
   branch.
+
+# Session 2026-05-23 — branch hygiene: HEAD swap BETWEEN turns (cross-session)
+
+Observation logged this session: when multiple Claude sessions on
+the same repo run in parallel against ONE working tree, HEAD can
+flip BETWEEN turns of a single session — not just during a single
+session's own branch checkouts. Observed sequence in one ~3-minute
+interaction:
+
+1. Session opens; startup `git status` reports branch A
+   (`docs/claude-md-dogfood-prep-2026-05-23`) with a known dirty
+   working tree.
+2. User answers a clarification question. Several seconds pass.
+3. Next tool batch runs `git status` — branch B
+   (`chore/visual-baselines-2026-05-23`) with an entirely different
+   foreign dirty working tree (modified `.py` files + untracked
+   `.py.bak` editor backups belonging to a parallel session).
+4. The next tool call (`git stash push -u`) reports being on
+   branch C (`chore/claude-md-bookbed-crossover-session-2026-05-23`).
+
+Three distinct branches in a single short interaction without this
+session running a single `git checkout`. The recovery path that
+worked in the earlier "wrong-branch commit" cases documented in
+Session 2026-05-22 (cherry-pick + reset) does NOT apply here
+because nothing has been committed yet — the foreign work is in
+the working tree and the writing session would silently `git add`
+files it has no context for.
+
+**Mitigation that worked (in order):**
+1. `git stash push -u -m "parallel-session-snapshot-<date>-foreign-do-not-discard"`
+   captures foreign work (untracked files included via `-u`)
+   without deleting it. The descriptive message tells the parallel
+   session it can `git stash apply` to recover. Do NOT `git stash
+   drop` — the foreign work is not yours to discard.
+2. `git fetch origin main && git worktree add -b <new-branch>
+   ../<sibling-dir> origin/main` creates an ISOLATED worktree at
+   a sibling path. Each worktree has its own HEAD file under
+   `.git/worktrees/<name>/HEAD`, so the parallel session cannot
+   swap the new worktree's HEAD even if it manipulates the
+   primary worktree's HEAD.
+3. `git symbolic-ref HEAD` inside the worktree confirms the
+   isolated HEAD stays put across tool calls.
+
+The earlier single-worktree mitigation (`git symbolic-ref HEAD`
+right after `git checkout -b` and before the first edit) covers
+only the FIRST tool batch on a branch. It does NOT cover the
+case above where HEAD swaps mid-session after several stable
+turns. Adding an explicit HEAD re-check before EACH write batch
+is a partial mitigation; the durable fix is to use a dedicated
+worktree per Claude session when more than one session may run
+on the same repo.
+
+**Adoption rule for future multi-session work on this repo:**
+when a new Claude session starts on a repo that another session
+already has open, the new session's first action should be
+`git worktree add -b <new-branch> ../<sibling-dir> origin/main`,
+then anchor all subsequent work to that sibling path (absolute
+paths in tool calls; the Bash shell cwd resets between calls and
+will jump back to the primary worktree). The primary working
+tree stays reserved for the original session.
+
+Cleanup when the session ends: `git worktree remove
+../<sibling-dir>`. If the branch has unpushed commits, push first
+or the remove refuses without `--force`.
+
+# Session 2026-05-23 — phase16-t3 data & observability sweep
+
+## T3 sweep report — `tests/perf/phase16-t3-data-obs.md` (PR #228)
+
+21-sub-task live audit of the Supabase project
+(`kbtkxpvchmunwjykbeht`, Postgres 17.6) via Supabase MCP
+`execute_sql`. Three pre-flight techniques validated once and then
+relied on for every subsequent check: `to_regclass` for table
+existence, `set_config('role','anon',true)` for RLS context switch
+inside a single execute_sql call, `SET LOCAL statement_timeout='1500ms';
+SELECT pg_sleep(3)` to prove cancellation primitive isn't masked by
+MCP-side timeouts. The full report carries the SQL for each task so
+operator can re-run any check verbatim.
+
+Five locked-in invariants (no findings):
+- 7/7 CHECK constraints fire `23514` on attempted violations.
+- anon SELECT/INSERT/RPC all deny on every core table;
+  `exec_sql` regression intact (function does not exist).
+- FK cascade `campaign → campaign_messages` verified end-to-end
+  (`23503` rejection on bad parent UUID + 3 → 0 messages on
+  parent DELETE).
+- Per-role `statement_timeout` in `pg_db_role_setting` exact match:
+  anon=3s, authenticated=8s, service_role=30s.
+- WAL archival live (`pg_stat_archiver.archived_count=590,
+  failed_count=0`) — PITR ready at the WAL layer; retention
+  window is plan-dependent (Supabase dashboard).
+
+## T3 fixes — PR #230
+
+`fix(security): revoke account_deletions grants + add seo_score index`
+
+Closes the two actionable findings from the sweep:
+
+- **T3.8-A (HIGH)** — `REVOKE ALL ON public.account_deletions FROM
+  anon, authenticated, PUBLIC;` applied to live DB + mirrored in
+  `supabase_schema.sql`. Supabase grants the full privilege set to
+  anon/authenticated by default on every new public-schema table;
+  RLS `account_deletions_deny_all` (RESTRICTIVE, `USING(false)`)
+  already blocked read/write, but a future regression that dropped
+  the policy would silently expose the GDPR audit log. Now both
+  layers must fail before exposure. Verified: post-REVOKE
+  `information_schema.table_privileges` shows only `postgres` +
+  `service_role` rows; `service_role` SELECT still works.
+  `schema_drift_check.py::TABLES` already covers `account_deletions`
+  in its 5-table tuple, and `check_table_grants()` will stay green
+  against the REVOKE'd state — no code change needed there.
+- **T3.1-A (MEDIUM)** — `CREATE INDEX IF NOT EXISTS
+  idx_leads_seo_score ON public.leads (seo_score) WHERE seo_score
+  IS NOT NULL;` added. `WHERE seo_score BETWEEN 50 AND 100` used
+  to fall through `enable_seqscan=off` to a Seq Scan because no
+  index covered the column; now picks `Index Scan
+  idx_leads_seo_score`. Partial form because `seo_score` is NULL
+  on every pre-audit row — keeps writes cheap. Plain btree handles
+  both `BETWEEN` and `<` operators (Forward / Backward scan); no
+  DESC variant needed.
+- `HOT_PATH_QUERIES` in `src/scripts/check_query_plans.py`
+  extended from 4 to 5 probes with the `seo_score BETWEEN` query
+  — a future schema drop trips the gate red.
+
+## T3 findings dispositioned as no-action
+
+Documented in `tests/perf/phase16-t3-followups.md`:
+
+- **T3.8-B (LOW)** — `account_deletions_deny_all` is RESTRICTIVE
+  while the 4 core deny-all policies are PERMISSIVE. RESTRICTIVE +
+  `USING(false)` and PERMISSIVE + `USING(false)` are semantically
+  equivalent for pure deny-all (both block). RESTRICTIVE is
+  strictly stronger (a future permissive policy can't override it),
+  so the mismatch errs on the safer side for the GDPR audit log
+  specifically. Standardizing all 5 tables on RESTRICTIVE would be
+  defensible cleanup, but no security gain on the 4 core tables
+  today and not worth churning the schema-drift baseline.
+- **T3.9-A (LOW)** — `update_updated_at_column` has EXECUTE granted
+  to PUBLIC + anon + authenticated. It's a trigger function (not
+  SECURITY DEFINER, returns `NEW`, not callable via PostgREST RPC),
+  so not exploitable. Standard Supabase trigger glue. When
+  `check_function_safety.py` is wired into CI, this function will
+  need to land in its `EXEC_GRANT_ALLOWLIST`.
+
+## T3 still-deferred (no infra to exercise live)
+
+- **T3.2** — JSONB shape on `audit_results`: zero `Completed` rows in
+  the live DB. Static gate `check_jsonb_shapes.py` continues to
+  enforce the contract once data exists.
+- **T3.12 / T3.13 / T3.14** — cooperative cancel, /stats stampede,
+  browser pool: need a running backend + workload. Static contracts
+  verified; live repros documented in the main report.
+- **T3.15 / T3.16 / T3.17 live tail** — Sentry capture, Web Vitals
+  aggregation, JsonFormatter stdout sample: need Render-side log
+  access (Supabase MCP only sees Postgres logs).
+
+## Operational state hit during this session
+
+- **GitHub Actions CI is fully red on every PR right now** —
+  account-level billing block ("recent account payments have failed
+  or your spending limit needs to be increased"). Every job fails
+  in 1-3s with empty `steps[]` because GH never starts them. Not
+  code, not secrets, not flaky — billing gate fires before job
+  startup. Resolve via GitHub Settings → Billing & plans, then
+  re-trigger PRs. Until resolved, treat the per-PR fail list as
+  noise: any "real" failures will only surface once jobs actually
+  run.
+- **Render prod services unreachable** —
+  `https://lead-scraper-frontend.onrender.com` returns HTTP/2 404
+  with `x-render-routing: no-server` (DNS resolves to Render
+  Cloudflare edge `216.24.57.7/251`, but the Render router has no
+  service registered at that hostname). Backend probe returns
+  nothing. Investigate via Render dashboard: services suspended,
+  deleted, or renamed. If renamed, update `render.yaml` +
+  `docs/secret-inventory.md` to match.
+
+## CLAUDE.md invariants to remember when re-running similar audits
+
+- The 5 RLS-protected tables are `leads`, `campaigns`,
+  `campaign_messages`, `orchestration_jobs`, **and**
+  `account_deletions` (5, not 4 — every doc still saying "4 core
+  tables" was written before the GDPR Article 17 audit table
+  landed and should be re-read with that in mind).
+- The schema-drift gate (`schema_drift_check.py::TABLES`) and the
+  grants gate (`check_grants_matrix.py`) both must include
+  `account_deletions`; verified intact 2026-05-23.
+- The query-plans gate (`check_query_plans.py::HOT_PATH_QUERIES`)
+  now has 5 probes (created_at, audit_status, unique_key,
+  campaign_messages.campaign_id, seo_score range).
+- The two `..on grants` defenses (RLS deny-all + zero anon
+  GRANTs) must BOTH hold for the 5 tables; a single-layer failure
+  is the threshold for a HIGH finding even when the other layer
+  still blocks.
+
+## Branch hygiene gotcha (encountered twice this session)
+
+Parallel concurrent sessions share the same git working tree.
+Operating sequences like `git checkout -b new-branch origin/main &&
+<edit files> && git commit` may **land the commit on whichever
+branch was checked out last by any session**, not the one you
+just created. Recovery: `git cherry-pick <sha>` from the correct
+branch + `git reset --hard <prior-head>` on the wrong branch (the
+commit is preserved by the cherry-pick; the reset just drops the
+duplicate). When this happens twice in one session it's the
+parallel-session pattern, not a hook bug. The fix lands on the
+right branch and the wrong branch returns to its prior origin
+head.
+
+# Session 2026-05-23 — dogfood prep (PRs #243 / #247 / #249)
+
+Three parallel PRs landed dogfood infrastructure: email-stack
+planning docs, a demo-data column + seed pipeline, and a cookie-only
+next-intl scaffold. None auto-applies on merge — wiring follow-ups
+are gated on operator setup (DNS, native-speaker review,
+screenshot-quality decisions).
+
+## Demo data infrastructure (PR #247)
+
+- **Live schema change** (applied via Supabase MCP
+  `apply_migration` named `add_leads_is_demo_column` on project
+  `kbtkxpvchmunwjykbeht`):
+  ```sql
+  ALTER TABLE public.leads
+    ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+  CREATE INDEX IF NOT EXISTS idx_leads_is_demo
+    ON public.leads(is_demo)
+    WHERE is_demo = TRUE;
+  ```
+  Partial index — production rows default FALSE and never enter the
+  index → writes stay cheap. Mirrored in `supabase_schema.sql`;
+  `schema_drift_check.py` picks up the column automatically via
+  `parse_expected_columns` (allowlist is name-only, derived from
+  CREATE/ALTER TABLE parsing). Reversible down script kept inline
+  as a comment.
+- `supabase_helper.delete_demo_leads()` uses the real boolean
+  predicate `eq("is_demo", True)` — no sentinel needed (unlike
+  `delete_all_*` which need a tautology since PostgREST refuses
+  naked DELETE). Hits `idx_leads_is_demo`.
+- **`DELETE /leads/clear-demo`** mirrors `/leads/clear` template
+  exactly — dual-gate (`verify_api_key` + `verify_admin_token`) +
+  `@limiter.limit("3/hour")`. Orchestration jobs untouched (demo
+  seeds never spawn jobs). Proxy `ADMIN_TOKEN_PATHS` set extended
+  to `{'leads/clear', 'leads/clear-demo'}` so X-Admin-Token
+  injects on both paths.
+- `src/scripts/seed_demo_data.py` — 20 fictional Croatian
+  businesses across 4 segments (vacation rental / restaurant /
+  dental / fitness) × 4-5 cities (Zagreb / Split / Dubrovnik /
+  Rijeka / Plitvice). Stable `_demo_<slug>` unique_keys so re-runs
+  ON CONFLICT cleanly. `is_demo=True`, `lead_source='_demo_'`
+  double-marked. Run:
+  ```
+  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+    python -m src.scripts.seed_demo_data
+  ```
+- **Demo flow integrity**: `GET /leads` via `list_leads_recent`
+  uses `.select("*")` so `is_demo` flows to the frontend. Single-
+  row mutation paths also use `.select("*")` so refreshed rows
+  carry the flag. Any future endpoint that selects explicit
+  columns must include `is_demo` or the toggle silently breaks.
+- Frontend `FilterBar` "Hide demo data" checkbox. Operator-facing
+  state in `localStorage['ldsHideDemoData']` ('0' or '1'); default
+  TRUE so seeded rows hide once operator has real leads. Demo
+  gate runs FIRST in `filteredLeads` so audited/high-risk view
+  counts stay honest under the toggle.
+- Settings → Danger Zone: "Remove all demo data" button above the
+  existing "Clear All Leads" (same dual-gate, same admin-token
+  injection on the proxy side).
+- **Cosmetic gap (deliberate, not a bug):** seeded rows have no
+  `audit_results` / `seo_score` / `outreach_score`. Dashboard reads
+  them as `Pending` — realistic for "freshly imported" but half-
+  populated for screenshot/onboarding purposes. If onboarding
+  screenshots need richer visuals, add varied scores in a follow-up
+  to `seed_demo_data.py::DEMO_LEADS`.
+
+## Cookie-only next-intl scaffold (PR #249)
+
+- **Chose cookie-only over route-group + middleware composition.**
+  bookbed-website uses route-group (`app/[locale]/`) + simple
+  `createMiddleware(routing)`; LDS doesn't because (1) internal
+  tooling, no public/SEO URLs to preserve, (2) `frontend/proxy.ts`
+  already owns CSP-nonce + Supabase auth gate and composing a
+  second top-level next-intl middleware is half-day work for no
+  operator-facing benefit, (3) operator switches locale once a
+  session at most. Upgrade path to route-group documented in
+  `frontend/i18n/routing.ts` header — flip later if SEO ever
+  matters.
+- `frontend/i18n/routing.ts` — `locales=['en','hr']`,
+  `defaultLocale='en'`, `LOCALE_COOKIE='NEXT_LOCALE'`,
+  `isLocale()` guard.
+- `frontend/i18n/request.ts` — `getRequestConfig()` reads cookie
+  via `next/headers.cookies()`, falls back to `defaultLocale` on
+  missing/unknown. Dynamic import per locale so only the matching
+  messages JSON ships per request.
+- `frontend/next.config.ts` — composes
+  `withNextIntl(withSentryConfig(...))`. next-intl plugin wraps
+  Sentry's wrap (outermost). Plugin order verified by `next build`
+  (Turbopack) clean.
+- `frontend/app/layout.tsx` — `getLocale()` + `getMessages()` on
+  the server, `<html lang={locale}>`, `<NextIntlClientProvider>`
+  wraps children. The existing `dynamic = 'force-dynamic'` (in
+  place for the CSP-nonce pipeline) ensures cookie reads aren't
+  statically cached.
+- `frontend/messages/{en,hr}.json` — 50+ strings across 8
+  namespaces (`nav` / `common` / `dashboard` / `leadTable` /
+  `actions` / `settings` / `login` / `localeSwitcher`).
+  **`hr.json` carries machine-quality translations** — operator
+  must skim before any external user touches the app.
+- **PARITY GOTCHA:** `hr.json` has a `_meta` namespace
+  (`{note: "review needed"}`) that `en.json` doesn't. next-intl
+  ignores unknown keys today, so harmless — but a future parity-
+  checking linter would trip. Move to `messages/_meta.json` (or
+  delete the namespace) if/when such a linter lands.
+- `frontend/app/components/LocaleSwitcher.tsx` — client `<select>`,
+  sets NEXT_LOCALE cookie (Max-Age=1y, SameSite=Lax, Secure in
+  prod) + `router.refresh()` so RSC re-renders without losing
+  modal/scroll state.
+- `frontend/app/components/Sidebar.tsx` — `useTranslations('nav')`
+  wired for Dashboard / Insights / Settings / Sign Out. Mounted
+  LocaleSwitcher below nav (only when sidebar expanded). Remaining
+  ~150 visible strings (`FilterBar` options, `LeadTable` headers,
+  action buttons, modals, page titles, `login/page.tsx`,
+  `insights/page.tsx`, `campaigns/page.tsx`) are still inline —
+  incremental extraction follow-up.
+
+## Email stack plan (PR #243, no wiring yet)
+
+`docs/email-deliverability.md` is the operator runbook for
+authenticated email send. `docs/email-dispatch-architecture.md` is
+the 5-PR wiring plan. **Both ship with `Do NOT wire` gating clearly
+stated** — the wiring PRs only become safe when the deliverability
+checklist (DNS green, Resend account live, mail-tester 10/10,
+Gmail/Outlook seed inbox tests pass) is 100% complete.
+
+Key decisions locked in by the docs:
+- Sending domain: **`mail.leaddatascraper.com`** (NEW — operator
+  registers `leaddatascraper.com` first, ~$10–15/yr at Cloudflare).
+  Subdomain isolates outreach reputation from any future
+  marketing/transactional sends on the root.
+- Provider: **Resend EU region**. BookBed already uses Resend (one
+  account); $20/mo Pro = 50k/mo.
+- **DMARC ramp**: `p=none` (2 weeks RUA-only) →
+  `p=quarantine pct=25→50→100` → `p=reject`. Aggressive day-1
+  policies silently drop legit forwarders (Google Groups, internal
+  mailing lists). RUA reports to `dmarc@leaddatascraper.com`
+  (operator-controlled mailbox required; Cloudflare Email Routing
+  free forward works).
+- **DKIM**: 3 CNAMEs Resend generates per account. Doc points at
+  Resend dashboard for the real values — embedded placeholders
+  would be wrong and tempt copy-paste.
+- **No MX** on `mail.` subdomain — outbound-only; replies go to
+  operator's real inbox via `Reply-To` header.
+
+Wiring-PR sequence (`docs/email-dispatch-architecture.md` §4):
+1. `ResendEmailSender(EmailSenderBase)` HTTP API client (NOT SMTP
+   — SMTP loses webhooks → `campaign_messages` state machine stays
+   stuck at `pending` forever).
+2. Schema additions (`campaign_messages.provider_message_id`,
+   `bounce_reason`; new tables `email_send_ledger`,
+   `email_suppression`) + `schema_drift_check.py` +
+   `check_grants_matrix.py` allowlist updates.
+3. `POST /webhooks/resend` with Svix-Signature HMAC verify
+   (`secrets.compare_digest` against `RESEND_WEBHOOK_SECRET`) +
+   replay-window check (`Svix-Timestamp` ±5 min) + Pydantic-Literal
+   event model. Updates `campaign_messages.status` by
+   `provider_message_id`; suppression-list inserts on bounce /
+   complaint.
+4. **Render Cron** dispatcher (NOT uvicorn-lifecycle loop, NOT
+   pg_cron — Cron is observable, decoupled from worker lifecycle,
+   avoids multi-worker leader-election). Per-domain throttle 3/hr +
+   per-day global cap 50 + 09:00–18:00 Europe/Sarajevo window
+   (cold outreach landing at 03:00 local recipient time signals
+   automation; 10:00 local signals human).
+5. `/campaigns/{id}/send` operator endpoint + UI "Send Now" button
+   (X-Admin-Token gate) + suppression-list view in Settings.
+
+## Branch hygiene reinforcement
+
+The parallel-session branch-confusion gotcha (already documented in
+Session 2026-05-22 notes) hit **twice** in this session — once
+after C.3 committed onto `docs/crossover-spot-checks` instead of
+`chore/demo-data-seed-13.3`, once after C.2 committed onto
+`docs/crossover-verification-2026-05-23` instead of
+`chore/i18n-scaffold-13.1`. Recovery via cherry-pick + reset (and
+once `git rebase --onto origin/main <parallel-session-tip>`) worked
+both times. **Cheap-insurance mitigation for future sessions:**
+right after `git checkout -b <new> origin/main` and BEFORE editing
+any file, run `git symbolic-ref HEAD` and verify the output ends in
+`refs/heads/<new>`. If the parallel session has swapped HEAD, the
+output names a different branch and you need to re-checkout. ~3
+seconds, catches the gotcha at point-of-no-loss.
+
+# Session 2026-05-23 — BookBed crossover execution (PRs #457 / #255)
+
+Cross-repo work driven by `docs/bookbed-crossover.md`. Two PRs
+opened, one Phase deferred, one plan doc written.
+
+## Deliverables
+
+- **bookbed PR [#457](https://github.com/DanLika/rab_booking/pull/457)** —
+  `security(email): route 18 templates through guarded wrapper`.
+  Step 2 of Phase B. PR #454 (separate session, prior day) added
+  `email-guards.ts` + extended `sendEmailWithValidation` wrapper but
+  every template under `functions/src/email/templates/` inlined
+  `resendClient.emails.send({...})` directly — guards had **zero
+  production effect** before this PR. Refactored mechanically via
+  a node-script regex pass (matched 18/18 after one regex relax
+  for trial-variant `errorMsg` extraction). tsc clean; jest
+  101/101 on `email-guards.test.ts` + 262/266 on the wider suite
+  (4 pre-existing `stripeConnect.test.ts` failures, confirmed
+  pre-existing by stash-and-rerun). Lint baseline removes ~219
+  LOC of `if (typedResult.error) throw` boilerplate.
+- **LDS PR [#255](https://github.com/DanLika/LeadDataScraper/pull/255)** —
+  `docs(crossover): verify 8 spot-check rows + add Phase D
+  backport plan`. Pure docs.
+
+## Crossover findings worth surfacing
+
+Read all 8 files in `docs/bookbed-crossover.md`'s §Verification-debt
+table. Highlights:
+
+- **Row 2.3 SSRF (bookbed CF)** — `icalSync.ts::validateIcalUrl`
+  (line 44) exists and rejects loopback / RFC1918 / Google metadata
+  / `.internal` / `.local`. Weaker than LDS `src/utils/ssrf_guard.py`:
+  hostname-prefix match (not DNS-resolve), no AWS/Azure metadata,
+  no DNS-rebind double-resolve. If ever ported back to LDS as
+  reference: it's NOT a full replacement.
+- **Row 2.12 Rate limit (bookbed CF)** — ❌ overturned: 10/21
+  callables (~48%) lack `checkRateLimit`, including spam / destructive
+  vectors `customEmail`, `deleteUserAccount`, `resendBookingEmail`.
+  Doc previously claimed "verify all" — verification shows partial
+  coverage. Tracked as new Phase E.1.
+- **Row 2.13 Firestore CHECK-equivalent** — ❌ overturned:
+  `firestore.rules` (441 LOC) has **ZERO** type-check patterns
+  (`is string` / `is number` / `matches(`). Only 5 field-allowlist
+  sites via `hasAny`/`hasOnly`. No Firestore equivalent of LDS's 10
+  CHECK constraints. Tracked as new Phase E.2.
+
+## Phase D plan doc
+
+`docs/phase-d-header-backport-plan.md` — copy-paste patches for
+3 missing static headers (COOP `same-origin` / CORP `same-site` /
+`X-Permitted-Cross-Domain-Policies: none`), broader Permissions-Policy
+(3 → 11 directives incl. FLoC + Topics opt-outs), 4 CSP supplementary
+directives. **Surprising:** 3 of 6 originally claimed gaps
+(`object-src`, `base-uri`, `form-action`) are already in LDS
+`proxy.ts`. **Not executed** per session prompt ("defer until
+LDS CI green to verify backport doesn't regress").
+
+## Bookbed wrapper-extension pattern
+
+PR #454 + #457 together implement the pattern: when a guard module
+exists but **has zero production callers**, the migration PR makes
+the dead code the canonical path. Two distinct PRs preserve
+review-ability — #454 is "what the guards do" (124 LOC + 101 tests),
+#457 is "wire all templates to use the guards" (mechanical 18-file
+diff). Useful pattern for any future LDS refactor where guards land
+ahead of their callers.
+
+## Mass-refactor script-via-ctx_execute pattern
+
+Refactoring 18 templates manually = ~5 min via Read+Edit per file.
+Refactoring via `ctx_execute(language: "javascript")` regex pass =
+30 seconds + 1 idempotency-bug fix. Bug worth noting: the first pass
+checked `if (!src.includes('sendEmailWithValidation'))` to decide
+whether to add the import, but the replace step had ALREADY put the
+function call into `src` — `.includes()` returned true and the
+import was never added. Fix: check the import-line string specifically
+(`if (src.includes(IMPORT_LINE))`), not the function name. For any
+future mass-edit, idempotency check goes BEFORE the replace OR
+matches on the import line, never on the substring shared by both.
+
+## Branch-hygiene reinforcement (third occurrence)
+
+Session 2026-05-22 and 2026-05-23-dogfood-prep notes both flagged
+parallel-session HEAD swaps. This session hit it again: started on
+`docs/claude-md-dogfood-prep-2026-05-23`, harness/parallel-session
+swapped HEAD to `chore/visual-baselines-2026-05-23` mid-orientation.
+The `git symbolic-ref HEAD` verify-after-checkout pattern (~3 seconds)
+caught the issue at point-of-no-loss. Reinforced: **before any
+substantive write, run `git symbolic-ref HEAD` and confirm the branch
+name matches what you intended**. This is mandatory for cross-repo
+sessions where you `cd` into a different repo and back. Cost: 3 sec.
+Cost of skipping: minutes-to-hours of cherry-pick recovery.
+
+## bookbed repo nuances picked up this session
+
+- Email template surface is **18 files** (not 19 as PR #454
+  description's count suggests). `passwordReset.ts` at top-level
+  doesn't call `resendClient.emails.send` directly — it calls into
+  the `password-reset.ts` template helper, which does. The wrapper
+  migration only touches templates.
+- bookbed has **21 `onCall(...)` callable handlers** in
+  `functions/src/`. Listed in `bookbed-crossover.md` row 2.12 finding.
+- bookbed CF logger lives at `functions/src/logger.ts` — the doc
+  previously said `functions/src/lib/logger.ts` (no `lib/` segment
+  exists). Path corrected in the verification appendix.
+- bookbed jest suite includes `test/firestore_rules/*` which need
+  the Firebase emulator. Local runs use
+  `--testPathIgnorePatterns=firestore_rules` to skip those without
+  emulator setup. Live CI presumably wires the emulator.
