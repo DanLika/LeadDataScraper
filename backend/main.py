@@ -875,10 +875,14 @@ async def list_leads(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200, description="Page size, 1..200"),
     cursor: Optional[str] = Query(default=None, max_length=512, description="Opaque cursor from previous page's next_cursor"),
+    include_demo: bool = Query(default=False, description="Include is_demo=true rows. Default false hides Phase 13.3 demo seed."),
 ):
     """Retrieve a page of leads ordered by created_at DESC.
 
-    Backwards-compatible default: no params → first page (50 rows).
+    Backwards-compatible default: no params → first page (50 rows) of
+    real (non-demo) leads. `?include_demo=true` returns the union of
+    real + demo rows — used by the "Show demo data" toggle.
+
     Returns {leads, next_cursor, has_more}; next_cursor is null on the
     final page. has_more is the authoritative end-of-stream signal —
     next_cursor==null is sufficient but the dedicated boolean avoids
@@ -889,7 +893,7 @@ async def list_leads(
             return error_response("Database not connected", status_code=503)
         decoded = _decode_lead_cursor(cursor) if cursor else None
         # Fetch limit+1 to detect has_more without an extra round-trip.
-        rows = await db.list_leads_recent(limit=limit + 1, cursor=decoded)
+        rows = await db.list_leads_recent(limit=limit + 1, cursor=decoded, include_demo=include_demo)
         has_more = len(rows) > limit
         page = rows[:limit]
         next_cursor = None
@@ -1219,7 +1223,7 @@ async def get_insights(request: Request):
         logger.error("Error getting insights: %s", e, exc_info=True)
         return error_response("Insights currently unavailable")
 
-async def _compute_stats() -> dict:
+async def _compute_stats(include_demo: bool = False) -> dict:
     """Build the /stats response from scratch.
 
     Pulled out of the handler so `stats_cache.get(_compute_stats)` can
@@ -1227,9 +1231,13 @@ async def _compute_stats() -> dict:
     cache-hit requests. Returns the same dict shape /stats returns;
     callers must NOT mutate the result (it may be shared across
     in-flight requests via the cache).
+
+    `include_demo` defaults False — only the default path is cached
+    (operator default view). The "Show demo data" toggle invokes
+    `include_demo=True` directly, bypassing the cache.
     """
     import pandas as pd
-    leads = await db.get_stats_rows()
+    leads = await db.get_stats_rows(include_demo=include_demo)
 
     if not leads:
         return {
@@ -1266,18 +1274,29 @@ async def _compute_stats() -> dict:
 
 @app.get("/stats", dependencies=[Depends(verify_api_key)])
 @limiter.limit("30/minute")
-async def get_stats(request: Request):
+async def get_stats(
+    request: Request,
+    include_demo: bool = Query(default=False, description="Include is_demo=true rows. Bypasses the cache when true."),
+):
     """Retrieve structured statistics about leads for charting.
 
-    Result is memoized for `stats_cache.ttl_seconds` (default 60s).
-    Write paths (/upload completion, orchestrator job finish) call
+    Default path (`include_demo=false`) is memoized for
+    `stats_cache.ttl_seconds` (default 60s). Write paths (/upload
+    completion, orchestrator job finish, /leads/demo wipe) call
     `stats_cache.invalidate()` so the next /stats sees fresh numbers.
     A stampede lock inside `stats_cache.get` guarantees N concurrent
     /stats at expiry only run the DataFrame build once.
+
+    `include_demo=true` bypasses the cache — it's an operator-toggle
+    code path (the "Show demo data" pill), called rarely, and caching
+    a second variant adds invalidation complexity without a real
+    throughput win.
     """
     try:
         if not db.client:
             return error_response("Database not connected", status_code=503)
+        if include_demo:
+            return await _compute_stats(include_demo=True)
         payload = await stats_cache.get(_compute_stats)
         return payload
     except Exception as e:
@@ -1358,7 +1377,49 @@ async def clear_leads(request: Request):
     db.delete_all_leads()
     db.delete_all_jobs()
     logger.warning("DESTRUCTIVE: /leads/clear invoked — all leads + jobs wiped.")
+    stats_cache.invalidate()
     return {"status": "cleared", "message": "All leads and jobs have been deleted."}
+
+
+class DemoLeadsDeletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Literal pins the exact confirmation phrase — wrong value = 422 via
+    # Pydantic before the handler runs. Narrower than /leads/clear (which
+    # has no body) because the operator-facing Settings UI surfaces this
+    # behind a type-to-confirm modal, and the typed phrase is the
+    # cheap proof-of-intent that survives a misclick.
+    confirmation: Literal["REMOVE DEMO"]
+
+
+@app.delete(
+    "/leads/demo",
+    dependencies=[Depends(verify_api_key), Depends(verify_admin_token)],
+)
+@limiter.limit("3/hour")
+async def delete_demo_leads(request: Request, payload: DemoLeadsDeletionRequest):
+    """Wipe Phase 13.3 demo seed rows (`is_demo=true`) and any
+    `campaign_messages` referencing them. Bound by the same admin-token
+    + API-key + rate-limit gates as `/leads/clear`, plus a Pydantic
+    Literal body to prevent accidental wipes from a stray DELETE.
+
+    Returns the row counts so the operator-facing toast can show
+    `"Removed N demo leads (M messages)"`. Both counts may be 0 — the
+    operator may have already cleared them via SQL Studio.
+    """
+    if not db.client:
+        return error_response("Database not connected", status_code=503)
+    try:
+        counts = await asyncio.to_thread(db.delete_demo_leads)
+    except Exception as exc:
+        logger.exception("Demo-data wipe failed: %s", exc)
+        return error_response("Failed to remove demo leads")
+    logger.warning(
+        "DESTRUCTIVE: /leads/demo invoked — %d demo leads + %d messages wiped.",
+        counts.get("leads_deleted", 0),
+        counts.get("messages_deleted", 0),
+    )
+    stats_cache.invalidate()
+    return {"status": "cleared", **counts}
 
 
 # -----------------------------------------------------------------------------

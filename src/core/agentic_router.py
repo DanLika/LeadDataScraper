@@ -553,14 +553,32 @@ class AgenticRouter:
         # a scalar so the prompt can ground Gemini against the real population
         # size instead of letting it confuse the sample count for the total —
         # the latter was hallucinating "180" against 521 in the live DB.
-        response = self.db.client.table("leads").select("name,company_name,audit_status,seo_score,lead_source").limit(200).execute()
+        #
+        # Phase 13.3 demo seed rows (is_demo=true) are excluded unconditionally
+        # — strategic insights are about REAL business; demo data would skew
+        # the vulnerability + industry pattern signal and inflate the grounding
+        # total above. The same filter is applied to the count query below so
+        # the total_leads scalar stays consistent with the sample population.
+        response = (
+            self.db.client.table("leads")
+            .select("name,company_name,audit_status,seo_score,lead_source")
+            .eq("is_demo", False)
+            .limit(200)
+            .execute()
+        )
         leads = response.data if hasattr(response, 'data') else []
 
         if not leads:
             return {"summary": "No data yet to analyze. Try importing some leads!", "insights": [], "top_priorities": []}
 
         try:
-            count_resp = self.db.client.table("leads").select("unique_key", count="exact").limit(1).execute()
+            count_resp = (
+                self.db.client.table("leads")
+                .select("unique_key", count="exact")
+                .eq("is_demo", False)
+                .limit(1)
+                .execute()
+            )
             total_leads = int(getattr(count_resp, "count", None) or 0)
         except Exception as e:
             # Best-effort: if the count call fails we fall back to the sample

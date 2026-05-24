@@ -118,7 +118,12 @@ class SupabaseHelper:
     # calls — it already runs off the request loop and the to_thread
     # hop would just add scheduling overhead.
 
-    async def list_leads_recent(self, limit: int = 50, cursor: "dict | None" = None):
+    async def list_leads_recent(
+        self,
+        limit: int = 50,
+        cursor: "dict | None" = None,
+        include_demo: bool = False,
+    ):
         """Async wrapper for the /leads handler.
 
         Keyset (cursor) pagination on (created_at DESC, unique_key DESC).
@@ -135,9 +140,17 @@ class SupabaseHelper:
         are interpolated directly — they're either pristine ISO + the
         unique_key the API just emitted, or already-validated cursor
         contents. constraint regex in the cursor decoder bounds length.
+
+        `include_demo` defaults False — Phase 13.3 demo seed rows
+        (`is_demo=true`) are hidden from the dashboard unless the
+        operator's "Show demo data" toggle is on. Real producers (CSV
+        upload, Google-Maps scrape) write `is_demo=false` so the filter
+        is a no-op for them.
         """
         def _query():
             q = self.client.table("leads").select("*")
+            if not include_demo:
+                q = q.eq("is_demo", False)
             if cursor and isinstance(cursor.get("c"), str) and isinstance(cursor.get("k"), str):
                 c = cursor["c"]
                 k = cursor["k"]
@@ -151,18 +164,69 @@ class SupabaseHelper:
         response = await asyncio.to_thread(_query)
         return response.data
 
-    async def get_stats_rows(self):
+    async def get_stats_rows(self, include_demo: bool = False):
         """Async wrapper for the /stats handler. Returns the narrow column
         set the chart aggregation needs — full rows would inflate the
-        pandas DataFrame and dominate the thread-hop savings."""
+        pandas DataFrame and dominate the thread-hop savings.
+
+        `include_demo` defaults False — Phase 13.3 demo seed rows are
+        excluded from the dashboard's stats by default so demo data
+        doesn't inflate the operator's real-lead counts.
+        """
         def _query():
-            return (
+            q = (
                 self.client.table("leads")
                 .select("audit_status", "audit_results", "seo_score", "lead_source")
-                .execute()
             )
+            if not include_demo:
+                q = q.eq("is_demo", False)
+            return q.execute()
         response = await asyncio.to_thread(_query)
         return response.data
+
+    def delete_demo_leads(self) -> dict:
+        """Hard-delete every `is_demo=true` lead and any campaign_messages
+        that reference them. Returns row counts for the operator-facing
+        toast.
+
+        Order matters: `campaign_messages.lead_unique_key` is a FK with
+        no ON DELETE clause (defaults to NO ACTION), so a row tied to a
+        demo lead would block the parent DELETE. Wipe messages first,
+        then leads.
+
+        The operator may have generated outreach drafts against a demo
+        lead during a screenshot session; deleting those messages with
+        the lead is the expected behaviour.
+        """
+        if not self.client:
+            return {"leads_deleted": 0, "messages_deleted": 0}
+
+        demo_keys_resp = (
+            self.client.table("leads")
+            .select("unique_key")
+            .eq("is_demo", True)
+            .execute()
+        )
+        demo_keys = [row["unique_key"] for row in (demo_keys_resp.data or []) if row.get("unique_key")]
+
+        messages_deleted = 0
+        if demo_keys:
+            msg_resp = (
+                self.client.table("campaign_messages")
+                .delete()
+                .in_("lead_unique_key", demo_keys)
+                .execute()
+            )
+            messages_deleted = len(msg_resp.data or [])
+
+        leads_resp = (
+            self.client.table("leads")
+            .delete()
+            .eq("is_demo", True)
+            .execute()
+        )
+        leads_deleted = len(leads_resp.data or [])
+        return {"leads_deleted": leads_deleted, "messages_deleted": messages_deleted}
 
     async def find_running_job(self):
         """Async wrapper for orchestrator's resume-check on /process-lead /
