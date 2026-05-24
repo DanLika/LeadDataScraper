@@ -31,6 +31,7 @@ import re
 import sys
 import unicodedata
 import unittest
+import pytest
 from typing import Any
 from unittest.mock import patch
 
@@ -251,6 +252,7 @@ async def _gen_linkedin(router, lead: dict) -> dict:
 
 # ---- Outreach + LinkedIn i18n test class ------------------------------------
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestOutreachI18n(unittest.IsolatedAsyncioTestCase):
     """Bosnian/Croatian inputs through /draft-outreach and /draft-linkedin."""
@@ -355,6 +357,7 @@ class TestOutreachI18n(unittest.IsolatedAsyncioTestCase):
 
 # ---- AI mapper i18n ---------------------------------------------------------
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestMapperI18n(unittest.IsolatedAsyncioTestCase):
     """Croatian CSV header row through GeminiMapper.get_column_mapping."""

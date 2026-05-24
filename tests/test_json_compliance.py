@@ -35,6 +35,7 @@ import os
 import re
 import sys
 import unittest
+import pytest
 from typing import Any, Callable
 from unittest.mock import MagicMock, patch
 
@@ -318,6 +319,7 @@ class _FakeSupabase:
 
 # ---- Test --------------------------------------------------------------------
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestJSONCompliance(unittest.IsolatedAsyncioTestCase):
     """100% JSON parse + schema conformance over N runs per endpoint."""

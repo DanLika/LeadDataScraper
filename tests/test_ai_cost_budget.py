@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import unittest
+import pytest
 from collections import defaultdict
 from typing import Callable
 from unittest.mock import patch
@@ -199,6 +200,7 @@ class _FakeSB:
 
 # ---- Test --------------------------------------------------------------------
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestAICostBudget(unittest.IsolatedAsyncioTestCase):
     """End-to-end token/cost budget over 20 fixture leads."""
