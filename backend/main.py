@@ -741,6 +741,21 @@ async def _block_logger_middleware(request: Request, call_next):
             )
 
 
+# Browser security headers — defense in depth for the case where FastAPI
+# is reached directly (bypassing the Next.js proxy that already stamps
+# these on the HTML routes). CSP intentionally omitted: backend never
+# serves HTML. HSTS intentionally omitted: the Render edge already adds
+# it on the frontend hostname, and stamping it on a JSON-only API host
+# pollutes the preload list with a host that has no HTML route to serve.
+@app.middleware("http")
+async def _security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
+
 @app.get("/")
 async def root():
     """Unauthenticated liveness probe. Intentionally returns no product /
