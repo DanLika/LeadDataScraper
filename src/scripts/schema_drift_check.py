@@ -14,8 +14,10 @@ Assertions:
 - Every column in DB is declared in ``supabase_schema.sql`` (no silent drift).
 - RLS enabled on leads, campaigns, campaign_messages, orchestration_jobs,
   account_deletions.
-- A deny-all policy (qual=false, with_check=false, anon+authenticated, FOR ALL)
-  exists on each of those 5 tables.
+- A deny-all policy (AS RESTRICTIVE, qual=false, with_check=false,
+  anon+authenticated, FOR ALL) exists on each of those 5 tables. RESTRICTIVE
+  is enforced so a future ad-hoc PERMISSIVE qual=true policy added in Studio
+  cannot OR over the deny.
 - No GRANT to anon / authenticated / PUBLIC on those 5 tables.
 - ``add_lead_column`` function is ``SECURITY DEFINER``, owned by ``postgres``,
   with ``search_path`` set, and has no EXECUTE grant to anon/authenticated/PUBLIC.
@@ -183,23 +185,24 @@ def check_rls(conn: psycopg.Connection) -> list[str]:
 
 def check_deny_policies(conn: psycopg.Connection) -> list[str]:
     cur = conn.execute(
-        "SELECT tablename, policyname, roles, cmd, qual, with_check "
+        "SELECT tablename, policyname, permissive, roles, cmd, qual, with_check "
         "FROM pg_policies "
         "WHERE schemaname = 'public' AND tablename = ANY(%s)",
         (list(TABLES),),
     )
     by_table: dict[str, list[tuple]] = {}
-    for table, name, roles, cmd, qual, with_check in cur.fetchall():
+    for table, name, permissive, roles, cmd, qual, with_check in cur.fetchall():
         by_table.setdefault(table, []).append(
-            (name, set(roles or []), cmd, qual, with_check)
+            (name, permissive, set(roles or []), cmd, qual, with_check)
         )
 
     errs: list[str] = []
     for t in TABLES:
         ok = False
-        for name, roles, cmd, qual, with_check in by_table.get(t, []):
+        for name, permissive, roles, cmd, qual, with_check in by_table.get(t, []):
             if (
                 name == f"{t}_deny_all"
+                and permissive == "RESTRICTIVE"
                 and {"anon", "authenticated"}.issubset(roles)
                 and cmd == "ALL"
                 and qual == "false"
@@ -210,8 +213,9 @@ def check_deny_policies(conn: psycopg.Connection) -> list[str]:
         if not ok:
             errs.append(
                 f"deny_all policy missing or misconfigured on public.{t} "
-                f"(expected name={t}_deny_all, roles>={{anon,authenticated}}, "
-                f"FOR ALL, qual=false, with_check=false)"
+                f"(expected name={t}_deny_all, permissive=RESTRICTIVE, "
+                f"roles>={{anon,authenticated}}, FOR ALL, qual=false, "
+                f"with_check=false)"
             )
     return errs
 
