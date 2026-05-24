@@ -203,6 +203,27 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
         })
         self.env_patcher.start()
 
+        # No-op the guarded_generate_content_async budget gate. The test
+        # already stubs `client.aio.models.generate_content` via
+        # `_PromptCapture.install()`, but the surrounding wrapper
+        # `guarded_generate_content_async` *also* calls `check_budget` +
+        # `record_usage` against the live SQLite budget DB before the
+        # mocked call ever runs. Without these patches the test fails
+        # with `BudgetExceededError` once the operator's local budget
+        # DB accumulates near the daily ceiling (verified 2026-05-24
+        # smoke run: 4999246 / 5000000 tokens). Patching the symbols at
+        # `gemini_call` (where they're imported + invoked) keeps the
+        # production code path identical except for the gate, so the
+        # SHA256 of the captured prompt remains the prod prompt.
+        self.budget_check_patcher = patch(
+            "src.utils.gemini_call.check_budget", lambda *_a, **_kw: None
+        )
+        self.budget_check_patcher.start()
+        self.budget_record_patcher = patch(
+            "src.utils.gemini_call.record_usage", lambda *_a, **_kw: None
+        )
+        self.budget_record_patcher.start()
+
         # Fake Supabase with the three tables/queries our call sites trigger.
         # The linkedin path uses .eq("unique_key", val) — we return the fixture
         # only when the val matches snap-linkedin.
@@ -259,6 +280,8 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(c, f"{name} Gemini client must initialize")
 
     async def asyncTearDown(self):
+        self.budget_record_patcher.stop()
+        self.budget_check_patcher.stop()
         self.sb_patcher.stop()
         self.env_patcher.stop()
         if self.hunter._session and not self.hunter._session.closed:

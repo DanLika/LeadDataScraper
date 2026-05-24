@@ -54,3 +54,14 @@ slowapi==0.1.9
 # lock-python` pins the exact resolved version + sha256 hashes into
 # requirements.txt — the lockfile is the actual byte-level guarantee.
 sentry-sdk[fastapi]>=2.20,<3
+
+# ---------------------------------------------------------------------------
+# Dev-time deps (test runners) — pinned in requirements.in so `make
+# lock-python` keeps them hash-locked alongside runtime deps. They DO ship
+# in the Docker image (~50 KB total), which is acceptable until a separate
+# `requirements-dev.in` is introduced; the alternative (untracked + ad-hoc
+# `pip install` in operator venv) drops the suite when the venv is
+# rebuilt and was the root cause of pytest-asyncio missing in the
+# 2026-05-24 smoke run.
+# ---------------------------------------------------------------------------
+pytest-asyncio>=0.23,<1.0
