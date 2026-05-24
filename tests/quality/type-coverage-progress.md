@@ -158,6 +158,14 @@ Expected delta: **-36 errors**. Target-dir total: 173 → 137.
 
 ### Phase 2 — Gemini response TypedDicts (~110 errors, 1 PR)
 
+**SHIPPED 2026-05-23 — PR #261 `chore/typecov-phase2-gemini-types`.**
+Actual delta: **-140** (607 → 467). Module `src/utils/gemini_types.py`
+exports 9 TypedDicts + 3 narrowing helpers (`response_text`,
+`extract_function_call`, `typed_loads`). Full surface + per-file
+delta documented in `CLAUDE.md` § "Gemini-boundary type narrowing
+(PR #261)". The original recommendation below is preserved for
+historical context.
+
 Introduce `src/utils/gemini_types.py`:
 
 ```py

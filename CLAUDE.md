@@ -1815,6 +1815,77 @@ prefer `Path(__file__).resolve().parents[N] / 'src' / ...` — it's
 depth-independent and fails loud if the file moves without the test
 author noticing. Don't use the `'..'`-chain pattern.
 
+## Gemini-boundary type narrowing (PR #261)
+
+`src/utils/gemini_types.py` is the single seam where every Gemini
+call site picks up its types. Phase 2 of the type-coverage initiative
+(target +95% on `src/utils` + `src/scrapers` + `src/processors`):
+`mypy --strict src/` 607 → 467 (-140 errors).
+
+Three Optional-union sources used to cascade as `union-attr` at
+every downstream `.get()` / `.strip()` / `.candidates[0]` call:
+1. `extract_json_from_response()` returned untyped `dict` → every
+   field lookup hit the `JSON` union from PostgREST.
+2. Gemini SDK shapes (`response.text: str | None`,
+   `response.candidates[0].content.parts[i].function_call: ... | None`)
+   forced each site to re-implement the None-chain; most got one
+   level wrong and fell back to `# type: ignore`.
+3. `/execute` per-task params were `dict` → every `params.get(...)`
+   returned `Any`.
+
+Module surface:
+
+```python
+response_text(resp) -> str               # None-floor + strip
+extract_function_call(resp) -> FunctionCallResult | None
+typed_loads(text, Schema) -> Schema | None
+
+# 5 response TypedDicts (one per JSON-emitting call site)
+AIMapperFieldMap, OutreachHooksResponse, EnrichmentDetailsResponse,
+DeepEnrichmentFieldsResponse, StrategicInsightsResponse
+# plus StrategicInsightsPriority (nested)
+
+# 4 per-task params TypedDicts (/execute handler arg types)
+UniqueKeyParams, DiscoverySearchParams, DatabaseQueryParams,
+FilteredParams   # all total=False — Gemini tool-call may omit args
+```
+
+**Invariant: zero runtime change.** All three helpers are
+type-narrowing layers (cast + None-floor). Prompt strings, model
+selection, and call params are untouched — prompt snapshot tests
+catch any drift.
+
+**One small tightening** (no real caller depends on it):
+`extract_json_from_response` now returns `None` on top-level
+non-dict JSON (was: returned raw value). All 4 callers route
+through `typed_loads` and expect dicts.
+
+**Per-file mypy delta**:
+- `src/core/agentic_router.py`: 149 → 26 (-123)
+- `src/processors/leadhunter.py`: 47 → 42 (-5)
+- `src/processors/ai_mapper.py`: 10 → 2 (-8)
+- `src/scrapers/enrichment_engine.py`: 13 → 11 (-2)
+- `src/utils/json_helper.py`: 3 → 0 (-3)
+
+Tests: `tests/unit/test_gemini_types.py` (28 passing — response_text 5,
+extract_function_call 11, typed_loads 9, composition 2,
+unicode-preserved 1). Behavior locked in by
+`tests/test_prompt_snapshots.py` (prompts unchanged).
+
+**Follow-up phases** (separate PRs, scoped in
+`tests/quality/type-coverage-progress.md`):
+- **Phase 3** — Supabase row TypedDicts (`LeadRow`, `CampaignRow`,
+  `CampaignMessageRow`, `OrchestrationJobRow`) in
+  `src/utils/supabase_types.py`. ~33 more errors. Generate via
+  `mcp__supabase__generate_typescript_types` then port.
+- **Phase 4** — scraper TypedDicts. `AuditResult` for `seo_audit.py`
+  (~33), Playwright `cast(Browser, ...)` at the seam in
+  `enrichment_engine.py` + `discovery_engine.py` (~20). Total ~53.
+
+The 26 remaining `agentic_router.py` errors are `arg-type` on Gemini
+tool-schema params + untyped helper calls — out of scope for this
+phase; tracked for Phase 6 (`backend/main.py` + `src/core/` pass).
+
 ## Quality reports — weekly Monday cadence
 
 Run all of these weekly; deltas tracked in the per-report tracker:
