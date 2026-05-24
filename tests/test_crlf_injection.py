@@ -177,6 +177,68 @@ class TestSMTPSubjectFromNameCRLFGuard(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# 2b) Resend HTTP API path — subject / from_name / reply_to CRLF guard.
+# ---------------------------------------------------------------------------
+
+class TestResendSubjectFromNameReplyToCRLFGuard(unittest.IsolatedAsyncioTestCase):
+    """`ResendEmailSender.send` runs the same CRLF reject as SMTP on
+    (subject, sender_name) AND additionally on `reply_to` (new field).
+
+    `reply_to` is operator-env today, but a future per-campaign override
+    could route lead data through it — guard now so the boundary stays
+    put when that lands."""
+
+    async def asyncSetUp(self):
+        self.env_patcher = patch.dict(os.environ, {
+            "RESEND_API_KEY": "re_fake",
+            "RESEND_FROM_EMAIL": "outreach@example.com",
+        })
+        self.env_patcher.start()
+        from src.integrations.email_sender import ResendEmailSender
+        self.sender = ResendEmailSender()
+
+    async def asyncTearDown(self):
+        self.env_patcher.stop()
+
+    async def test_crlf_in_subject_rejected(self):
+        for payload in CRLF_RAW_PAYLOADS:
+            if "\r" not in payload and "\n" not in payload:
+                continue
+            with self.subTest(payload=repr(payload)):
+                r = await self.sender.send(
+                    to="ok@example.com",
+                    subject=f"Subject {payload} smuggle",
+                    body="hi",
+                )
+                self.assertEqual(r["status"], "error", r)
+                self.assertIn("CRLF", r["error"], r)
+
+    async def test_crlf_in_from_name_rejected(self):
+        for payload in ("\r", "\n", "\r\n", "From: x\r\nBcc: y"):
+            with self.subTest(payload=repr(payload)):
+                r = await self.sender.send(
+                    to="ok@example.com",
+                    subject="ok",
+                    body="hi",
+                    from_name=f"Attacker {payload}",
+                )
+                self.assertEqual(r["status"], "error", r)
+                self.assertIn("CRLF", r["error"], r)
+
+    async def test_crlf_in_reply_to_rejected(self):
+        for payload in ("\r", "\n", "\r\n", "x\r\nBcc: attacker@evil.com"):
+            with self.subTest(payload=repr(payload)):
+                self.sender.reply_to = f"reply@example.com{payload}"
+                r = await self.sender.send(
+                    to="ok@example.com",
+                    subject="ok",
+                    body="hi",
+                )
+                self.assertEqual(r["status"], "error", r)
+                self.assertIn("CRLF", r["error"], r)
+
+
+# ---------------------------------------------------------------------------
 # 3) Logging — CRLF scrub filter prevents log-line forgery.
 # ---------------------------------------------------------------------------
 
