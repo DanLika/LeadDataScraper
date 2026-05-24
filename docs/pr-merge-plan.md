@@ -172,3 +172,25 @@ For every PR landed:
 ## Outstanding risk
 
 The 13 ahead-commits on local `main` (Phase 12.13) WILL conflict with at least one PR if pushed naively. Resolve `git-state-2026-05.md` decisions FIRST.
+
+---
+
+## 2026-05-23 — docs-PR stack (CLAUDE.md drain documentation)
+
+Three docs PRs all append to the same CLAUDE.md insertion point and were rebased into a deterministic stack:
+
+```
+main ← #253 ← #254 ← #258
+```
+
+| PR | Branch | Content | Base |
+| --- | --- | --- | --- |
+| **#253** | `docs/claude-md-drain-2026-05-23-opus47-v2` | Drain PRs #235–#251 (#238 backend headers, #242 web-vitals, #244 stats card, #245 insights, #246 slow-handler, #250 trigger fn) + A.8 dupe + A.9 already-on-main notes | `main` |
+| **#254** | `docs/claude-md-phase15-session-2026-05-23` | Phase 15 finding matrix with refreshed rows (#3→#244, #5→#242, #6→#245) | rebased onto #253 |
+| **#258** | `docs/claude-md-crossover-gaps-2026-05-23` | #237 cross-origin headers + #231 gitignore + #227 P0a retraction + docs-stack-rebase recipe | rebased onto #254 |
+
+**Merge order: #253 → #254 → #258.** Each PR was rebased onto the previous PR's tip with `--force-with-lease=<branch>:<expected-tip>` so the line-1844 append conflict is pre-resolved. When the bottom merges to `main`, GitHub auto-rebases the next; the diff collapses to that PR's own additions.
+
+**Do not merge out of order.** If #254 lands before #253, GitHub will rebase #254 onto main correctly, but #258 then has #254's content + an orphan reference to #253 (which has not landed). #253 will then merge cleanly as a separate diff; #258 still needs a final rebase. Lots of churn. Stick to the documented order.
+
+Full recipe + invariants pinned in `CLAUDE.md` under "Docs-PR stack via sequential rebase".
