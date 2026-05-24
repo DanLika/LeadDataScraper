@@ -374,11 +374,20 @@ def _assert_single_tenant_if_enforced() -> None:
     expected = os.getenv("OPERATOR_EMAIL", "").strip().lower()
     if not expected:
         return
-    if not db.client:
+    # Resolve `db` via the module object so PEP 562 `__getattr__` fires and
+    # lazy-initialises the singleton if it hasn't been primed yet. Bare-name
+    # `db.client` here would `NameError` because LOAD_GLOBAL doesn't consult
+    # module `__getattr__` — and that turns the explicit-skip branch below
+    # into a crash that bricks the whole lifespan (fail-closed catch wraps
+    # NameError as "single-tenancy check could not run"). Locked in:
+    # tested in prod 2026-05-24 (Render restore session).
+    import sys as _sys
+    _db = getattr(_sys.modules[__name__], "db", None)
+    if _db is None or not _db.client:
         logger.warning("OPERATOR_EMAIL set but Supabase client missing — skipping tenancy check.")
         return
     try:
-        users_resp = db.client.auth.admin.list_users()
+        users_resp = _db.client.auth.admin.list_users()
         # supabase-py returns a list directly; tolerate paginated objects too.
         users = users_resp if isinstance(users_resp, list) else getattr(users_resp, "users", []) or []
         emails = [
@@ -417,12 +426,11 @@ async def lifespan(app: FastAPI):
     # below (`_block_logger_middleware`) — same signal at the HTTP layer
     # without the loop-wide debug penalty. Enable kernel-level debug
     # only in dev via `PYTHONASYNCIODEBUG=1`.
-    _assert_single_tenant_if_enforced()
     # Prime the lazy `db` / `router` / `auditor` / `orchestrator` singletons
-    # by going through the module object (which triggers PEP 562
-    # `__getattr__` and caches the instances into `globals()`). Bare-name
-    # references inside functions use LOAD_GLOBAL bytecode, which does NOT
-    # consult module-level `__getattr__` — so without this priming step,
+    # FIRST — must run before any function that may LOAD_GLOBAL one of these
+    # names (e.g. `_assert_single_tenant_if_enforced` reaches for `db`).
+    # Bare-name references use LOAD_GLOBAL bytecode, which does NOT consult
+    # module-level `__getattr__` (PEP 562) — so without this priming step,
     # every route handler's bare `db.client` / `router.execute_task` /
     # etc. reference raises `NameError`, the global exception handler
     # turns that into HTTP 500, and the dashboard's eager fetch-on-mount
@@ -438,6 +446,7 @@ async def lifespan(app: FastAPI):
             getattr(_self, _lazy_name)
         except Exception as exc:
             logger.warning("Lazy global %s could not initialize: %s", _lazy_name, exc)
+    _assert_single_tenant_if_enforced()
     try:
         missing = _self.db.check_schema()
         if missing:
