@@ -17,7 +17,7 @@
 #   pip install pip-tools
 #   make lock-python   # regenerates requirements.txt with hashes
 
-pandas==2.2.3
+pandas==2.3.3
 numpy==2.2.3
 requests==2.33.0
 beautifulsoup4==4.13.3
