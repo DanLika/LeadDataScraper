@@ -966,6 +966,24 @@ CI stays green without setup.
   via scipy if available)
 - `tests/test_supabase_helper.py`, `tests/test_security_helpers.py`,
   `tests/test_csv_helper_health.py` — narrow utility-layer guards
+- `tests/unit/test_orchestrator_task_aware_fetch.py` — Phase 9.10
+  Finding A locked in: `_status_predicates_for_tasks` generator + the
+  `_fetch_chunk` / `_get_total_leads` builder-chain capture proves
+  `tasks=['audit']` does NOT include `enrichment_status` in the
+  predicate (11 tests).
+- `tests/unit/test_seo_audit_null_title.py` — Phase 9.10 Finding B
+  locked in: empty `<title></title>`, multi-child title, missing meta
+  content="", and the normal-page happy path all do not crash
+  `_check_meta_tags` (7 tests).
+- `tests/unit/test_audit_bot_blocked_skip_ai.py` — Phase 9.10 Finding E
+  locked in: each of HTTP {401,403,429} trips `is_bot_blocked=True`
+  AND clears `page_text` so downstream Gemini guards short-circuit;
+  405-not-treated-as-blocked sanity (9 tests).
+- `tests/unit/test_gemini_budget_monotonic.py` — Phase 9.10 Finding H
+  locked in: over-estimate keeps counter flat (does NOT decrement),
+  under-estimate increments, WARN log on negative would-be delta,
+  50-thread concurrent-increment probe (no lost updates), repeated
+  `get_state()` reads return identical snapshots (7 tests).
 
 **Frontend node tests (`cd frontend && node --test utils/...`):**
 - `frontend/utils/url.test.mjs` — `sanitizeNext` open-redirect +
@@ -1418,8 +1436,29 @@ Skipped / deferred:
   `Coverage`. Re-run via Playwright if needed.
 - **9.8 Live CSP/HSTS** — spec required "live deployed URL"; not
   available in the agent session.
-- **9.10 Full pipeline live** — real Gemini + Maps scrape ($,
-  operator DB writes). Spec says quarterly cadence; operator-triggered.
+- **9.10 Full pipeline live** — **shipped 2026-05-23 (PR #274)**.
+  Report at `tests/integration/live-pipeline-2026-05-23.md` + 7 PNG
+  screenshots at `tests/integration/screenshots-2026-05-23/`. 20 US
+  fixture leads (`lead_source='_us_test_'`) audited end-to-end via
+  chrome-devtools-mcp against the local dev stack; 19/21 Completed,
+  2 Failed, 5 draft emails generated. Total Gemini spend ~$0.037
+  (~287 k tokens) — under 7% of the $0.50 hard-stop. Surfaced 8
+  findings; four were filed as atomic fix PRs labeled `drain`:
+    - **A (P1)** orchestrator task-aware filter — PR #275
+      (`fix/orchestrator-task-aware-fetch-2026-05-23`)
+    - **B (P2)** `seo_audit` NoneType.strip on empty `<title>` — PR #276
+      (`fix/auditor-null-url-2026-05-23`)
+    - **E (P2)** skip Gemini on bot-blocked sites (401/403/429 or
+      <500-byte body) — PR #277
+      (`fix/skip-ai-on-bot-blocked-2026-05-23`)
+    - **H (P2)** `/admin/gemini-budget` monotonic invariant
+      (counter could decrement on over-estimate) — PR #278
+      (`fix/gemini-budget-counter-race-2026-05-23`)
+  Findings C (AI Insights auto-fire on every dashboard mount), D
+  (`outreach_score` JSONB-vs-column drift), F (chrome-devtools-mcp
+  uid race on virtualised table), G (two transient `/leads` 500s) are
+  documented but not addressed — see the report. Spec cadence is
+  quarterly; operator-triggered.
 - **9.12 Visual smoke** — `frontend/e2e/__screenshots__/` does not
   exist; spec files present without baselines.
 
