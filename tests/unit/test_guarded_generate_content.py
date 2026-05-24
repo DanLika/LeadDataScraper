@@ -21,6 +21,24 @@ from src.utils import gemini_call  # noqa: E402
 from src.utils.gemini_budget import BudgetExceededError  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _restore_real_budget_gate(monkeypatch):
+    """The suite-wide ``tests/conftest.py`` neuters
+    ``gemini_call.check_budget`` + ``record_usage`` to no-ops so other
+    tests don't trip the daily-token ceiling. This file *exercises*
+    the gate itself — restore the originals (stashed on the module by
+    the conftest as ``_real_check_budget`` / ``_real_record_usage``)
+    for the duration of each test in this file, then ``monkeypatch``
+    auto-rolls back on teardown.
+    """
+    real_check = getattr(gemini_call, "_real_check_budget", None)
+    real_record = getattr(gemini_call, "_real_record_usage", None)
+    if real_check is not None:
+        monkeypatch.setattr(gemini_call, "check_budget", real_check)
+    if real_record is not None:
+        monkeypatch.setattr(gemini_call, "record_usage", real_record)
+
+
 @pytest.fixture
 def isolated_budget(tmp_path, monkeypatch):
     """Per-test isolated SQLite + permissive default ceiling."""

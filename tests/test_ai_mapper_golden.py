@@ -25,6 +25,7 @@ import asyncio
 import os
 import sys
 import unittest
+import pytest
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from unittest.mock import patch
@@ -317,6 +318,7 @@ async def _map_one(mapper, case: GoldenCase, sem: asyncio.Semaphore) -> dict:
         return await asyncio.to_thread(mapper.get_column_mapping, case.headers)
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestAIMapperGolden(unittest.IsolatedAsyncioTestCase):
     """15-case golden set for GeminiMapper.get_column_mapping."""

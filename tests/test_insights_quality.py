@@ -33,6 +33,7 @@ import os
 import re
 import sys
 import unittest
+import pytest
 from collections import Counter
 from typing import Any
 from unittest.mock import patch
@@ -218,6 +219,7 @@ def _parse_judge(raw: str) -> tuple[int, str]:
 
 # ---- Test class ------------------------------------------------------------
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
     """50-lead seeded DB, 5 /insights runs, ground-truth judge."""
