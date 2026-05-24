@@ -320,6 +320,7 @@ class TestRateLimit:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.live
 class TestRetention:
     def test_audit_expires_30_days_after_deletion(self, client):
         from datetime import datetime, timezone
