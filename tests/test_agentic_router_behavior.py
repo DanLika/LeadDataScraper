@@ -219,6 +219,12 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
         with patch("src.core.parallel_auditor.ParallelAuditor") as PA, \
              patch("src.core.task_orchestrator.TaskOrchestrator") as TO:
             PA.return_value.audit_single_lead = AsyncMock(return_value={"score": 50})
+            # `_execute_deep_hunt` awaits `auditor.hunt_single_lead(...)`; without
+            # an AsyncMock the default attribute is a plain MagicMock and the
+            # await raises `TypeError: 'MagicMock' object can't be awaited`.
+            PA.return_value.hunt_single_lead = AsyncMock(
+                return_value={"facebook": None, "instagram": None}
+            )
             TO.return_value.run_massive_pipeline = AsyncMock(return_value="job-x")
             TO.return_value.run_discovery_job = AsyncMock(return_value="job-d")
             TO.return_value.run_enrichment_job = AsyncMock(return_value="job-e")
