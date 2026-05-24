@@ -128,6 +128,25 @@ function DashboardInner() {
   const [auditStatus, setAuditStatus] = useState<AuditStatusInfo | null>(null);
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [demoRemoveOpen, setDemoRemoveOpen] = useState(false);
+  const [demoRemoveText, setDemoRemoveText] = useState('');
+  const [isRemovingDemo, setIsRemovingDemo] = useState(false);
+
+  // Phase 13.3 — "Show demo data" toggle. Defaults OFF so the operator's
+  // first impression is real-lead-only. Persisted in localStorage as
+  // `lds-include-demo` so a refresh keeps the state; reading happens in
+  // a mount effect (not lazy initialState) so SSR + hydration agree on
+  // `false`, then client upgrades to the stored value.
+  const [showDemo, setShowDemo] = useState<boolean>(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem('lds-include-demo') === '1') setShowDemo(true);
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (showDemo) window.localStorage.setItem('lds-include-demo', '1');
+    else window.localStorage.removeItem('lds-include-demo');
+  }, [showDemo]);
 
   // Auto-open Settings / Discovery / set view when arriving from /insights or
   // /campaigns via ?openSettings=1 / ?openDiscovery=1 / ?view=audited|high-risk.
@@ -239,7 +258,8 @@ function DashboardInner() {
       // newly-discovered leads at the top of created_at DESC become
       // visible. The Load-more button uses a separate handler that
       // *appends* the next page.
-      const response = await apiFetch(`${API_BASE_URL}/leads?limit=50`, { signal });
+      const url = `${API_BASE_URL}/leads?limit=50${showDemo ? '&include_demo=true' : ''}`;
+      const response = await apiFetch(url, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setLeads(data.leads || []);
@@ -255,7 +275,7 @@ function DashboardInner() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [showDemo]);
 
   const loadMoreLeads = useCallback(async () => {
     if (!nextCursor || isLoadingMore) return;
@@ -264,7 +284,7 @@ function DashboardInner() {
       // encodeURIComponent the cursor — base64url is mostly URL-safe but
       // belt-and-braces for the `=` padding character.
       const response = await apiFetch(
-        `${API_BASE_URL}/leads?limit=50&cursor=${encodeURIComponent(nextCursor)}`
+        `${API_BASE_URL}/leads?limit=50&cursor=${encodeURIComponent(nextCursor)}${showDemo ? '&include_demo=true' : ''}`
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -282,7 +302,7 @@ function DashboardInner() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [nextCursor, isLoadingMore, showToast]);
+  }, [nextCursor, isLoadingMore, showToast, showDemo]);
 
   const fetchInsights = useCallback(async (signal?: AbortSignal) => {
     setFetchingInsights(true);
@@ -851,6 +871,39 @@ function DashboardInner() {
     }
   };
 
+  const handleRemoveDemo = async () => {
+    if (demoRemoveText !== 'REMOVE DEMO' || isRemovingDemo) return;
+    setIsRemovingDemo(true);
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/leads/demo`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'REMOVE DEMO' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.detail || data.error || `Demo removal failed (HTTP ${res.status})`, 'error');
+        return;
+      }
+      const leadsDeleted = data.leads_deleted ?? 0;
+      const msgsDeleted = data.messages_deleted ?? 0;
+      showToast(
+        leadsDeleted
+          ? `Removed ${leadsDeleted} demo lead${leadsDeleted === 1 ? '' : 's'}${msgsDeleted ? ` + ${msgsDeleted} message${msgsDeleted === 1 ? '' : 's'}` : ''}.`
+          : 'No demo data found to remove.',
+        leadsDeleted ? 'success' : 'info'
+      );
+      setDemoRemoveOpen(false);
+      setDemoRemoveText('');
+      fetchLeads();
+    } catch (err) {
+      console.error('Demo removal failed:', err);
+      showToast('Demo removal failed — backend unreachable.', 'error');
+    } finally {
+      setIsRemovingDemo(false);
+    }
+  };
+
   const handleClearLeads = async () => {
     if (!confirm("Are you SURE you want to clear all leads? This cannot be undone.")) return;
     setLoading(true);
@@ -1316,6 +1369,8 @@ function DashboardInner() {
               segmentOptions={segmentOptions}
               onClearFilters={clearFilters}
               hasActiveFilters={hasActiveFilters}
+              showDemo={showDemo}
+              setShowDemo={setShowDemo}
             />
 
             <LeadTable
@@ -1787,9 +1842,65 @@ function DashboardInner() {
 
               <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid var(--error-tint)' }}>
                 <h3 style={{ fontSize: '0.9rem', color: 'var(--error-strong)', marginBottom: '0.5rem' }}>Danger Zone</h3>
-                <button className="btn-secondary" style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }} onClick={handleClearLeads}>
-                  Clear All Leads
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {!demoRemoveOpen ? (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }}
+                      onClick={() => { setDemoRemoveOpen(true); setDemoRemoveText(''); }}
+                    >
+                      Remove all demo data
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <label htmlFor="confirm-remove-demo" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Type <code>REMOVE DEMO</code> to confirm. This wipes every <code>is_demo=true</code> lead and any campaign messages that reference them.
+                      </label>
+                      <input
+                        id="confirm-remove-demo"
+                        type="text"
+                        value={demoRemoveText}
+                        onChange={(e) => setDemoRemoveText(e.target.value)}
+                        placeholder="REMOVE DEMO"
+                        autoComplete="off"
+                        spellCheck={false}
+                        style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.5rem 0.75rem', color: 'var(--text-white)', fontSize: '0.85rem', outline: 'none' }}
+                      />
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ flex: 1, fontSize: '0.8rem' }}
+                          onClick={() => { setDemoRemoveOpen(false); setDemoRemoveText(''); }}
+                          disabled={isRemovingDemo}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ flex: 1, borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }}
+                          onClick={handleRemoveDemo}
+                          disabled={demoRemoveText !== 'REMOVE DEMO' || isRemovingDemo}
+                          aria-busy={isRemovingDemo}
+                        >
+                          {isRemovingDemo ? (
+                            <><Loader2 size={14} className="animate-spin" aria-hidden="true" /> Removing…</>
+                          ) : 'Confirm remove'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }}
+                    onClick={handleClearLeads}
+                  >
+                    Clear All Leads
+                  </button>
+                </div>
               </div>
             </div>
 

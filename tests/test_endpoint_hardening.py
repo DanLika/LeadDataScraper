@@ -135,6 +135,7 @@ AUTHED_ENDPOINTS: list[tuple[str, str]] = [
     ("POST",   "/discovery/start"),
     ("POST",   "/enrich/start"),
     ("DELETE", "/leads/clear"),
+    ("DELETE", "/leads/demo"),
     ("POST",   "/orchestrator/start"),
     ("GET",    f"/orchestrator/status/{TEST_JOB_ID}"),
     ("GET",    "/orchestrator/active"),
@@ -150,7 +151,7 @@ AUTHED_ENDPOINTS: list[tuple[str, str]] = [
     ("POST",   f"/campaigns/{TEST_CAMPAIGN_ID}/pause"),
     ("GET",    f"/campaigns/{TEST_CAMPAIGN_ID}/export"),
 ]
-assert len(AUTHED_ENDPOINTS) == 32, len(AUTHED_ENDPOINTS)
+assert len(AUTHED_ENDPOINTS) == 33, len(AUTHED_ENDPOINTS)
 
 
 # POST endpoints with a Pydantic JSON body. (Excludes /upload which is
@@ -498,6 +499,29 @@ class TestAdminTokenGuard(unittest.IsolatedAsyncioTestCase):
             "X-Admin-Token": ADMIN_TOKEN,
         })
         self.assertEqual(res.status_code, 403, f"got {res.status_code} body={res.text!r}")
+
+    async def test_leads_demo_requires_admin_token(self):
+        """DELETE /leads/demo shares the same triple gate as /leads/clear
+        (API key + admin token + typed Pydantic body). Probing without the
+        admin token must short-circuit at 403 before Pydantic even sees
+        the JSON body."""
+        res = await self.http.delete(
+            "/leads/demo",
+            headers={"X-API-Key": API_KEY},
+            json={"confirmation": "REMOVE DEMO"},
+        )
+        self.assertEqual(res.status_code, 403, f"got {res.status_code} body={res.text!r}")
+
+    async def test_leads_demo_wrong_confirmation_returns_422(self):
+        """With both keys present, a body that doesn't carry the exact
+        Literal["REMOVE DEMO"] must 422 via Pydantic — the handler never
+        runs and no rows are deleted."""
+        res = await self.http.delete(
+            "/leads/demo",
+            headers={"X-API-Key": API_KEY, "X-Admin-Token": ADMIN_TOKEN},
+            json={"confirmation": "remove demo"},
+        )
+        self.assertEqual(res.status_code, 422, f"got {res.status_code} body={res.text!r}")
 
 
 # ---- /execute task allowlist (defense-in-depth) ----------------------------

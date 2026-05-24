@@ -96,14 +96,35 @@ Lead data scraping and enrichment pipeline with Supabase backend and Next.js das
   intermediate caches after logout. Client-side `apiFetch` already passes
   `cache: 'no-store'` on the request — the response-side stamp is the
   matching defense.
-- Destructive endpoint `DELETE /leads/clear` additionally requires
-  `X-Admin-Token` matching `ADMIN_TOKEN` env (defense-in-depth even if API key leaks).
-  The Next.js proxy injects `X-Admin-Token` from its own server-side env **only
-  for the `leads/clear` path** (`frontend/app/api/proxy/[...path]/route.ts`).
-  Clients cannot set this header themselves; the in-browser auth gate (Supabase
-  session) is the only thing that lets a user reach the proxy at all. Setting
-  `ADMIN_TOKEN` in both backend `.env` AND frontend `.env.local` (must match)
-  is required — without it the UI's "Clear All Leads" button hits 403.
+- Destructive endpoints `DELETE /leads/clear` + `DELETE /leads/demo`
+  (Phase 13.3) additionally require `X-Admin-Token` matching `ADMIN_TOKEN`
+  env (defense-in-depth even if API key leaks). The Next.js proxy injects
+  `X-Admin-Token` from its own server-side env for the paths in the
+  `ADMIN_TOKEN_PATHS` allowlist at
+  `frontend/app/api/proxy/[...path]/route.ts` (`leads/clear`, `leads/demo`
+  — exact match on joined dynamic segments, so prefix collisions like
+  `leads/clear-cache` can't accidentally inherit the admin token).
+  Clients cannot set this header themselves; the in-browser auth gate
+  (Supabase session) is the only thing that lets a user reach the proxy
+  at all. Setting `ADMIN_TOKEN` in both backend `.env` AND frontend
+  `.env.local` (must match) is required — without it the UI's "Clear
+  All Leads" + "Remove all demo data" buttons hit 403.
+- Phase 13.3 demo-data flag: `leads.is_demo BOOLEAN NOT NULL DEFAULT
+  FALSE` (+ partial index `WHERE is_demo = TRUE`) seeded by
+  `src/scripts/seed_demo_data.py` (20 Croatian leads, idempotent via
+  `ignore_duplicates=True`, all websites + emails use `.demo.invalid`
+  TLD so any accidental SSRF / SMTP probe fails at DNS). `/leads` +
+  `/stats` accept `?include_demo=true|false` (default false); the
+  `_compute_stats` cache only covers the default exclude-demo path —
+  include-demo bypasses the cache (rare path). `agentic_router
+  ._get_strategic_insights` filters `is_demo=false` unconditionally on
+  both the sample SELECT and the grounding count query so AI
+  recommendations never anchor on demo fixtures. Frontend "Show demo
+  data" toggle in `FilterBar` persists to `localStorage['lds-include-
+  demo']` (default off). Settings → Danger Zone "Remove all demo data"
+  requires typing `REMOVE DEMO` (Pydantic Literal) — wrong phrase 422s
+  before the handler runs; cascade order is `campaign_messages
+  WHERE lead_unique_key IN (demo)` → `leads WHERE is_demo=true`.
 - Required env vars (see `.env.example`):
   - Backend `.env`: `API_SECRET_KEY`, `ADMIN_TOKEN`, `SUPABASE_URL`,
     `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `ALLOWED_ORIGINS`

@@ -43,6 +43,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // exact on the joined dynamic segments (no query string, no prefixing).
 const ADMIN_TOKEN_PATHS = new Set<string>([
   'leads/clear',
+  'leads/demo',
 ]);
 
 // Match backend `/upload`'s MAX_UPLOAD_BYTES (50 MB). Defense-in-depth

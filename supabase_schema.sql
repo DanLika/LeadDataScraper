@@ -232,6 +232,23 @@ ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS business_description  TEXT;
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS company_description   TEXT;
 
 -- =============================================================================
+-- Demo-data flag (Phase 13.3).
+--
+-- Seeded by src/scripts/seed_demo_data.py; default FALSE so every existing
+-- row + every real producer (CSV upload, Google-Maps scrape, enrichment)
+-- keeps is_demo=false without changes. The frontend's "Show demo data"
+-- toggle defaults OFF — backend /leads + /stats filter is_demo=false
+-- unless ?include_demo=true. DELETE /leads/demo (admin-token-gated) wipes
+-- only rows where is_demo=true (and the campaign_messages that reference
+-- them via lead_unique_key).
+--
+-- Partial index keeps the cardinality cost near zero (only TRUE rows
+-- carry an index entry; the bulk of the table is FALSE).
+-- =============================================================================
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_leads_is_demo ON public.leads (is_demo) WHERE is_demo = TRUE;
+
+-- =============================================================================
 -- DB-level CHECK constraints (defense in depth)
 --
 -- Pydantic at the FastAPI boundary already validates these, but Supabase
