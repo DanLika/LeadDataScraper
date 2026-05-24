@@ -1,9 +1,26 @@
 # Local Merge Sprint — 2026-05-24
 
+> **⚠ READ FIRST — prod state at end of sprint:** Last 5 `deploy-backend.yml`
+> runs across the sprint = `failure` at "Build + push to GHCR" step with
+> ZERO sub-steps logged → runner never started. Pattern goes back to
+> 2026-05-23 07:09:37, well before this sprint's first push. Confirms the
+> `ci_runner_allocation_failure_2026-05-23` memory: GH Actions runner
+> allocation is failing (likely spending-limit cap), not a code/secret
+> issue. **Sprint commits are NOT the cause; reverting won't fix prod.**
+> Render service is on "Deploy from existing image" mode (per CLAUDE.md)
+> so it's running the last-successfully-built image, not down. Fix
+> requires GH org/billing action.
+>
+> Parallel session merged #283 `fix(lockfile): pin async-timeout==5.0.1`
+> at SHA `5f9c451` (08:51:28 UTC) attempting a forward fix — that run
+> ALSO failed at the same runner-allocation step, confirming the failure
+> is upstream of the lockfile concern.
+
 **Operator:** Duško Ličanin (claude session, /effort max)
 **Trigger:** GH Actions runner allocation failure → all PR CI red → local-verify+merge bypass
 **Source plan:** runbook embedded in `/effort` prompt (referenced `docs/pr-merge-order-2026-05-23.md` + `tests/quality/pr-review-pass-2026-05-23.md`, neither exist; runbook's inline phase list used as source of truth)
 **Pre-sprint state:** origin/main = `bd4dab5` (#271 Gemini cost cap); 49 open PRs; local repo corrupted (branch ref mispointed by parallel session HEAD-swap)
+**Final state:** origin/main = `5f9c451` (after parallel session merged #283 on top of my `696b069`). My sprint contribution: `bd4dab5..696b069` = 7 commits / 24 PRs.
 
 ## Architecture decisions
 
@@ -72,9 +89,21 @@ Multiple `parallel sessions` (per CLAUDE.md note on `head-swap mitigation via gi
 
 ## Recommended follow-ups (operator)
 
-1. Verify Render shows green for `ed62b9d` on both `lead-scraper-backend` + `lead-scraper-frontend`. If red, `git revert ed62b9d..f6691d4` (Phase 6, smallest blast — Phase 5 docs only).
-2. Resolve #248/#255 dupe (crossover verification doc) — both still open.
-3. Rebase #277 with the documented test-mock fix → re-cherry-pick.
-4. Rebase #247 onto `ed62b9d` + reconcile with #270 + #271 → run schema migration → re-merge.
-5. Triage remaining ~22 open PRs (docs/test/cleanup miscellany + 9 Dependabot).
-6. `rescue/audit-2026-05-24-{d6aa160,a2ec2f7}` local branches preserved — review + delete after confirming content is on main via the sprint (it is — landed via #270 + #263 squash + the audit-report doc landed via Phase 1 #258's stack).
+1. **P0 — unblock GH Actions runner allocation.** Likely fix path: GitHub org billing/spending settings (`https://github.com/organizations/<org>/billing/spending_limit`) — bump or reset the spending limit. Until this clears, NO push to main produces a new Docker image, so Render stays frozen on whatever the last-successfully-built digest was. Re-run a failed `deploy-backend.yml` after fixing to confirm runner spins up.
+2. Once GH Actions deploy succeeds for the first time post-fix, verify `lead-scraper-backend` + `lead-scraper-frontend` come up on `5f9c451`. If a regression appears, the failing change is somewhere in the `bd4dab5..5f9c451` window — bisect within the 7 phase pushes (each phase is one push, so blast is per-push, not per-PR).
+3. Resolve #248/#255 dupe (crossover verification doc) — both still open.
+4. Rebase #277 with the documented test-mock fix → re-cherry-pick.
+5. Rebase #247 onto current HEAD + reconcile with #270 + #271 → run `is_demo` column migration → re-merge.
+6. Triage remaining ~22 open PRs (docs/test/cleanup miscellany + 9 Dependabot).
+7. `rescue/audit-2026-05-24-{d6aa160,a2ec2f7}` local branches preserved — review + delete after confirming content is on main via the sprint (it is — landed via #270 + #263 squash + the audit-report doc landed via Phase 1 #258's stack).
+
+## ⚠ Canary for next merge sprint — merge-base discipline
+
+#247 was about to be cherry-picked blindly in Phase 6; the diff vs **HEAD** showed 10 files (bloated by main churn), but the diff vs **merge-base** showed 8 files of real contribution — including a REGRESSION of merged #270's `PipelineFilters` Pydantic model back to a raw frozenset. Cherry-picking would have silently reverted security hardening.
+
+**Rule for any future PR fetched from origin/&lt;branch&gt;:** before `git cherry-pick`, run
+```
+mb=$(git merge-base origin/main origin/<branch>)
+git diff $mb origin/<branch> -- backend/main.py src/ frontend/app/
+```
+If the diff shows lines that REMOVE code added by sprint commits (PipelineFilters, gemini_budget import, the typed FormState classes, etc.), the PR MUST be rebased onto current main before merge. Common red flags: PR branched off `6488afb` (pre-drain) or any pre-sprint SHA.
