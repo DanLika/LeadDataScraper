@@ -1,0 +1,22 @@
+{
+  "nav": {
+    "dashboard": "Nadzorna ploča",
+    "insights": "Statistika",
+    "campaigns": "Kampanje",
+    "deep_discovery": "Dubinsko pretraživanje",
+    "audited": "Analizirano",
+    "high_risk": "Visok rizik",
+    "settings": "Postavke",
+    "sign_out": "Odjava"
+  },
+  "actions": {
+    "deep_discovery": "Dubinsko pretraživanje",
+    "audit_all": "Analiziraj sve",
+    "hunt_all": "Pretraži sve"
+  },
+  "locale": {
+    "switch_label": "Jezik",
+    "english": "English",
+    "croatian": "Hrvatski"
+  }
+}

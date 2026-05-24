@@ -1,0 +1,22 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "insights": "Insights",
+    "campaigns": "Campaigns",
+    "deep_discovery": "Deep Discovery",
+    "audited": "Audited",
+    "high_risk": "High Risk",
+    "settings": "Settings",
+    "sign_out": "Sign Out"
+  },
+  "actions": {
+    "deep_discovery": "Deep Discovery",
+    "audit_all": "Audit all",
+    "hunt_all": "Hunt all"
+  },
+  "locale": {
+    "switch_label": "Language",
+    "english": "English",
+    "croatian": "Hrvatski"
+  }
+}

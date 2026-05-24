@@ -1,5 +1,12 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import createNextIntlPlugin from "next-intl/plugin";
+
+// next-intl: cookie-based locale (no /<locale>/ URL prefix). Config in
+// `./i18n/request.ts`. Plugin wires the request-time message loader; no
+// middleware involvement, so the existing CSP-nonce + Supabase-auth flow
+// in `frontend/proxy.ts` is untouched.
+const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 // NOTE: Content-Security-Policy is set per-request in `frontend/proxy.ts`
 // so the script-src directive can include a per-request `'nonce-<n>'`
@@ -77,7 +84,7 @@ const nextConfig: NextConfig = {
 //
 // `silent: !process.env.CI` keeps `npm run build` quiet locally but
 // loud in CI.
-export default withSentryConfig(nextConfig, {
+export default withSentryConfig(withNextIntl(nextConfig), {
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
   silent: !process.env.CI,

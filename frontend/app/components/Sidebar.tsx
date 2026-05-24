@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import LocaleSwitch from './LocaleSwitch';
 
 interface SidebarLead {
   company_name?: string;
@@ -60,6 +62,7 @@ export default function Sidebar({
   const [isManuallyToggled, setIsManuallyToggled] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  const t = useTranslations('nav');
 
   // Restore collapse preference from localStorage on mount. Safe to read
   // on client only (Sidebar is a client component). User session-scoped
@@ -161,7 +164,7 @@ export default function Sidebar({
               aria-current={!isInsightsPage && view === 'all' && !showDiscoveryModal && !showSettings ? 'page' : undefined}
             >
               <BarChart3 size={18} />
-              {showLabels && <span>Dashboard</span>}
+              {showLabels && <span>{t('dashboard')}</span>}
             </Link>
             <Link
               href="/insights"
@@ -171,7 +174,7 @@ export default function Sidebar({
               aria-current={isInsightsPage ? 'page' : undefined}
             >
               <TrendingUp size={18} />
-              {showLabels && <span>Insights</span>}
+              {showLabels && <span>{t('insights')}</span>}
             </Link>
             <button
               className={`nav-item ${showDiscoveryModal ? 'active' : ''}`}
@@ -179,7 +182,7 @@ export default function Sidebar({
               title="Deep Discovery"
             >
               <Search size={18} />
-              {showLabels && <span>Deep Discovery</span>}
+              {showLabels && <span>{t('deep_discovery')}</span>}
             </button>
             <button
               className={`nav-item ${!isInsightsPage && view === 'audited' && !showDiscoveryModal && !showSettings ? 'active' : ''}`}
@@ -188,7 +191,7 @@ export default function Sidebar({
               aria-pressed={!isInsightsPage && view === 'audited'}
             >
               <CheckCircle size={18} />
-              {showLabels && <span>Audited</span>}
+              {showLabels && <span>{t('audited')}</span>}
             </button>
             <button
               className={`nav-item ${!isInsightsPage && view === 'high-risk' && !showDiscoveryModal && !showSettings ? 'active' : ''}`}
@@ -198,7 +201,7 @@ export default function Sidebar({
               aria-pressed={!isInsightsPage && view === 'high-risk'}
             >
               <AlertTriangle size={18} />
-              {showLabels && <span>High Risk</span>}
+              {showLabels && <span>{t('high_risk')}</span>}
             </button>
             <button
               className={`nav-item ${showSettings ? 'active' : ''}`}
@@ -206,7 +209,7 @@ export default function Sidebar({
               title="Settings"
             >
               <Settings size={18} />
-              {showLabels && <span>Settings</span>}
+              {showLabels && <span>{t('settings')}</span>}
             </button>
             <button
               className="nav-item"
@@ -218,12 +221,13 @@ export default function Sidebar({
                   router.refresh();
                 }
               }}
-              title="Sign out"
-              aria-label="Sign out"
+              title={t('sign_out')}
+              aria-label={t('sign_out')}
             >
               <LogOut size={18} />
-              {showLabels && <span>Sign Out</span>}
+              {showLabels && <span>{t('sign_out')}</span>}
             </button>
+            {showLabels && <LocaleSwitch compact />}
           </nav>
 
           {showExtra && (
