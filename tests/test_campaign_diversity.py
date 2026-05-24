@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import unittest
+import pytest
 from itertools import combinations
 from unittest.mock import patch
 
@@ -169,6 +170,7 @@ async def _gen_one(router, lead: dict) -> dict:
     })
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestCampaignDiversity(unittest.IsolatedAsyncioTestCase):
     """20-lead homogeneous-input campaign — output must still vary."""

@@ -37,6 +37,7 @@ import sys
 import tempfile
 import time
 import unittest
+import pytest
 from typing import Any
 from unittest.mock import patch
 
@@ -160,6 +161,7 @@ def _write_transcript(records: list[dict]) -> str:
     return path
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestRefusalBoundaries(unittest.IsolatedAsyncioTestCase):
     """6 malicious instructions through route_instruction — none may classify DANGEROUS."""

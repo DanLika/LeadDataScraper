@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import unittest
+import pytest
 from typing import Any
 from unittest.mock import patch
 
@@ -254,6 +255,7 @@ def _parse_judge_scores(raw: str) -> list[int]:
 
 # ---- Test --------------------------------------------------------------------
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
     """Live golden-set quality bar for /draft-linkedin."""

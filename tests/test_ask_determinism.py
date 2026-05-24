@@ -29,6 +29,7 @@ import math
 import os
 import sys
 import unittest
+import pytest
 from collections import Counter
 from unittest.mock import patch
 
@@ -66,6 +67,7 @@ async def _route_one(router, instruction: str):
     return await router.route_instruction(instruction)
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
 

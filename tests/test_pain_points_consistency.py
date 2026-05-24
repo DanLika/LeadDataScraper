@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import unittest
+import pytest
 from collections import Counter
 from itertools import combinations
 from typing import Iterable
@@ -241,6 +242,7 @@ async def _analyze_once(hunter, lead: dict, sem: asyncio.Semaphore) -> str:
         )
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestPainPointConsistency(unittest.IsolatedAsyncioTestCase):
     """Per-lead stability + cross-lead divergence for analyze_pain_points_async."""
