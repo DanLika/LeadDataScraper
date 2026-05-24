@@ -30,6 +30,13 @@ python-multipart==0.0.27
 supabase==2.29.0
 python-dotenv==1.2.2
 aiohttp==3.13.4
+# Transitive of aiohttp on Python 3.10 (Dockerfile base image
+# `mcr.microsoft.com/playwright/python:v1.40.0-jammy` is py3.10).
+# On Python 3.11+ aiohttp uses stdlib `asyncio.timeout`, so a
+# pip-compile run under 3.11 won't lock this implicitly — declared
+# explicitly so the lockfile satisfies --require-hashes in the Docker
+# build regardless of the host Python that ran `make lock-python`.
+async-timeout==5.0.1
 playwright==1.50.0
 aiofiles==23.2.1
 slowapi==0.1.9
