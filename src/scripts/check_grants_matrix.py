@@ -4,13 +4,14 @@ Beyond the deny-all RLS posture asserted by ``schema_drift_check.py``,
 this gate enumerates **every** ``information_schema.table_privileges``
 row and asserts:
 
-- ``anon`` has ZERO grants on the 4 core tables.
-- ``authenticated`` has ZERO grants on the 4 core tables.
-- ``PUBLIC`` has ZERO grants on the 4 core tables.
+- ``anon`` has ZERO grants on the 7 core tables.
+- ``authenticated`` has ZERO grants on the 7 core tables.
+- ``PUBLIC`` has ZERO grants on the 7 core tables.
 - ``service_role`` has the full DML+DDL set (the backend is the only
-  legitimate writer; missing privs would break the orchestrator).
+  legitimate writer; missing privs would break the orchestrator /
+  dispatcher).
 - ``postgres`` has the full set (DB owner; always allowed).
-- No **other** role appears in the grants matrix for these 4 tables.
+- No **other** role appears in the grants matrix for these 7 tables.
 
 Also enumerates ``pg_roles`` and flags any role not in
 ``EXPECTED_ROLES`` — catches Studio-created roles, accidental
@@ -35,6 +36,7 @@ import psycopg
 TABLES: tuple[str, ...] = (
     "leads", "campaigns", "campaign_messages", "orchestration_jobs",
     "account_deletions",
+    "email_send_ledger", "email_suppression",
 )
 TABLE_LIST = list(TABLES)
 

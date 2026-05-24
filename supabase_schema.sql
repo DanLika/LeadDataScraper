@@ -369,3 +369,83 @@ DO $$ BEGIN
         USING (false)
         WITH CHECK (false);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ===========================================================================
+-- Email dispatch — provider_message_id, send ledger, suppression list
+--
+-- Backs the Resend HTTP API path (docs/email-dispatch-architecture.md §2.4).
+-- Three additions:
+--   1. campaign_messages.provider_message_id + bounce_reason — written when
+--      the dispatcher receives Resend's 200 response (provider_message_id =
+--      Resend's msg_id, used by the /webhooks/resend handler to map
+--      delivered/bounced events back to the source row).
+--   2. email_send_ledger — append-only per-domain throttle ledger. The
+--      dispatcher consults it before sending to avoid same-domain bursts
+--      (Gmail/Outlook penalize) — currently 3/hr/domain target.
+--   3. email_suppression — opt-out + bounce list. dispatcher SKIPs any row
+--      whose lead.email is here. Webhook populates on `email.bounced` /
+--      `email.complained` events.
+--
+-- All three additive — no destructive changes to existing tables. RLS
+-- deny-all + REVOKE on anon/authenticated/PUBLIC mirror the 5-table
+-- pattern above (only service_role bypasses).
+-- ===========================================================================
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS provider_message_id TEXT;
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS bounce_reason TEXT;
+
+-- Partial index — only sent rows carry a provider_message_id, so we skip
+-- the NULL pile (pending rows). Webhook lookup is by exact msg_id.
+CREATE INDEX IF NOT EXISTS idx_campaign_messages_provider_message_id
+    ON public.campaign_messages(provider_message_id)
+    WHERE provider_message_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.email_send_ledger (
+    id               BIGSERIAL PRIMARY KEY,
+    recipient_domain TEXT NOT NULL,
+    sent_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Index supports the throttle predicate
+--   `WHERE recipient_domain = ? AND sent_at > now() - interval '1 hour'`.
+CREATE INDEX IF NOT EXISTS idx_email_send_ledger_domain_sent
+    ON public.email_send_ledger(recipient_domain, sent_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.email_suppression (
+    email     TEXT PRIMARY KEY,
+    reason    TEXT NOT NULL,
+    added_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Reason allowlist matches the webhook handler's event taxonomy plus
+-- operator-initiated manual adds. New values land here AND in
+-- schema_drift_check.py::EXPECTED_CHECK_CONSTRAINTS in the same PR.
+DO $$ BEGIN
+    ALTER TABLE public.email_suppression
+        ADD CONSTRAINT email_suppression_reason_allowed
+        CHECK (reason IN ('bounce', 'complaint', 'manual'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE public.email_send_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_suppression ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.email_send_ledger, public.email_suppression
+    FROM anon, authenticated, PUBLIC;
+
+DO $$ BEGIN
+    CREATE POLICY email_send_ledger_deny_all ON public.email_send_ledger
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE POLICY email_suppression_deny_all ON public.email_suppression
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
