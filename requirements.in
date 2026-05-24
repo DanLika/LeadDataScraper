@@ -21,15 +21,15 @@ pandas==2.3.3
 numpy==2.2.3
 requests==2.33.0
 beautifulsoup4==4.13.3
-lxml==6.1.0
+lxml==6.1.1
 google-genai==1.12.1
 urllib3==2.7.0
 fastapi==0.121.0
 uvicorn==0.34.0
-python-multipart==0.0.27
+python-multipart==0.0.29
 supabase==2.29.0
 python-dotenv==1.2.2
-aiohttp==3.13.4
+aiohttp==3.13.5
 # Transitive of aiohttp on Python 3.10 (Dockerfile base image
 # `mcr.microsoft.com/playwright/python:v1.40.0-jammy` is py3.10).
 # On Python 3.11+ aiohttp uses stdlib `asyncio.timeout`, so a
