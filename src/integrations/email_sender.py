@@ -5,10 +5,10 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime, timezone
 
-import aiohttp
+import aiohttp  # type: ignore[import-not-found]
 
 
 RESEND_API_URL = "https://api.resend.com/emails"
@@ -40,7 +40,7 @@ class EmailSenderBase(ABC):
 class SMTPEmailSender(EmailSenderBase):
     """SMTP-based email sender with rate limiting and bounce tracking."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
         self.smtp_port = int(os.environ.get("SMTP_PORT", "587"))
         self.smtp_user = os.environ.get("SMTP_USER", "")
@@ -160,7 +160,7 @@ class ResendEmailSender(EmailSenderBase):
     PRs (see ``docs/email-dispatch-architecture.md`` §4).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.api_key = os.environ.get("RESEND_API_KEY", "")
         self.from_email = os.environ.get("RESEND_FROM_EMAIL", "")
         self.from_name = os.environ.get("RESEND_FROM_NAME", "LeadDataScraper")
@@ -168,12 +168,12 @@ class ResendEmailSender(EmailSenderBase):
         self.list_unsubscribe = os.environ.get("EMAIL_LIST_UNSUBSCRIBE", "")
 
         self.rate_limit = int(os.environ.get("EMAIL_RATE_LIMIT", "10"))
-        self._send_times: list = []
+        self._send_times: list[float] = []
         self._lock = asyncio.Lock()
 
-        self.bounced_emails: set = set()
+        self.bounced_emails: set[str] = set()
 
-    async def _wait_for_rate_limit(self):
+    async def _wait_for_rate_limit(self) -> None:
         async with self._lock:
             now = datetime.now(timezone.utc).timestamp()
             self._send_times = [t for t in self._send_times if now - t < 60]
@@ -192,7 +192,7 @@ class ResendEmailSender(EmailSenderBase):
         body: str,
         from_name: Optional[str] = None,
         idempotency_key: Optional[str] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """POST to Resend ``/emails`` endpoint and map the response."""
         if not self.api_key or not self.from_email:
             return {"status": "error", "error": "Resend credentials not configured."}
@@ -218,7 +218,7 @@ class ResendEmailSender(EmailSenderBase):
 
         await self._wait_for_rate_limit()
 
-        payload: dict = {
+        payload: dict[str, Any] = {
             "from": f"{sender_name} <{self.from_email}>",
             "to": [to],
             "subject": subject,
@@ -227,14 +227,14 @@ class ResendEmailSender(EmailSenderBase):
         if self.reply_to:
             payload["reply_to"] = self.reply_to
 
-        extra_headers: dict = {}
+        extra_headers: dict[str, str] = {}
         if self.list_unsubscribe:
             extra_headers["List-Unsubscribe"] = self.list_unsubscribe
             extra_headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
         if extra_headers:
             payload["headers"] = extra_headers
 
-        request_headers = {
+        request_headers: dict[str, str] = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
@@ -260,7 +260,7 @@ class ResendEmailSender(EmailSenderBase):
         except aiohttp.ClientError:
             return {"status": "error", "error": "Network failure contacting email provider."}
 
-    def _map_response(self, status_code: int, data: dict, to: str) -> dict:
+    def _map_response(self, status_code: int, data: dict[str, Any], to: str) -> dict[str, Any]:
         # Error strings never echo `data` payload directly except the
         # 422 `message`. Resend's 422 message is operator-config-driven
         # ("domain not verified", "invalid 'from' value") — the
