@@ -8,6 +8,13 @@ from typing import Optional
 
 from src.utils.ssrf_guard import SSRFError, SSRFGuardResolver, assert_safe_scheme
 
+# Bot-block detection thresholds — see PR #274 Phase 9.10 Finding E.
+# Sites that respond with these statuses are returning a "blocked" body
+# (typical: "403 Forbidden" or a Cloudflare interstitial). Bodies shorter
+# than the byte threshold can't carry enough signal for a real audit.
+_BOT_BLOCKED_STATUSES = frozenset({401, 403, 429})
+_MIN_AUDITABLE_CONTENT_BYTES = 500
+
 # Pre-compiled regex patterns for social URL filtering (performance optimization)
 FB_EXCLUDE = re.compile(r'sharer|messenger|plugins')
 IG_EXCLUDE = re.compile(r'explore|p/|reels')
@@ -255,6 +262,21 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
                         html = await response.text()
                         results["is_up"] = True
                         results["response_time"] = round(time.time() - start_time, 2)
+                        results["http_status"] = response.status
+                        # Bot-blocked detection — without this, a 403 page
+                        # passes its small "403 Forbidden" body downstream
+                        # and Gemini hallucinates pain_points that look
+                        # grounded but reference signals (no Google Analytics,
+                        # no Facebook Pixel) inferred from an empty
+                        # tech_flags dict, not from the real homepage.
+                        # See PR #274 Phase 9.10 Finding E.
+                        if response.status in _BOT_BLOCKED_STATUSES or len(html) < _MIN_AUDITABLE_CONTENT_BYTES:
+                            results["is_bot_blocked"] = True
+                            results["last_error"] = f"site_blocked_{response.status}"
+                            results["red_flags"].append(
+                                f"Bot-blocked (HTTP {response.status}, "
+                                f"{len(html)} bytes) — Gemini analysis skipped"
+                            )
                 except (aiohttp.ClientConnectorSSLError, ssl.SSLError):
                     results["red_flags"].append("SSL Certificate Error")
                     results["has_ssl"] = False
@@ -285,6 +307,15 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
 
         # Email extraction and page text
         _extract_emails_and_text(soup, html, results)
+
+        # Clear page_text on bot-blocked sites so downstream Gemini callers
+        # (analyze_pain_points_async / enrich_business_data_async / outreach
+        # hook generation) all short-circuit on their existing
+        # ``if not page_text: return`` guards. Without this, a 403 page's
+        # ~25-byte body would be analysed by Gemini and yield plausible-
+        # but-ungrounded pain points — see PR #274 Phase 9.10 Finding E.
+        if results.get("is_bot_blocked"):
+            results["page_text"] = ""
 
     return results
 
