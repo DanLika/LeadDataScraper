@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import unittest
+import pytest
 from typing import Any
 from unittest.mock import patch
 
@@ -292,6 +293,7 @@ def _parse_judge_scores(raw: str) -> list[int]:
     return [int(s["score"]) for s in data["scores"]]
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
     """Live golden-set quality bar for /draft-outreach."""

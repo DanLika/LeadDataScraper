@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import unittest
+import pytest
 from typing import Any
 from unittest.mock import patch
 
@@ -228,6 +229,7 @@ async def _judge_one(router, lead: dict, draft: dict) -> tuple[str, list[dict]]:
     return lead["unique_key"], claims
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestOutreachHallucination(unittest.IsolatedAsyncioTestCase):
     """Sparse-input hallucination guard for /draft-outreach."""
