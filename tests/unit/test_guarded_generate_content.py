@@ -188,8 +188,17 @@ class TestGuardedGenerateContentAsync:
             model="m", contents="hello", config=None,
         )
         state = gemini_budget.get_state()
+        # estimate 40/80 was pre-debited; actual was 50/75.
+        # input: actual > estimate → counter catches up to 50.
+        # output: actual < estimate → MONOTONIC INVARIANT (Phase 9.10
+        # Finding H): counter does NOT decrement, stays at the pre-debit
+        # of 80 even though the real spend was 75. See
+        # src/utils/gemini_budget.py::record_usage. Trade-off: counter
+        # may over-state usage when estimates are sloppy. That is the
+        # safer direction — better to false-trip the ceiling than to
+        # silently overspend (the original buggy direction).
         assert state["input_today"] == 50
-        assert state["output_today"] == 75
+        assert state["output_today"] == 80
 
     @pytest.mark.asyncio
     async def test_budget_exceeded_skips_async_sdk_call(

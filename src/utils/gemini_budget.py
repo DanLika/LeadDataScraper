@@ -65,6 +65,7 @@ Environment variables
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -72,6 +73,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_DAILY_TOKEN_CEILING = 5_000_000
@@ -241,25 +244,58 @@ def record_usage(
 ) -> None:
     """Reconcile the per-call estimate (already debited by
     ``check_budget``) with the real usage_metadata that Gemini
-    returns post-call.  Stores the delta only.
+    returns post-call.  Adds *non-negative* delta only.
+
+    **Monotonic invariant**: the counter never decreases on
+    reconciliation. When a caller's estimate exceeded the actual
+    spend (``actual < estimated``), the delta is clamped to zero
+    and a WARN log is emitted so the operator can see chronic
+    over-estimation. Without this, the ``/admin/gemini-budget``
+    snapshot can decrement between consecutive reads — observed
+    in PR #274 Phase 9.10 Finding H, where the ``output_today``
+    field dropped from 38_532 → 25_887 across two reads (the M3
+    cost cap would then leak in the direction that matters:
+    under-counts → over-spends). Trade-off: chronic over-estimation
+    causes the counter to over-state usage. That is the safer
+    direction — better to false-trip the ceiling than to false-pass.
 
     Defaults for ``estimated_*`` keep the function safe for callers
     that bypass ``check_budget`` entirely (e.g. test fixtures).  In
     that case the full ``actual_*`` is added.
     """
-    delta_in = int(actual_input) - int(estimated_input)
-    delta_out = int(actual_output) - int(estimated_output)
+    raw_delta_in = int(actual_input) - int(estimated_input)
+    raw_delta_out = int(actual_output) - int(estimated_output)
+    if raw_delta_in < 0 or raw_delta_out < 0:
+        logger.warning(
+            "Gemini estimate exceeded actual — counter held flat to "
+            "preserve monotonic invariant. "
+            "est_in=%d est_out=%d act_in=%d act_out=%d "
+            "(would-be deltas: %d, %d)",
+            estimated_input,
+            estimated_output,
+            actual_input,
+            actual_output,
+            raw_delta_in,
+            raw_delta_out,
+        )
+    delta_in = max(0, raw_delta_in)
+    delta_out = max(0, raw_delta_out)
     today = _today_utc()
     with _LOCK:
         with _connect() as conn:
+            # Always ensure today's row exists, even when both clamped
+            # deltas are zero — keeps the observable shape consistent for
+            # ``get_state`` and for the original M3 contract that today's
+            # row is present after any ``record_usage`` call.
             _ensure_today_row(conn, today)
-            conn.execute(
-                "UPDATE usage_daily "
-                "SET input_tokens = MAX(0, input_tokens + ?), "
-                "    output_tokens = MAX(0, output_tokens + ?) "
-                "WHERE date = ?",
-                (delta_in, delta_out, today),
-            )
+            if delta_in or delta_out:
+                conn.execute(
+                    "UPDATE usage_daily "
+                    "SET input_tokens = input_tokens + ?, "
+                    "    output_tokens = output_tokens + ? "
+                    "WHERE date = ?",
+                    (delta_in, delta_out, today),
+                )
 
 
 def get_state() -> dict[str, object]:
