@@ -60,6 +60,9 @@ supabase/.branches/
 *.jpg
 *.jpeg
 *.png
+# Allowed PNG exceptions: committed visual baselines + integration-report screenshots
+!frontend/e2e/visual.spec.ts-snapshots/*.png
+!tests/integration/screenshots-*/*.png
 
 # IDE / Tools
 .claude/
