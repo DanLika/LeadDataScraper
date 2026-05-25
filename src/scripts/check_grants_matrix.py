@@ -36,7 +36,7 @@ import psycopg
 TABLES: tuple[str, ...] = (
     "leads", "campaigns", "campaign_messages", "orchestration_jobs",
     "account_deletions",
-    "email_send_ledger", "email_suppression",
+    "email_send_ledger", "suppressions",
 )
 TABLE_LIST = list(TABLES)
 

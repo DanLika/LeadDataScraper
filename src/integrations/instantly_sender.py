@@ -151,9 +151,10 @@ class InstantlyDispatcher(EmailDispatcher):
         Instantly will fall back to its campaign-level template.
 
         Suppression precheck is a single batch SELECT against
-        ``email_suppression`` (one DB round-trip regardless of batch
-        size). Suppressed addresses are skipped silently — they do NOT
-        count against ``failed_count``.
+        ``suppressions`` filtered to (identifier_type='email', channel ∈
+        {email, all}) — one DB round-trip regardless of batch size.
+        Suppressed addresses are skipped silently — they do NOT count
+        against ``failed_count``.
 
         Ledger writes happen ONLY on confirmed-success rows from
         Instantly (i.e. ``success_count``), and ONLY when
@@ -244,17 +245,26 @@ class InstantlyDispatcher(EmailDispatcher):
     # --- internals ---------------------------------------------------------
 
     async def _fetch_suppressed_emails(self, emails: list[str]) -> set[str]:
-        """Single-query batch precheck against email_suppression."""
+        """Single-query batch precheck against the generic suppressions table.
+
+        Phase 14.2 renamed email_suppression → suppressions and extended
+        identifier_type to {email, domain, linkedin_url, phone}. The email
+        dispatcher only filters on email-typed rows whose channel allows
+        email sends (i.e. channel ∈ {email, all}). The partial index
+        idx_suppressions_lookup matches this predicate exactly.
+        """
         if not self._db or not emails:
             return set()
         try:
             rows = (
-                self._db.table("email_suppression")
-                .select("email")
-                .in_("email", emails)
+                self._db.table("suppressions")
+                .select("identifier_value")
+                .eq("identifier_type", "email")
+                .in_("channel", ["email", "all"])
+                .in_("identifier_value", emails)
                 .execute()
             )
-            return {(r.get("email") or "").lower() for r in (rows.data or [])}
+            return {(r.get("identifier_value") or "").lower() for r in (rows.data or [])}
         except Exception:
             logger.exception("InstantlyDispatcher: suppression precheck failed")
             # Fail-OPEN intentionally: a transient PostgREST blip should
