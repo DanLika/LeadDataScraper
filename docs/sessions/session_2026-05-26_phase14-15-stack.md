@@ -180,69 +180,10 @@ blocker; once P1 clears the rest cascades. Next session can pick
 up at Phase 16 (reply classifier) — defer until real dogfood reply
 samples land.
 
-## Validation findings (2026-05-26 simulation run)
+## Validation findings (2026-05-26 sim run, sha fb7aae8)
 
-Local merge simulation against `main` (no push, no GitHub merge —
-`#305` still OPEN). 9 PRs merged sequentially via `git merge --no-ff`
-into a throwaway `sim/phase14-15-merged-validation` branch; branch
-deleted post-test.
-
-| Check | Result |
-|---|---|
-| Merge conflicts across 9 PRs | **0** |
-| Full pytest on merged state | **1029 passed**, 99 skipped (live-tier), 86 deselected (default `not slow and not live` filter), 191 subtests passed |
-| Unit-only pytest (`tests/unit -q`) | **298 passed** |
-| Drift gate (`parse_expected_columns`) | **Clean** — 11 tables tracked, 21 named CHECK constraints declared |
-| CLI smoke (`scripts/dispatch_tick.py`) | **Pass** — structured JSON output, clean exit=1 on missing env |
-| Ruff regression | **+19 errors** (main=82, merged=101). Quality-ratchet ceiling=90 → **would fail**. Fix-up PR **#330** opened on top of #328. |
-| Mypy `--strict` regression | **+57 errors** on top of pre-existing **+205 main drift** vs 401 baseline (ratchet dormant during #305 outage). **Deferred** — not stack-blocking. |
-
-### Ruff fix-up — #330
-
-Sits as the final entry in the stack:
-
-```
-main ← #320 ← #321 ← #322 ← #323 ← #324 ← #325 ← #326 ← #327 ← #328 ← #330 (chore/ruff-cleanup)
-```
-
-- 18× F401 (unused imports) — auto-fixed via `ruff check --fix`
-- 1× F841 (unused local `step` in `test_sequence_repos.py`) — manual
-- Verified clean: `Found 80 errors` < 90 baseline; 289/289 unit tests still green
-
-### Mypy reconciliation — deferred (post-#305 work item)
-
-**Pre-existing infra issue, not Phase 14+15 code quality.** Main is
-already +205 over the 401 baseline because the quality-ratchet
-workflow has been dormant during the #305 CI outage. Phase 14+15
-adds +57 proportional to stack size, not a quality signal.
-
-**Recommendation after #305 resolves**: bump the mypy_strict
-baseline to the current main level. 205 errors across 26 files
-are largely a function of Python being weakly typed at the
-boundaries we've accepted (Supabase row dicts, Gemini SDK
-shapes, dynamic JSON payloads); retroactive annotation is high
-effort, low ROI. Bump + forward ratchet from the new floor.
-
-Alternative (purist): dedicated type-annotation pass — at least
-a session of focused work; not stack-blocking.
-
-### Updated merge sequence
-
-10 PRs in the stack (was 9 in the original handoff plan):
-
-```
-1. #320  →  2. #321  →  3. #322  →  4. #323  →  5. #324
-→  6. #325 →  7. #326 →  8. #327 →  9. #328 → 10. #330 (ruff)
-```
-
-Doc PR #329 (this file) merges independently — solo branch off
-main, doesn't need to wait for the stack. Recommend merging it
-after the stack lands so the validation-findings update reflects
-the final actual state.
-
-### Verdict
-
-**Stack is functionally correct + drift-clean + smoke-clean.** Only
-the ruff regression needs a stack addition (#330). Mypy reconciliation
-is its own work item and doesn't block the stack from landing.
-Operator can resume the merge sequence as soon as #305 clears.
+- pytest 1029 pass, 0 fail on merged state
+- Ruff +19 errors (101 vs 90 ceiling) → fix-up PR #330 opened on stack
+- Mypy +57 on top of pre-existing +205 main drift (CI ratchet dormant during #305 outage)
+- No merge conflicts, no drift gate violations, CLI smoke clean
+- Verdict: stack ships clean after ruff fix-up; mypy reconciliation = separate post-#305 work item
