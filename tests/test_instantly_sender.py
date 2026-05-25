@@ -70,9 +70,13 @@ class TestInstantlyLeadPayload:
             InstantlyLeadPayload(email="not-an-email")
 
     def test_lds_keys_pinned(self):
+        # list_unsubscribe + list_unsubscribe_post added in Phase 14.2 PR β
+        # so the dispatcher can pass the angle-bracketed RFC 8058 header
+        # value to Instantly's custom-vars-to-header bridge.
         assert InstantlyLeadPayload.LDS_KEYS == frozenset({
             "lds_lead_id", "lds_audit_score", "lds_discovery_source",
             "lds_dispatched_at",
+            "list_unsubscribe", "list_unsubscribe_post",
         })
 
 

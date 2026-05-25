@@ -60,8 +60,20 @@ class InstantlyLeadPayload(BaseModel):
     # LDS custom-variable keys — pinned here so the dispatcher + webhook
     # handler agree on names. Adding a new key requires updating both
     # sides AND the Phase 14.1 doc (`docs/integrations/instantly.md`).
+    # ``list_unsubscribe`` (Phase 14.2 PR β) carries the angle-bracketed
+    # ``<https://...>, <mailto:...>`` value Instantly sets as the
+    # List-Unsubscribe header. Setting the header server-side is
+    # Instantly's job; we ship the value via this var per their
+    # custom-vars-to-header bridge convention.
     LDS_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"lds_lead_id", "lds_audit_score", "lds_discovery_source", "lds_dispatched_at"}
+        {
+            "lds_lead_id",
+            "lds_audit_score",
+            "lds_discovery_source",
+            "lds_dispatched_at",
+            "list_unsubscribe",
+            "list_unsubscribe_post",
+        }
     )
 
     @classmethod
@@ -70,6 +82,7 @@ class InstantlyLeadPayload(BaseModel):
         lead: LdsLeadRow,
         personalization: Optional[str] = None,
         dispatched_at: Optional[str] = None,
+        list_unsubscribe: Optional[str] = None,
     ) -> "InstantlyLeadPayload":
         """Map a Supabase `leads` row to an Instantly request payload.
 
@@ -78,7 +91,23 @@ class InstantlyLeadPayload(BaseModel):
         Custom variables thread ``lds_lead_id`` / ``lds_audit_score`` /
         ``lds_discovery_source`` / ``lds_dispatched_at`` so the webhook
         handler can reconcile bounces back to the originating row.
+
+        ``list_unsubscribe`` (Phase 14.2 PR β) is the angle-bracketed
+        ``<https://...>, <mailto:...>`` header value Instantly maps to
+        the SMTP List-Unsubscribe header. Pair with
+        ``list_unsubscribe_post = "List-Unsubscribe=One-Click"`` to
+        satisfy Gmail/Yahoo/Microsoft 2024+ enforcement. Caller passes
+        ``None`` to omit (e.g. for a non-bulk send).
         """
+        custom_vars: dict[str, Optional[str | int | float | bool]] = {
+            "lds_lead_id": lead.get("unique_key"),
+            "lds_audit_score": lead.get("outreach_score"),
+            "lds_discovery_source": lead.get("lead_source"),
+            "lds_dispatched_at": dispatched_at,
+        }
+        if list_unsubscribe:
+            custom_vars["list_unsubscribe"] = list_unsubscribe
+            custom_vars["list_unsubscribe_post"] = "List-Unsubscribe=One-Click"
         return cls(
             email=lead["email"],
             first_name=lead.get("first_name") or None,
@@ -86,12 +115,7 @@ class InstantlyLeadPayload(BaseModel):
             company_name=lead.get("company_name") or None,
             website=lead.get("website") or None,
             personalization=personalization,
-            custom_variables={
-                "lds_lead_id": lead.get("unique_key"),
-                "lds_audit_score": lead.get("outreach_score"),
-                "lds_discovery_source": lead.get("lead_source"),
-                "lds_dispatched_at": dispatched_at,
-            },
+            custom_variables=custom_vars,
         )
 
 
