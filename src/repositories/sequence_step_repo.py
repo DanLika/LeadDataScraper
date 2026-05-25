@@ -131,8 +131,23 @@ class SequenceStepRepository:
         """Insert one step. Returns None on UNIQUE collision (same
         (sequence_id, step_index)) — caller retries with a fresh index
         or surfaces a UI error. Other DB errors are logged + None'd
-        to keep the boundary uniform."""
+        to keep the boundary uniform.
+
+        Phase 15.4 additional pre-check: a step beyond the first
+        (``step_index > 0``) must carry a positive delay. A
+        zero-delay step 2+ would schedule its row immediately upon
+        prior-step advance, defeating the multi-touch cadence. The
+        first step (``step_index == 0``) is exempt — that's the
+        initial send, which fires at campaign-activate time.
+        """
         if not self._db or not sequence_id or step_index < 0:
+            return None
+        if step_index > 0 and delay_days == 0 and delay_hours == 0:
+            logger.info(
+                "SequenceStepRepository.create rejected zero-delay step %d "
+                "(only step_index=0 may have delay=0)",
+                step_index,
+            )
             return None
         try:
             res = await asyncio.to_thread(
