@@ -272,6 +272,108 @@ class CampaignMessageRepository:
             return MarkResult(matched=False, error=type(exc).__name__)
         return MarkResult(matched=bool(getattr(res, "data", None)))
 
+    # ----- Phase 15.1 dispatch-queue surface ------------------------------
+
+    async def fetch_due_for_dispatch(
+        self,
+        *,
+        limit: int = 100,
+        now_iso: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Read the next batch of due-to-send messages.
+
+        Predicate: ``status = 'pending' AND scheduled_at <= now()``
+        ORDER BY scheduled_at ASC LIMIT N. Backed by partial index
+        ``idx_campaign_messages_dispatch_queue`` (status='pending' AND
+        scheduled_at IS NOT NULL).
+
+        Returns raw row dicts (not a typed dataclass) — the
+        dispatch_tick worker (Phase 15.2) joins lead + step + variant
+        data per row and constructs the send payload from a wider
+        projection than this repo's natural surface should expose.
+
+        ``now_iso`` defaults to current UTC; tests override for
+        deterministic scheduling.
+
+        Race-safety note: this is a pure read. The atomic
+        ``pending → dispatching`` lock-transition lives in
+        ``claim_for_dispatch`` (Phase 15.2 PR — adds the 'dispatching'
+        status to the CHECK allowlist alongside the claim method).
+        """
+        if not self._db or limit <= 0:
+            return []
+        when = now_iso or _now_iso()
+        try:
+            rows = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .select("*")
+                    .eq("status", "pending")
+                    .lte("scheduled_at", when)
+                    .order("scheduled_at", desc=False)
+                    .limit(limit)
+                    .execute()
+                )
+            )
+        except Exception:
+            logger.exception(
+                "fetch_due_for_dispatch failed (limit=%d, when=%s)",
+                limit, when,
+            )
+            return []
+        return list(getattr(rows, "data", None) or [])
+
+    async def schedule_step(
+        self,
+        message_id: str,
+        *,
+        step_id: str,
+        variant_id: str,
+        scheduled_at_iso: str,
+    ) -> MarkResult:
+        """Stamp the step + variant FKs and the ``scheduled_at`` ts on a
+        pending row. Used by the sequence advancement path (Phase 15.4)
+        when creating the next-step row OR when re-scheduling a
+        rejected send window.
+
+        Predicate: ``id = message_id AND status = 'pending'``. A row
+        already in ``sent`` / ``bounced`` / etc. is excluded — the
+        sequence advancer only schedules into legitimately-pending
+        slots, and a late re-schedule on a terminal row would be a
+        bug we want to surface as a no-op rather than silently
+        rewrite history.
+        """
+        if not self._db or not message_id or not step_id or not variant_id:
+            return MarkResult(matched=False, error="missing identifiers")
+        try:
+            res = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .update({
+                        "step_id": step_id,
+                        "variant_id": variant_id,
+                        "scheduled_at": scheduled_at_iso,
+                    })
+                    .eq("id", message_id)
+                    .eq("status", "pending")
+                    .execute()
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "schedule_step failed for message_id=%s", message_id,
+            )
+            return MarkResult(matched=False, error=type(exc).__name__)
+        return MarkResult(matched=bool(getattr(res, "data", None)))
+
+
+def _now_iso() -> str:
+    """Centralized UTC ISO timestamp — split from inline ``datetime.now()``
+    calls so tests can patch a single import site if a future scenario
+    needs frozen-clock semantics."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
 
 __all__ = [
     "MarkResult",
