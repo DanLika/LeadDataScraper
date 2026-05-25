@@ -5,7 +5,7 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 from datetime import datetime, timezone
 
 import aiohttp  # type: ignore[import-not-found]
@@ -35,6 +35,29 @@ class EmailSenderBase(ABC):
         semantics.
         """
         pass
+
+
+class EmailDispatcher(EmailSenderBase):
+    """Marker base for senders that participate in the dispatch loop.
+
+    Carries provider metadata so the dispatch orchestrator (Phase
+    14.0+, ``docs/email-dispatch-architecture.md`` §0.3) can:
+
+    - Write the right ``provider`` value into ``email_send_ledger``.
+    - Skip webhook-driven state transitions when the provider doesn't
+      ship them (SMTP).
+    - Skip ``Idempotency-Key`` plumbing when the provider doesn't
+      honour it.
+
+    Subclasses MUST override ``PROVIDER_NAME`` with one of the values
+    in ``email_send_ledger_provider_allowed`` (``'resend'``,
+    ``'instantly'``, ``'smtp'`` — see PR ``feature/email-schema-pr2``
+    and the multi-dispatcher pivot doc).
+    """
+
+    PROVIDER_NAME: ClassVar[str] = ""
+    SUPPORTS_WEBHOOKS: ClassVar[bool] = False
+    SUPPORTS_IDEMPOTENCY: ClassVar[bool] = False
 
 
 class SMTPEmailSender(EmailSenderBase):
@@ -148,17 +171,29 @@ class SMTPEmailSender(EmailSenderBase):
             server.sendmail(self.from_email, to, msg.as_string())
 
 
-class ResendEmailSender(EmailSenderBase):
+class ResendEmailSender(EmailDispatcher):
     """Resend HTTP API client. Honours ``Idempotency-Key`` so retries
     dedupe at the provider for 24h. Hardening mirrors SMTPEmailSender —
     same ``\\Z``-anchored recipient regex, same CRLF reject on header
     values (subject, from_name, reply_to), same per-instance rate limit
     + short-lived bounce set.
 
+    Scope — **warm / transactional only.** Resend's Acceptable Use
+    Policy (https://resend.com/legal/acceptable-use-policy) forbids
+    cold outreach to unverified prospects. Cold sends go through
+    Instantly's cold-sender pool (Phase 14.x); LinkedIn through
+    HeyReach (Phase 17.x). See the multi-dispatcher pivot in
+    ``docs/email-dispatch-architecture.md`` §0.
+
     Suppression list, ``provider_message_id`` persistence, and the
     webhook that drives ``campaign_messages.status`` ship in follow-up
-    PRs (see ``docs/email-dispatch-architecture.md`` §4).
+    PRs (see ``docs/email-dispatch-architecture.md`` §0.3 Phase
+    13.5c–e).
     """
+
+    PROVIDER_NAME = "resend"
+    SUPPORTS_WEBHOOKS = True
+    SUPPORTS_IDEMPOTENCY = True
 
     def __init__(self) -> None:
         self.api_key = os.environ.get("RESEND_API_KEY", "")
