@@ -466,3 +466,56 @@ DO $$ BEGIN
         USING (false)
         WITH CHECK (false);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ===========================================================================
+-- Phase 14.0 — multi-dispatcher provider columns (additive to PR #286)
+-- ---------------------------------------------------------------------------
+-- Adds `provider` to email_send_ledger so the dispatcher can throttle
+-- per-provider AND maintain per-provider cost accounting. Adds optional
+-- `source` to email_suppression for forensic ("which provider reported
+-- this bounce"). LinkedIn (HeyReach) is included in the provider
+-- allowlist because the LinkedIn-surface decision (parallel tables vs
+-- email_*→outreach_* rename) is deferred to Phase 17.0 — until then,
+-- HeyReach writes land here, which is functionally fine: domain/email
+-- columns become NULL for LinkedIn sends, so we also relax
+-- recipient_domain NOT NULL (was incompatible with the LinkedIn path).
+-- ===========================================================================
+
+ALTER TABLE public.email_send_ledger
+    ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'resend';
+
+-- HeyReach (LinkedIn) sends have no recipient_domain; relax the NOT NULL
+-- so the dispatcher can write a provider-tagged ledger row without a
+-- synthetic placeholder. Per-email throttling for LinkedIn moves to
+-- Phase 17.0 with the dedicated linkedin_send_ledger table.
+ALTER TABLE public.email_send_ledger
+    ALTER COLUMN recipient_domain DROP NOT NULL;
+
+DO $$ BEGIN
+    ALTER TABLE public.email_send_ledger
+        ADD CONSTRAINT email_send_ledger_provider_allowed
+        CHECK (provider IN ('resend', 'instantly', 'smtp', 'heyreach'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Throttle queries by (provider, domain, time) — composite index ahead
+-- of the existing single-column index so per-provider throttle predicates
+-- ("3/hr/domain on Resend, separate quota on Instantly") use an index scan.
+CREATE INDEX IF NOT EXISTS idx_email_send_ledger_provider_domain_sent
+    ON public.email_send_ledger (provider, recipient_domain, sent_at DESC);
+
+ALTER TABLE public.email_suppression
+    ADD COLUMN IF NOT EXISTS source TEXT;
+
+-- Source allowlist mirrors email_send_ledger.provider — webhook handlers
+-- (PR 3) write attacker-influenced bodies; without a DB-level CHECK the
+-- forensic column accepts arbitrary text. NULL stays valid for manual
+-- operator adds. New providers land here AND in
+-- schema_drift_check.py::EXPECTED_CHECK_CONSTRAINTS in the same PR.
+DO $$ BEGIN
+    ALTER TABLE public.email_suppression
+        ADD CONSTRAINT email_suppression_source_allowed
+        CHECK (source IS NULL OR source IN ('resend', 'instantly', 'smtp', 'heyreach'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+COMMENT ON COLUMN public.email_suppression.source IS
+    'Provider that reported the suppression (resend|instantly|smtp|heyreach). NULL for manual operator add. Enforced by email_suppression_source_allowed CHECK.';
