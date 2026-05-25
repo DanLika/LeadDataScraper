@@ -1,7 +1,7 @@
 # Email dispatch — current state, target state, wiring plan
 
 **Status:** plan-only. **Do NOT wire** until `docs/email-deliverability.md`
-checklist 100% complete (DNS propagated, Resend account live,
+checklist 100% complete (DNS propagated, sender account live,
 mail-tester 10/10).
 
 This doc maps:
@@ -9,6 +9,77 @@ This doc maps:
 2. What the dispatch loop should look like once DNS + provider go live.
 3. Decision points that need operator input before wiring (scheduler
    host, SMTP-vs-API path, webhook authentication).
+
+---
+
+## 0 — 2026-05-25 multi-dispatcher pivot (overrides §2.1 + §5)
+
+Original plan (PRs #281 / #286) is **Resend-warm-path-only**. This
+section pins the broader 3-dispatcher target so subsequent PRs build
+on the right model.
+
+### 0.1 Channel map
+
+| Channel | Provider | Audience | Reputation tier |
+|---|---|---|---|
+| Cold email outreach | **Instantly** | Unverified prospects, first-touch | Cold-sender pool, rotating IP/identity |
+| Warm email outreach | **Resend** | Replied / engaged / opted-in prospects | Owned domain `mail.leaddatascraper.com` reputation |
+| LinkedIn outreach | **HeyReach** | Pure LinkedIn surface, no email | Per-LinkedIn-account, not domain-bound |
+
+Rationale: burning the owned-domain warm reputation on cold sends is
+the costliest mistake. Instantly's pool absorbs cold-sender risk;
+Resend keeps the warm domain pristine. HeyReach is a separate medium
+(LinkedIn) — no email-domain reputation overlap.
+
+### 0.2 Schema impact (Phase 14.1, additive, post-#286)
+
+`email_send_ledger` + `email_suppression` from PR #286 are
+**dispatcher-agnostic on the critical path** (`provider_message_id`
+is opaque TEXT — Resend / Instantly / HeyReach IDs all fit). Three
+forward-additive columns close the multi-dispatcher gap; none break
+#286 callers:
+
+```sql
+ALTER TABLE email_send_ledger
+  ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'resend';
+ALTER TABLE email_send_ledger
+  ADD CONSTRAINT email_send_ledger_provider_allowed
+  CHECK (provider IN ('resend', 'instantly', 'smtp'));
+
+ALTER TABLE email_suppression
+  ADD COLUMN IF NOT EXISTS source TEXT;  -- nullable, forensic: which
+                                          -- provider reported the bounce
+```
+
+Suppression stays **global** (a bounce on Resend MUST suppress
+Instantly too — same recipient, same deliverability ground truth).
+`source` is forensic only.
+
+LinkedIn surface: HeyReach actions are NOT email. Either (a)
+introduce `linkedin_send_ledger` + `linkedin_suppression` parallel
+tables, or (b) rename `email_*` → `outreach_*` with a `channel`
+discriminator. Decision deferred to Phase 14.2; the rename path is
+breaking and needs a coordinated migration.
+
+### 0.3 Phased PR map (supersedes §4 numbering)
+
+| Phase | Scope | PRs |
+|---|---|---|
+| 1.0 (Resend warm path) | `ResendEmailSender` + dispatcher schema | **#281, #286** (in flight) |
+| 1.1 | Resend webhook handler (`POST /webhooks/resend`) | new |
+| 1.2 | Resend dispatcher (Render Cron, warm queue only) | new |
+| 1.3 | Operator-facing Send + suppression UI | new |
+| 2.0 (Instantly cold path) | `InstantlyEmailSender` + provider column on ledger + Instantly webhook | new |
+| 2.1 | Instantly dispatcher + cold/warm queue routing | new |
+| 3.0 (HeyReach LinkedIn) | `HeyReachLinkedInSender` + LinkedIn surface tables/columns | new |
+| 3.1 | LinkedIn dispatcher + UI | new |
+
+### 0.4 Out-of-scope clarification
+
+§5 below historically excluded LinkedIn entirely. **Reverse that** —
+HeyReach IS in scope, but as Phase 3.0+, AFTER Phase 1.x (Resend
+warm path) reaches dogfood-ready status. The §5 LinkedIn paragraph
+is preserved below as historical context but no longer normative.
 
 ---
 
@@ -74,10 +145,18 @@ is flagged by `src/scripts/check_orphans_and_zombies.py`.
 
 ## 2 — Target state
 
-### 2.1 Recommended path: Resend HTTP API (not SMTP)
+### 2.1 Recommended warm path: Resend HTTP API (not SMTP)
 
-Per [`docs/email-deliverability.md`](email-deliverability.md), provider
-choice is **Resend**. Two integration paths:
+> **Pivot note (2026-05-25):** This section covers the **warm path
+> only** — see §0 above for the broader 3-dispatcher model. Cold
+> outreach goes through Instantly (Phase 2.0), LinkedIn through
+> HeyReach (Phase 3.0). The §0 pivot does NOT change the
+> warm-path recommendation: Resend HTTP API beats SMTP for the
+> same reasons listed below.
+
+Per [`docs/email-deliverability.md`](email-deliverability.md), the
+**warm-path** provider is **Resend** (owned domain
+`mail.leaddatascraper.com`). Two integration paths:
 
 | | SMTP path | HTTP API path |
 |---|---|---|
@@ -325,10 +404,11 @@ PR 5 surfaces sending to operator.
 
 ## 5 — Out of scope for dogfood
 
-- LinkedIn outreach via channel `'linkedin'` — no UI to authorize a
-  LinkedIn API token, and LinkedIn's automated-outreach detection is
-  aggressive. Leave the schema column intact, surface the draft for
-  operator to copy/paste manually.
+- ~~LinkedIn outreach via channel `'linkedin'`~~ — **Superseded by
+  §0.3 Phase 3.0 (HeyReach LinkedIn)**. Original concern (no API
+  token, aggressive detection) is addressed by HeyReach acting as the
+  managed-account intermediary. Keep the `channel='linkedin'` column;
+  surface stays operator-curated until Phase 3.x lands.
 - Open/click tracking pixels — privacy-hostile and signal value at
   dogfood scale is zero. Resend tracks at-provider; the operator can
   read it there.
