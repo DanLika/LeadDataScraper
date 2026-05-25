@@ -713,3 +713,92 @@ COMMENT ON COLUMN public.campaign_messages.in_reply_to_message_id IS
     'Points at the previously-sent message in the same thread; NULL on the initial touch. Enables reply-classifier (Phase 16) to walk the chain backwards.';
 COMMENT ON COLUMN public.campaign_messages.tracking_id IS
     'LDS-side opaque UUID for unsubscribe-link binding. Embedded in the RFC 8058 List-Unsubscribe token (HMAC-signed) so the unsubscribe handler can suppress the right (lead_unique_key, channel) tuple without trusting the recipient-side email value.';
+
+-- ===========================================================================
+-- Phase 14.2 (PR γ) — webhook_events idempotency table
+-- ---------------------------------------------------------------------------
+-- Provider webhooks (Instantly today; Resend / HeyReach next) MUST be
+-- idempotent at the handler boundary because:
+--   * Instantly retries on any non-2xx, on timeout (>2s default), and
+--     occasionally even on confirmed 2xx delivery.
+--   * Network blips between TLS handshake completion and our INSERT
+--     can leave the provider believing the event wasn't ack'd.
+--   * Replay attacks: a leaked or sniffed valid-signature webhook body
+--     can be re-played by anyone with TCP access to the public URL.
+--
+-- The (provider, event_id) UNIQUE constraint is the idempotency lock:
+-- a duplicate INSERT collides, the handler reads the 23505 error code
+-- and returns 200 OK without re-running the side effects.
+--
+-- payload JSONB stores the verified raw body for replay/audit. No TTL
+-- enforcement yet — partial-vacuum job lands when volume justifies it.
+--
+-- processed_at / processing_error give the background processor a
+-- place to checkpoint without a separate state table. The partial
+-- index idx_webhook_events_unprocessed supports the worker's "pick
+-- the next one" scan.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS public.webhook_events (
+    id                BIGSERIAL PRIMARY KEY,
+    provider          TEXT NOT NULL,
+    event_id          TEXT NOT NULL,
+    event_type        TEXT NOT NULL,
+    payload           JSONB NOT NULL,
+    received_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    processed_at      TIMESTAMPTZ,
+    processing_error  TEXT
+);
+
+DO $$ BEGIN
+    ALTER TABLE public.webhook_events
+        ADD CONSTRAINT webhook_events_provider_allowed
+        CHECK (provider IN ('instantly', 'resend', 'heyreach'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.webhook_events
+        ADD CONSTRAINT webhook_events_idempotency
+        UNIQUE (provider, event_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS idx_webhook_events_unprocessed
+    ON public.webhook_events (provider, received_at)
+    WHERE processed_at IS NULL;
+
+ALTER TABLE public.webhook_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.webhook_events FROM anon, authenticated, PUBLIC;
+
+DO $$ BEGIN
+    CREATE POLICY webhook_events_deny_all ON public.webhook_events
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+COMMENT ON COLUMN public.webhook_events.event_id IS
+    'Provider-side event identifier. Forms the (provider, event_id) UNIQUE pair that gives the handler idempotency under retries + replay attacks. Instantly: event UUID from webhook body. Resend/HeyReach: provider-specific.';
+COMMENT ON COLUMN public.webhook_events.payload IS
+    'Verified raw webhook body. Stored as JSONB for replay/audit; a future partial-vacuum job (Phase 14.3+) trims older rows once volume justifies the maintenance window.';
+
+-- ---------------------------------------------------------------------------
+-- Phase 14.2 (PR γ) — extend campaign_messages.status allowlist with
+-- 'unsubscribed'. The webhook handler stamps this status alongside the
+-- suppression INSERT so operator reporting ("which message got the
+-- unsubscribe") works without a join. DROP+ADD with the same name so
+-- the drift gate doesn't see two CHECK constraints.
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+    ALTER TABLE public.campaign_messages
+        DROP CONSTRAINT IF EXISTS campaign_messages_status_allowed;
+EXCEPTION WHEN undefined_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.campaign_messages
+        ADD CONSTRAINT campaign_messages_status_allowed
+        CHECK (status IS NULL OR status IN (
+            'pending', 'sent', 'delivered', 'replied', 'bounced', 'unsubscribed'
+        ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
