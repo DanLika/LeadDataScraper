@@ -151,11 +151,18 @@ jobs:
           curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin gitleaks
           gitleaks version
-      - name: Scan full history (0 findings required)
+      - name: Scan full history (0 NEW findings required)
         # `detect` walks every commit in the repo. `--redact` censors
         # the value in logs so the leak isn't re-published by the CI
-        # output. Exit code 1 on any finding.
-        run: gitleaks detect --no-banner --redact --verbose --exit-code 1
+        # output. `--baseline-path` suppresses already-triaged findings
+        # whose tokens have been rotated at the provider; only NEW
+        # findings exit 1. To re-baseline, run locally:
+        #   gitleaks detect --no-banner --redact \
+        #     --report-format json --report-path .gitleaks-baseline.json
+        # then triage every entry before committing.
+        run: |
+          gitleaks detect --no-banner --redact --verbose --exit-code 1 \
+            --baseline-path .gitleaks-baseline.json
 
   lockfile-sync:
     name: requirements.txt ↔ requirements.in sync
