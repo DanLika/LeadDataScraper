@@ -18,9 +18,8 @@ import os
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
-from src.utils.send_window import WindowCheck, is_within_window
+from src.utils.send_window import is_within_window
 
 
 # Default test step config — matches the schema defaults.

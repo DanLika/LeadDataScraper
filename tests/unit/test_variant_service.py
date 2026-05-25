@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 from src.repositories.sequence_variant_repo import SequenceVariant
 from src.services.variant_service import (
-    CreateVariantResult,
     ErrorCodes,
     VariantService,
 )

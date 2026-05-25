@@ -13,7 +13,6 @@ import unittest
 
 from src.services.template_renderer import (
     ALLOWED_VARS,
-    DisallowedVariableError,
     MissingUnsubscribeUrlError,
     MissingVariableError,
     SecurityError,

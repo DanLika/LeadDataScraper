@@ -47,7 +47,7 @@ import asyncio
 import logging
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)

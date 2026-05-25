@@ -170,7 +170,7 @@ class TestSequenceStepRepo(unittest.TestCase):
         ]
         client, table = _build_db(rows)
         repo = SequenceStepRepository(client)
-        step = asyncio.run(repo.create(
+        asyncio.run(repo.create(
             "s-1", 1,
             channel="email", delay_days=3, delay_hours=6,
             thread_with_prior=True, branch_condition="no_reply",
