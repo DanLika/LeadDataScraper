@@ -76,6 +76,10 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     },
     "email_suppression": {
         "email_suppression_reason_allowed",
+        "email_suppression_source_allowed",
+    },
+    "email_send_ledger": {
+        "email_send_ledger_provider_allowed",
     },
 }
 
