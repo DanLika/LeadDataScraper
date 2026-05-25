@@ -366,6 +366,132 @@ class CampaignMessageRepository:
             return MarkResult(matched=False, error=type(exc).__name__)
         return MarkResult(matched=bool(getattr(res, "data", None)))
 
+    # ----- Phase 15.2 dispatch claim surface -------------------------------
+    #
+    # Concurrent-worker safety pattern (canonical for this repo and any
+    # follow-up worker repo):
+    #
+    #   PostgREST has NO ``SELECT FOR UPDATE SKIP LOCKED``. The equivalent
+    #   is a two-phase status-transition claim that relies on PG's
+    #   row-level serialization in READ COMMITTED:
+    #
+    #   Phase 1: SELECT due ids (via :meth:`fetch_due_for_dispatch`)
+    #   Phase 2: UPDATE SET status='dispatching', dispatched_at=now()
+    #            WHERE id IN (ids) AND status='pending'
+    #            RETURNING *
+    #
+    #   Two ticks SELECTing the same ids both attempt Phase 2; the first
+    #   UPDATE flips each row's status; the second's ``status='pending'``
+    #   predicate matches zero rows for already-claimed ones. Wasted
+    #   SELECT work but no double-dispatch.
+    #
+    #   The stale-claim sweeper (separate method) handles the crash
+    #   scenario where a worker dies mid-tick leaving rows stuck in
+    #   ``'dispatching'``. Sweeper runs at the top of every tick.
+
+    async def claim_due_batch(
+        self,
+        *,
+        limit: int = 100,
+        now_iso: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Atomically claim up to ``limit`` due-to-send messages.
+
+        Two-phase status-transition claim (see comment above): Phase 1
+        reads due ids via :meth:`fetch_due_for_dispatch`. Phase 2 flips
+        them ``pending → dispatching`` with a ``status='pending'``
+        predicate that any concurrent worker's UPDATE matches against
+        zero rows after losing the row-level race.
+
+        Returns the rows that THIS tick successfully claimed.
+
+        Caller MUST release the lock by either:
+          * the dispatcher success path → webhook → ``mark_sent`` /
+            ``mark_bounced`` (transitions to a terminal status), OR
+          * waiting for :meth:`sweep_stale_claims` to revert after
+            ``DISPATCH_CLAIM_TIMEOUT_MIN``.
+        """
+        if not self._db or limit <= 0:
+            return []
+        when = now_iso or _now_iso()
+        due_rows = await self.fetch_due_for_dispatch(limit=limit, now_iso=when)
+        if not due_rows:
+            return []
+        due_ids = [r.get("id") for r in due_rows if r.get("id")]
+        if not due_ids:
+            return []
+        try:
+            res = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .update({
+                        "status": "dispatching",
+                        "dispatched_at": when,
+                    })
+                    .in_("id", due_ids)
+                    .eq("status", "pending")
+                    .execute()
+                )
+            )
+        except Exception:
+            logger.exception(
+                "claim_due_batch UPDATE failed (limit=%d, when=%s)",
+                limit, when,
+            )
+            return []
+        return list(getattr(res, "data", None) or [])
+
+    async def sweep_stale_claims(
+        self,
+        *,
+        timeout_minutes: int = 15,
+        now_iso: Optional[str] = None,
+    ) -> int:
+        """Reset rows stuck in ``'dispatching'`` past ``timeout_minutes``
+        back to ``'pending'`` so the next tick re-claims them.
+
+        Resilience for crashed workers: if a tick wins the claim but
+        then SIGKILL / OOM / Render-timeout's mid-dispatch, the row
+        stays in ``'dispatching'`` forever without intervention. The
+        sweeper runs at the top of every tick (before claim) so the
+        recovery window = at most one tick interval + timeout.
+
+        Default 15 min is generous vs the Render Cron 60 s hard
+        timeout — a 15× safety margin. Pin via
+        ``DISPATCH_CLAIM_TIMEOUT_MIN`` env if tightening for higher
+        throughput.
+
+        Returns the number of rows reset.
+        """
+        if not self._db or timeout_minutes <= 0:
+            return 0
+        from datetime import datetime, timedelta, timezone
+        now = (
+            datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+            if now_iso else datetime.now(timezone.utc)
+        )
+        cutoff = (now - timedelta(minutes=timeout_minutes)).isoformat()
+        try:
+            res = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .update({
+                        "status": "pending",
+                        "dispatched_at": None,
+                    })
+                    .eq("status", "dispatching")
+                    .lt("dispatched_at", cutoff)
+                    .execute()
+                )
+            )
+        except Exception:
+            logger.exception(
+                "sweep_stale_claims failed (timeout_minutes=%d)",
+                timeout_minutes,
+            )
+            return 0
+        return len(getattr(res, "data", None) or [])
+
 
 def _now_iso() -> str:
     """Centralized UTC ISO timestamp — split from inline ``datetime.now()``
