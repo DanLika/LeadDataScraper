@@ -228,7 +228,16 @@ class TestIdempotency:
 
 
 class TestEventTransitions:
-    def test_email_sent_updates_campaign_messages(self, client, _patch_db_and_limiter):
+    def test_email_sent_event_is_captured_but_no_update(self, client, _patch_db_and_limiter):
+        """email_sent does NOT write campaign_messages until Phase 14.3.
+
+        The naive UPDATE-by-status='pending' predicate would bulk-stamp
+        every pending row across every campaign with the same
+        provider_message_id, then subsequent bounce/reply webhooks would
+        cascade-match the entire bulk-stamped set. The handler defers
+        until the dispatcher round-trips provider_message_id at push
+        time (Phase 14.3); webhook_events still captures the payload.
+        """
         body = _body(
             "evt-sent-1", "email_sent",
             provider_message_id="instantly-msg-001",
@@ -240,13 +249,17 @@ class TestEventTransitions:
             headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
         )
         assert resp.status_code == 200
-        # State transitions happen in BackgroundTask which TestClient
-        # runs synchronously before returning. Pull the recorded updates.
+        # Event row landed in webhook_events for replay.
+        events = _patch_db_and_limiter.inserts.get("webhook_events", [])
+        assert any(r.get("event_id") == "evt-sent-1" for r in events)
+        # CRITICAL: no campaign_messages UPDATE — the bulk-stamp footgun.
         cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
-        assert any(
-            u[1].get("status") == "sent" and u[1].get("provider_message_id") == "instantly-msg-001"
-            for u in cms_updates
-        ), f"expected sent-status update; got {cms_updates}"
+        # checkpoint UPDATEs target webhook_events, not campaign_messages,
+        # so cms_updates should be empty.
+        assert not any(u[1].get("status") == "sent" for u in cms_updates), (
+            f"email_sent must not transition campaign_messages.status until "
+            f"Phase 14.3 wires the dispatcher round-trip; got {cms_updates}"
+        )
 
     def test_email_bounced_updates_status_and_inserts_suppression(
         self, client, _patch_db_and_limiter,
@@ -263,9 +276,15 @@ class TestEventTransitions:
             headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
         )
         assert resp.status_code == 200
-        # campaign_messages.status='bounced'
+        # campaign_messages.status='bounced' AND scoped by provider_message_id
+        # (NOT by status='pending' — that would cascade-match every row).
         cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
-        assert any(u[1].get("status") == "bounced" for u in cms_updates)
+        bounced_updates = [u for u in cms_updates if u[1].get("status") == "bounced"]
+        assert len(bounced_updates) == 1, f"expected 1 bounced UPDATE; got {bounced_updates}"
+        assert bounced_updates[0][2].get("provider_message_id") == "instantly-msg-002", (
+            "bounce UPDATE must scope by provider_message_id — predicate-less "
+            "UPDATE would cascade-match every sent row"
+        )
         # suppression row inserted: reason='bounce_hard', channel='email'
         sup_rows = _patch_db_and_limiter.inserts.get("suppressions", [])
         assert any(

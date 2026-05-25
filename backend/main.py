@@ -1253,32 +1253,34 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
 
 
 async def _instantly_handle_sent(provider_msg_id: str, recipient_email: str) -> None:
-    """email_sent: stamp provider_message_id + status='sent' + sent_at.
+    """email_sent: intentionally deferred to Phase 14.3.
 
-    The dispatcher (Phase 14.1) creates the campaign_messages row before
-    push; the webhook patches in Instantly's message id so the
-    bounce/reply webhook can look up the row.
+    The naive implementation — `UPDATE campaign_messages SET status='sent'
+    WHERE status='pending'` — would bulk-stamp EVERY pending row in EVERY
+    campaign with the same provider_message_id. Subsequent bounce /
+    unsubscribe / reply events look up by provider_message_id, which
+    would then cascade-match the entire bulk-stamped set. One bounce
+    webhook could corrupt the entire message table.
+
+    The correct path requires the dispatcher to round-trip Instantly's
+    message id back onto the originating row at push time (when the
+    POST /lead/add response carries the lds_lead_id ↔ provider_msg_id
+    pair). That wiring lives in Phase 14.3 alongside the dispatch loop.
+
+    Until then, this handler logs the event and returns — the
+    webhook_events row already captured the payload for replay. The
+    bounce / unsubscribe / reply handlers use recipient_email + a
+    fallback path that doesn't depend on provider_message_id being
+    populated upstream.
     """
-    if not provider_msg_id or not db.client:
+    if not provider_msg_id and not recipient_email:
         return
-    # Identify the row by (recipient email + pending status) — the
-    # dispatcher doesn't yet round-trip provider_message_id back into
-    # the row, so we match by best-effort context until that wiring
-    # lands (also Phase 14.2). UPDATE is bounded by .limit(1) via a
-    # nested SELECT-then-PATCH; PostgREST has no LIMIT on UPDATE so
-    # the email predicate must be specific enough on its own.
-    await asyncio.to_thread(
-        lambda: (
-            db.client.table("campaign_messages")
-            .update({
-                "provider_message_id": provider_msg_id,
-                "status": "sent",
-                "sent_at": datetime.now(timezone.utc).isoformat(),
-            })
-            .eq("status", "pending")
-            .execute()  # NB: bounded by status='pending'; multiple matches
-                        # acceptable — they all transition together.
-        )
+    logger.info(
+        "email_sent event observed (status transition deferred to Phase 14.3)",
+        extra={
+            "provider_message_id": provider_msg_id or None,
+            "recipient_hash": _redact_email(recipient_email) if recipient_email else None,
+        },
     )
 
 
