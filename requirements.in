@@ -64,12 +64,13 @@ sentry-sdk[fastapi]>=2.20,<3
 # rebuilt and was the root cause of pytest-asyncio missing in the
 # 2026-05-24 smoke run.
 # ---------------------------------------------------------------------------
-pytest-asyncio>=0.23,<1.0
+pytest-asyncio>=1.0,<2.0
 
 # pytest-asyncio brings transitives that pip-compile under py3.11+ drops
-# because their version specifiers are conditional (pytest<9,>=8.2;
+# because their version specifiers are conditional (pytest>=8.2,<10;
 # iniconfig>=1; pluggy>=1.5,<2). The py3.10 Docker base needs each
 # pinned for --require-hashes to succeed.
-pytest==8.4.2
+# pytest 9.0.3 closes CVE-2025-71176; dev-only (no runtime exposure).
+pytest==9.0.3
 iniconfig==2.0.0
 pluggy==1.6.0
