@@ -27,6 +27,7 @@ import unittest
 import uuid
 from typing import Any, Dict, List, Optional
 
+import pytest
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -70,6 +71,7 @@ AUDIT_OUTPUT_COLS = (
 )
 
 
+@pytest.mark.live
 @unittest.skipIf(MISSING_ENV, f"Missing live-env: {', '.join(MISSING_ENV)}")
 class TestOrchestratorCooperativeCancel(unittest.TestCase):
     """One test. Long-running. Pre-conditions all live."""
