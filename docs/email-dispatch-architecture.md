@@ -58,21 +58,34 @@ Instantly too — same recipient, same deliverability ground truth).
 LinkedIn surface: HeyReach actions are NOT email. Either (a)
 introduce `linkedin_send_ledger` + `linkedin_suppression` parallel
 tables, or (b) rename `email_*` → `outreach_*` with a `channel`
-discriminator. Decision deferred to Phase 14.2; the rename path is
-breaking and needs a coordinated migration.
+discriminator. Decision deferred to Phase 17.2 (see below); the
+rename path is breaking and needs a coordinated migration.
 
-### 0.3 Phased PR map (supersedes §4 numbering)
+### 0.3 Phased PR map (uses `docs/roadmap.md` Phase numbering)
+
+Maps onto the canonical Phase numbers in
+[`docs/roadmap.md`](roadmap.md), not the internal §4 1-5 numbering
+which is now historical context only. Phase 13.5 (DKIM/SPF/DMARC)
+already existed in roadmap.md; Phase 14 + Phase 17 are NEW phases
+added by this pivot doc.
 
 | Phase | Scope | PRs |
 |---|---|---|
-| 1.0 (Resend warm path) | `ResendEmailSender` + dispatcher schema | **#281, #286** (in flight) |
-| 1.1 | Resend webhook handler (`POST /webhooks/resend`) | new |
-| 1.2 | Resend dispatcher (Render Cron, warm queue only) | new |
-| 1.3 | Operator-facing Send + suppression UI | new |
-| 2.0 (Instantly cold path) | `InstantlyEmailSender` + provider column on ledger + Instantly webhook | new |
-| 2.1 | Instantly dispatcher + cold/warm queue routing | new |
-| 3.0 (HeyReach LinkedIn) | `HeyReachLinkedInSender` + LinkedIn surface tables/columns | new |
-| 3.1 | LinkedIn dispatcher + UI | new |
+| 13.5a (DNS + deliverability) | DKIM/SPF/DMARC ramp, mail-tester 10/10 | **operator action**, not a code PR |
+| 13.5b (Resend warm path code) | `ResendEmailSender` + dispatcher schema | **#281, #286** (in flight) |
+| 13.5c | Resend webhook handler (`POST /webhooks/resend`) | new |
+| 13.5d | Resend dispatcher (Render Cron, warm queue only) | new |
+| 13.5e | Operator-facing Send + suppression UI | new |
+| 14.0 (Instantly cold path) | `EmailDispatcher` Protocol refactor + `provider` column on ledger | new (follow-up to #286) |
+| 14.1 | `InstantlyEmailSender` + Instantly webhook handler | new |
+| 14.2 | Cold/warm queue routing in dispatcher | new |
+| 17.0 (HeyReach LinkedIn) | LinkedIn surface decision (parallel tables vs rename) + DDL | new |
+| 17.1 | `HeyReachLinkedInSender` + HeyReach webhook handler | new |
+| 17.2 | LinkedIn dispatcher + UI surface | new |
+
+`docs/roadmap.md` is updated alongside this doc to add Phase 14 +
+Phase 17 stubs and to clarify Phase 13.5's reduced (warm-only)
+scope.
 
 ### 0.4 Out-of-scope clarification
 
