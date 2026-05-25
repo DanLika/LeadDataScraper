@@ -1205,6 +1205,13 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
     exception lands in processing_error on the webhook_events row (best
     effort — if the UPDATE itself fails, the next sweeper run will pick
     the event back up via idx_webhook_events_unprocessed).
+
+    Phase 14.3 wired the dispatcher → webhook round-trip:
+    ``custom_variables.lds_message_id`` (set by the dispatcher per
+    ``InstantlyLeadPayload.from_lds_lead``) is echoed back in every
+    event for the same message, letting ``email_sent`` perform a
+    targeted, first-hit-wins UPDATE against
+    ``campaign_messages.id = lds_message_id``.
     """
     event_type = str(payload.get("event_type") or "")
     provider_msg_id = str(payload.get("lds_provider_message_id")
@@ -1213,10 +1220,33 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
     recipient_email = str(payload.get("recipient_email") or payload.get("email") or "")[:320]
     campaign_id_hint = payload.get("lds_campaign_id") or payload.get("campaign_id")
 
+    # `lds_message_id` lives either at the top level OR nested in
+    # `custom_variables` — Instantly echoes custom vars under both
+    # shapes depending on event type. Read both.
+    custom_vars = payload.get("custom_variables") or {}
+    if not isinstance(custom_vars, dict):
+        custom_vars = {}
+    lds_message_id = str(
+        payload.get("lds_message_id")
+        or custom_vars.get("lds_message_id")
+        or ""
+    )[:64]
+
+    # Instantly's sent_at timestamp on the email_sent event, if any.
+    # We pass it through as-is (ISO string) to mark_sent; the repo
+    # stamps it into campaign_messages.sent_at on first hit.
+    sent_at_iso = str(
+        payload.get("sent_at")
+        or payload.get("timestamp")
+        or ""
+    )[:64] or datetime.now(timezone.utc).isoformat()
+
     error_message: Optional[str] = None
     try:
         if event_type == "email_sent":
-            await _instantly_handle_sent(provider_msg_id, recipient_email)
+            await _instantly_handle_sent(
+                lds_message_id, provider_msg_id, sent_at_iso, recipient_email,
+            )
         elif event_type == "email_bounced":
             await _instantly_handle_bounced(
                 provider_msg_id, recipient_email, campaign_id_hint, payload,
@@ -1252,34 +1282,67 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
         logger.exception("instantly webhook checkpoint UPDATE failed")
 
 
-async def _instantly_handle_sent(provider_msg_id: str, recipient_email: str) -> None:
-    """email_sent: intentionally deferred to Phase 14.3.
+async def _instantly_handle_sent(
+    lds_message_id: str,
+    provider_msg_id: str,
+    sent_at_iso: str,
+    recipient_email: str,
+) -> None:
+    """email_sent: stamp provider_message_id + status='sent' + sent_at.
 
-    The naive implementation — `UPDATE campaign_messages SET status='sent'
-    WHERE status='pending'` — would bulk-stamp EVERY pending row in EVERY
-    campaign with the same provider_message_id. Subsequent bounce /
-    unsubscribe / reply events look up by provider_message_id, which
-    would then cascade-match the entire bulk-stamped set. One bounce
-    webhook could corrupt the entire message table.
+    Phase 14.3 wiring — the dispatcher passes
+    ``custom_variables.lds_message_id`` (= campaign_messages.id) on
+    push; Instantly echoes it back in every event for the same
+    message. We use it here to do a targeted first-hit-wins UPDATE.
 
-    The correct path requires the dispatcher to round-trip Instantly's
-    message id back onto the originating row at push time (when the
-    POST /lead/add response carries the lds_lead_id ↔ provider_msg_id
-    pair). That wiring lives in Phase 14.3 alongside the dispatch loop.
+    The repo enforces ``.is_("provider_message_id", "null")`` so a
+    duplicate ``email_sent`` event (Instantly retries; ~rare 2xx
+    redeliveries) is a clean no-op — the predicate matches zero rows
+    after the first apply. ``sent_at`` is preserved on subsequent
+    replays because the UPDATE doesn't fire at all.
 
-    Until then, this handler logs the event and returns — the
-    webhook_events row already captured the payload for replay. The
-    bounce / unsubscribe / reply handlers use recipient_email + a
-    fallback path that doesn't depend on provider_message_id being
-    populated upstream.
+    Out-of-order edge case: if the row's ``lds_message_id`` doesn't
+    exist (Phase 15 may decouple row creation from dispatch), the
+    UPDATE matches zero rows and we log + return. ``webhook_events``
+    has already captured the payload; the next sweeper run picks it
+    back up once the row appears.
+
+    Without ``lds_message_id`` (e.g. legacy webhook event from before
+    Phase 14.3 wiring), we cannot identify the row and fall back to a
+    log-only path (matches Phase 14.2 PR γ semantics).
     """
-    if not provider_msg_id and not recipient_email:
+    if not lds_message_id:
+        logger.info(
+            "email_sent without lds_message_id (legacy / pre-14.3 event); skipping mark_sent",
+            extra={
+                "provider_message_id": provider_msg_id or None,
+                "recipient_hash": _redact_email(recipient_email) if recipient_email else None,
+            },
+        )
         return
+    if not provider_msg_id:
+        # Webhook fired but no Instantly id to stamp — degenerate event.
+        logger.info(
+            "email_sent missing provider_message_id; skipping mark_sent",
+            extra={"lds_message_id": lds_message_id},
+        )
+        return
+    if not db.client:
+        logger.warning("email_sent: DB unavailable, deferring")
+        return
+
+    from src.repositories.campaign_message_repo import CampaignMessageRepository
+
+    repo = CampaignMessageRepository(db.client)
+    result = await repo.mark_sent(
+        lds_message_id, provider_msg_id, sent_at_iso=sent_at_iso,
+    )
     logger.info(
-        "email_sent event observed (status transition deferred to Phase 14.3)",
+        "email_sent processed",
         extra={
-            "provider_message_id": provider_msg_id or None,
-            "recipient_hash": _redact_email(recipient_email) if recipient_email else None,
+            "lds_message_id": lds_message_id,
+            "matched": result.matched,
+            "error": result.error,
         },
     )
 
@@ -1290,23 +1353,33 @@ async def _instantly_handle_bounced(
     campaign_id_hint: Optional[str],
     payload: dict,
 ) -> None:
-    """email_bounced: UPDATE status='bounced' + INSERT suppression(bounce_hard)."""
+    """email_bounced: state-machine UPDATE pending|sent → bounced + suppression.
+
+    The repo enforces ``.in_("status", ["pending", "sent"])`` so a
+    bounce after an unsubscribe / replied terminal state is a no-op.
+    Suppression INSERT still happens via recipient_email regardless of
+    whether the campaign_messages UPDATE matched — the dispatcher
+    precheck (PR α) gates future sends on the suppression row, which
+    is the load-bearing defense.
+
+    Out-of-order edge case: if email_bounced arrives before email_sent
+    (Instantly's background workers don't guarantee event order), the
+    row's provider_message_id is still NULL and the bounce UPDATE
+    matches zero rows. Documented; acceptable degraded state. The
+    suppression row still lands, so the address is protected on the
+    next send cycle.
+    """
     bounce_reason = str(payload.get("bounce_reason") or payload.get("reason") or "")[:200]
-    if db.client and provider_msg_id:
-        await asyncio.to_thread(
-            lambda: (
-                db.client.table("campaign_messages")
-                .update({"status": "bounced", "bounce_reason": bounce_reason})
-                .eq("provider_message_id", provider_msg_id)
-                .execute()
-            )
-        )
+    if provider_msg_id and db.client:
+        from src.repositories.campaign_message_repo import CampaignMessageRepository
+        repo = CampaignMessageRepository(db.client)
+        await repo.mark_bounced(provider_msg_id, bounce_reason=bounce_reason)
     if not recipient_email:
         return
     from src.repositories.suppression_repo import SuppressionRepository
 
-    repo = SuppressionRepository(db.client)
-    await repo.add(
+    suppression_repo = SuppressionRepository(db.client)
+    await suppression_repo.add(
         "email",
         recipient_email,
         "bounce_hard",
@@ -1322,27 +1395,26 @@ async def _instantly_handle_unsubscribed(
     recipient_email: str,
     campaign_id_hint: Optional[str],
 ) -> None:
-    """email_unsubscribed: status='unsubscribed' + suppression(channel='all').
+    """email_unsubscribed: state-machine UPDATE → unsubscribed + suppression(all).
 
-    Channel='all' because an unsubscribe expresses "stop everything from
-    this sender", not just the email channel. Bounces stay scoped to
-    channel='email'.
+    Repo allows ``pending|sent|replied → unsubscribed`` (recipient
+    might have replied positively then later opted out; legitimate).
+    Bounced → unsubscribed is excluded — a bounced address can't
+    legitimately opt out, that event would be spurious.
+
+    Channel='all' on the suppression because unsubscribe = "stop
+    everything from this sender". Bounces stay scoped to channel='email'.
     """
-    if db.client and provider_msg_id:
-        await asyncio.to_thread(
-            lambda: (
-                db.client.table("campaign_messages")
-                .update({"status": "unsubscribed"})
-                .eq("provider_message_id", provider_msg_id)
-                .execute()
-            )
-        )
+    if provider_msg_id and db.client:
+        from src.repositories.campaign_message_repo import CampaignMessageRepository
+        repo = CampaignMessageRepository(db.client)
+        await repo.mark_unsubscribed(provider_msg_id)
     if not recipient_email:
         return
     from src.repositories.suppression_repo import SuppressionRepository
 
-    repo = SuppressionRepository(db.client)
-    await repo.add(
+    suppression_repo = SuppressionRepository(db.client)
+    await suppression_repo.add(
         "email",
         recipient_email,
         "unsubscribe",
@@ -1353,22 +1425,24 @@ async def _instantly_handle_unsubscribed(
 
 
 async def _instantly_handle_replied(provider_msg_id: str) -> None:
-    """email_replied: stamp status='replied'.
+    """email_replied: state-machine UPDATE sent → replied.
+
+    Repo gates on ``status='sent'`` only — a reply arriving on a
+    bounced / unsubscribed / pending row is excluded as inconsistent
+    (a pending row reply would mean the send never went out yet
+    Instantly heard back; impossible without bypass paths we don't
+    have).
 
     Full reply-classifier (Phase 16) reads the body off the webhook
-    payload and writes pos/neg/ooo/objection. Until then we just flag
-    the message so the operator's reply-inbox view can pivot off it.
+    payload and writes pos/neg/ooo/objection labels. Until then we
+    just flag the message so the operator's reply-inbox view can
+    pivot off it.
     """
     if not provider_msg_id or not db.client:
         return
-    await asyncio.to_thread(
-        lambda: (
-            db.client.table("campaign_messages")
-            .update({"status": "replied"})
-            .eq("provider_message_id", provider_msg_id)
-            .execute()
-        )
-    )
+    from src.repositories.campaign_message_repo import CampaignMessageRepository
+    repo = CampaignMessageRepository(db.client)
+    await repo.mark_replied(provider_msg_id)
 
 
 def _looks_like_uuid(s) -> bool:

@@ -68,7 +68,7 @@ Stored payloads also give us:
 
 | Instantly event | `campaign_messages.status` | `suppressions` |
 |---|---|---|
-| `email_sent` | `pending` → `sent` (+ stamp `provider_message_id`, `sent_at`) | — |
+| `email_sent` | `pending` → `sent` (+ stamp `provider_message_id`, `sent_at`) — Phase 14.3 wires this via `custom_variables.lds_message_id` (= `campaign_messages.id`) so the UPDATE is targeted + first-hit-wins | — |
 | `email_bounced` | → `bounced` (+ `bounce_reason`) | INSERT `reason='bounce_hard'`, `channel='email'`, `source_provider='instantly'` |
 | `email_unsubscribed` | → `unsubscribed` | INSERT `reason='unsubscribe'`, `channel='all'`, `source_provider='instantly'` |
 | `email_replied` | → `replied` | — (reply-classifier in Phase 16 may extend) |

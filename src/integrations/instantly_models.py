@@ -68,6 +68,7 @@ class InstantlyLeadPayload(BaseModel):
     LDS_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "lds_lead_id",
+            "lds_message_id",
             "lds_audit_score",
             "lds_discovery_source",
             "lds_dispatched_at",
@@ -83,6 +84,7 @@ class InstantlyLeadPayload(BaseModel):
         personalization: Optional[str] = None,
         dispatched_at: Optional[str] = None,
         list_unsubscribe: Optional[str] = None,
+        lds_message_id: Optional[str] = None,
     ) -> "InstantlyLeadPayload":
         """Map a Supabase `leads` row to an Instantly request payload.
 
@@ -98,6 +100,15 @@ class InstantlyLeadPayload(BaseModel):
         ``list_unsubscribe_post = "List-Unsubscribe=One-Click"`` to
         satisfy Gmail/Yahoo/Microsoft 2024+ enforcement. Caller passes
         ``None`` to omit (e.g. for a non-bulk send).
+
+        ``lds_message_id`` (Phase 14.3) is the campaign_messages.id
+        UUID stringified. Instantly echoes ``custom_variables`` back in
+        every webhook event for the same message; the email_sent
+        handler reads ``lds_message_id`` from the event payload and
+        targets exactly the originating row for the
+        provider_message_id stamp. Without this var the webhook
+        round-trip can't identify the right row and email_sent stays
+        a no-op (see Phase 14.2 PR γ + 14.3 wiring).
         """
         custom_vars: dict[str, Optional[str | int | float | bool]] = {
             "lds_lead_id": lead.get("unique_key"),
@@ -105,6 +116,8 @@ class InstantlyLeadPayload(BaseModel):
             "lds_discovery_source": lead.get("lead_source"),
             "lds_dispatched_at": dispatched_at,
         }
+        if lds_message_id:
+            custom_vars["lds_message_id"] = lds_message_id
         if list_unsubscribe:
             custom_vars["list_unsubscribe"] = list_unsubscribe
             custom_vars["list_unsubscribe_post"] = "List-Unsubscribe=One-Click"
