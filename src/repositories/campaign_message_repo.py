@@ -492,6 +492,45 @@ class CampaignMessageRepository:
             return 0
         return len(getattr(res, "data", None) or [])
 
+    async def fetch_many(
+        self,
+        message_ids,
+    ) -> dict[str, dict[str, Any]]:
+        """Return ``id → row-dict`` for the given message ids.
+
+        Single PostgREST round trip (``WHERE id IN (...)``). Phase
+        15.3 dispatch tick uses this to batch-fetch the prior
+        messages for thread-with-prior steps so the thread builder
+        has each row's ``provider_message_id`` ready without N+1
+        per claim.
+        """
+        if not self._db:
+            return {}
+        ids = [m for m in (message_ids or []) if m]
+        if not ids:
+            return {}
+        unique_inputs = list(dict.fromkeys(ids))
+        try:
+            rows = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .select("*")
+                    .in_("id", unique_inputs)
+                    .execute()
+                )
+            )
+        except Exception:
+            logger.exception(
+                "CampaignMessageRepository.fetch_many failed for %d ids",
+                len(unique_inputs),
+            )
+            return {}
+        return {
+            r["id"]: r
+            for r in (getattr(rows, "data", None) or [])
+            if r.get("id")
+        }
+
 
 def _now_iso() -> str:
     """Centralized UTC ISO timestamp — split from inline ``datetime.now()``
