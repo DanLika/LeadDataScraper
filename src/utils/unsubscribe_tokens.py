@@ -162,6 +162,40 @@ def verify(token: str, *, secret: Optional[str] = None,
     return UnsubscribePayload(tracking_id=tracking_id, issued_at=issued_at)
 
 
+# Backend handler path: `backend/main.py` exposes
+# GET/POST /unsubscribe/{token}. Producer code that builds outbound URLs
+# MUST use this constant so the dispatcher and handler can never drift on
+# the path segment.
+UNSUBSCRIBE_URL_PATH_SEGMENT = "unsubscribe"
+
+
+def build_unsubscribe_url(base_url: str, tracking_id: str) -> str:
+    """Return the fully-qualified per-message unsubscribe URL.
+
+    Single source of truth for the producer side. Internally calls
+    :func:`mint` so the returned URL terminates in an HMAC-signed token
+    the handler will accept; the path segment matches
+    :data:`UNSUBSCRIBE_URL_PATH_SEGMENT` so any future handler-path
+    rename has exactly one matching producer to update.
+
+    Args:
+        base_url: Scheme + host (with or without trailing slash).
+        tracking_id: ``campaign_messages.tracking_id`` UUID.
+
+    Returns:
+        URL of the shape ``<base>/unsubscribe/<token>`` ready to embed
+        in email body / List-Unsubscribe header.
+
+    Raises:
+        ValueError: ``tracking_id`` is not UUID-shaped (propagated from
+            :func:`mint`).
+        RuntimeError: ``UNSUBSCRIBE_TOKEN_SECRET`` env unset.
+    """
+    base = base_url.rstrip("/")
+    token = mint(tracking_id)
+    return f"{base}/{UNSUBSCRIBE_URL_PATH_SEGMENT}/{token}"
+
+
 # ----- Internals ------------------------------------------------------------
 
 
@@ -217,6 +251,7 @@ def _bytes_to_uuid(b: bytes) -> str:
 
 __all__ = [
     "DEFAULT_TTL_DAYS",
+    "UNSUBSCRIBE_URL_PATH_SEGMENT",
     "UnsubscribePayload",
     "TokenError",
     "InvalidToken",
@@ -224,4 +259,5 @@ __all__ = [
     "ExpiredToken",
     "mint",
     "verify",
+    "build_unsubscribe_url",
 ]

@@ -168,6 +168,7 @@ async def run_tick(
     )
     from src.services.template_renderer import TemplateError
     from src.services.variant_selector import select_variant
+    from src.utils.unsubscribe_tokens import build_unsubscribe_url
 
     lead_repo = LeadRepository(db)
     step_repo = SequenceStepRepository(db)
@@ -320,9 +321,10 @@ async def run_tick(
         prior_id = str(row.get("in_reply_to_message_id") or "")
         prior_message = prior_msgs_by_id.get(prior_id) if prior_id else None
 
+        tracking_id = str(row.get("tracking_id") or "")
         unsubscribe_url = (
-            f"{unsubscribe_base}/u/{row.get('tracking_id') or ''}"
-            if unsubscribe_base and row.get("tracking_id")
+            build_unsubscribe_url(unsubscribe_base, tracking_id)
+            if unsubscribe_base and tracking_id
             else ""
         )
 
