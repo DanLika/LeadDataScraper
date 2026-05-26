@@ -22,6 +22,7 @@ from typing import Any, ClassVar, Optional, TYPE_CHECKING
 import aiohttp  # type: ignore[import-not-found]
 
 from src.integrations.email_sender import EmailDispatcher
+from src.types.providers import LedgerProvider
 from src.integrations.instantly_models import (
     InstantlyError,
     InstantlyLeadPayload,
@@ -68,7 +69,7 @@ class InstantlyDispatcher(EmailDispatcher):
     when routing per-message dispatch_type → dispatcher.
     """
 
-    PROVIDER_NAME: ClassVar[str] = "instantly"
+    PROVIDER_NAME: ClassVar[LedgerProvider] = "instantly"
     SUPPORTS_WEBHOOKS: ClassVar[bool] = True
     SUPPORTS_IDEMPOTENCY: ClassVar[bool] = True
     DISPATCH_TYPE: ClassVar[str] = "cold"
