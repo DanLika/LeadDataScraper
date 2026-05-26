@@ -21,14 +21,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from src.repositories.sequence_variant_repo import (
     SequenceVariant,
     SequenceVariantRepository,
 )
 from src.services.template_renderer import (
-    DisallowedVariableError,
     MissingUnsubscribeUrlError,
     TemplateError,
     assert_cold_email_unsubscribe,

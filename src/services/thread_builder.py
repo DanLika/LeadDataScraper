@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from src.services.template_renderer import (
-    MissingVariableError,
     TemplateError,
     render,
 )

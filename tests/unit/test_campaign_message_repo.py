@@ -21,7 +21,6 @@ from unittest.mock import MagicMock
 
 from src.repositories.campaign_message_repo import (
     CampaignMessageRepository,
-    MarkResult,
 )
 
 

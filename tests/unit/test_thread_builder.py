@@ -14,7 +14,6 @@ import unittest
 from dataclasses import dataclass
 from typing import Optional
 
-from src.services.template_renderer import MissingVariableError
 from src.services.thread_builder import (
     DispatchPayload,
     PriorMessageNotReadyError,

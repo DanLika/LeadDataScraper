@@ -16,11 +16,11 @@ from __future__ import annotations
 import asyncio
 import unittest
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock
 
-from src.services.sequence_advancer import AdvanceResult, advance_to_next_step
+from src.services.sequence_advancer import advance_to_next_step
 
 
 @dataclass

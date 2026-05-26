@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from typing import Any
 from unittest.mock import MagicMock
 
 from src.repositories.campaign_message_repo import CampaignMessageRepository
