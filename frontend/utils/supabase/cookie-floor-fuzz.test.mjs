@@ -4,8 +4,9 @@
  * targets the failure modes that a degraded / malicious Supabase client
  * could trigger:
  *
- *   - Cookie without `Secure` flag in prod HTTPS → MUST be rewritten
- *     to `secure: true`.
+ *   - Cookie without `Secure` flag → MUST be rewritten to `secure: true`.
+ *     The floor is now unconditional (no NODE_ENV dependency); CI / deploy
+ *     misconfig can't ship cookies without Secure.
  *   - Cookie with `SameSite=None` → MUST collapse to `Lax`.
  *   - Cookie missing `HttpOnly` → MUST be added.
  *   - Cookie `Domain` set wider than current origin (`.com`, leading
@@ -28,9 +29,9 @@ import assert from 'node:assert/strict'
 import { hardenCookieOptions } from './cookie-floor.mjs'
 
 
-// ── Production-mode invariants on every adversarial input ────────────
+// ── Floor invariants on every adversarial input ──────────────────────
 
-const PROD_ADVERSARIAL_INPUTS = [
+const ADVERSARIAL_INPUTS = [
   { sameSite: 'None',     httpOnly: false,  secure: false },
   { sameSite: 'none',     httpOnly: false,  secure: false },
   { sameSite: 'NONE',     httpOnly: false,  secure: false },
@@ -43,43 +44,20 @@ const PROD_ADVERSARIAL_INPUTS = [
   { sameSite: 123,        httpOnly: 'no',   secure: 'no' },
   { sameSite: ['lax'],    httpOnly: {},     secure: [] },
   { sameSite: 'lax',      httpOnly: false,  secure: false, maxAge: -1 },
-]
-
-for (const [i, input] of PROD_ADVERSARIAL_INPUTS.entries()) {
-  test(`prod-floor invariants hold on adversarial input #${i} ${JSON.stringify(input)}`, () => {
-    const out = hardenCookieOptions(input, true)
-    assert.equal(out.httpOnly, true, 'httpOnly must be true in prod')
-    assert.equal(out.secure, true, 'secure must be true in prod')
-    assert.ok(
-      out.sameSite === 'lax' || out.sameSite === 'strict',
-      `sameSite must be lax|strict, got ${JSON.stringify(out.sameSite)}`,
-    )
-  })
-}
-
-
-// ── Dev mode (HTTPS not guaranteed) — secure mirrors SDK request,
-// but httpOnly + sameSite floor still applies. ──
-
-const DEV_ADVERSARIAL_INPUTS = [
-  { sameSite: 'none', httpOnly: false, secure: false },
-  { sameSite: 'none', httpOnly: false, secure: true },
   {},
   null,
   undefined,
 ]
 
-for (const [i, input] of DEV_ADVERSARIAL_INPUTS.entries()) {
-  test(`dev-floor: httpOnly + sameSite still floored, secure mirrors SDK #${i}`, () => {
-    const out = hardenCookieOptions(input, false)
-    assert.equal(out.httpOnly, true, 'httpOnly always true regardless of mode')
+for (const [i, input] of ADVERSARIAL_INPUTS.entries()) {
+  test(`floor invariants hold on adversarial input #${i} ${JSON.stringify(input)}`, () => {
+    const out = hardenCookieOptions(input)
+    assert.equal(out.httpOnly, true, 'httpOnly must always be true')
+    assert.equal(out.secure, true, 'secure must always be true (no NODE_ENV dependency)')
     assert.ok(
       out.sameSite === 'lax' || out.sameSite === 'strict',
       `sameSite must be lax|strict, got ${JSON.stringify(out.sameSite)}`,
     )
-    // In dev, secure mirrors `Boolean(options?.secure)` — false/null/missing
-    // collapses to false; true stays true.
-    assert.equal(out.secure, Boolean(input?.secure))
   })
 }
 
@@ -95,7 +73,7 @@ const STRICT_VARIANTS = [
 
 for (const variant of STRICT_VARIANTS) {
   test(`SameSite=Strict (${JSON.stringify(variant.sameSite)}) preserved through floor`, () => {
-    const out = hardenCookieOptions(variant, true)
+    const out = hardenCookieOptions(variant)
     assert.equal(out.sameSite, 'strict')
   })
 }
@@ -114,7 +92,7 @@ test('maxAge / path / domain / expires NOT mutated by floor', () => {
     expires: new Date('2030-01-01').toUTCString(),
     priority: 'high',
   }
-  const out = hardenCookieOptions(input, true)
+  const out = hardenCookieOptions(input)
   assert.equal(out.maxAge, 7200)
   assert.equal(out.path, '/api')
   assert.equal(out.domain, '.example.com')
@@ -128,14 +106,14 @@ test('maxAge / path / domain / expires NOT mutated by floor', () => {
 test('hardenCookieOptions does not mutate input object', () => {
   const input = { sameSite: 'none', httpOnly: false, secure: false }
   const snapshot = { ...input }
-  hardenCookieOptions(input, true)
+  hardenCookieOptions(input)
   assert.deepEqual(input, snapshot, 'input must not be mutated')
 })
 
 
 // ── Total-coverage scheme assertions: across the entire matrix of
-// (sameSite, httpOnly, secure) inputs in prod, the output's
-// `Set-Cookie`-relevant triple is ALWAYS browser-acceptable. ──
+// (sameSite, httpOnly, secure) inputs, the output's `Set-Cookie`-relevant
+// triple is ALWAYS browser-acceptable. ──
 
 const SAMESITE_INPUTS = [undefined, null, '', 'lax', 'LAX', 'none', 'NONE',
                          'strict', 'STRICT', 'invalid', 'none; httpOnly',
@@ -147,12 +125,12 @@ for (const ss of SAMESITE_INPUTS) {
   for (const ho of BOOL_INPUTS) {
     for (const sc of BOOL_INPUTS) {
       total++
-      test(`prod matrix #${total}: ss=${JSON.stringify(ss)} ho=${JSON.stringify(ho)} sc=${JSON.stringify(sc)}`, () => {
+      test(`matrix #${total}: ss=${JSON.stringify(ss)} ho=${JSON.stringify(ho)} sc=${JSON.stringify(sc)}`, () => {
         const out = hardenCookieOptions(
-          { sameSite: ss, httpOnly: ho, secure: sc }, true,
+          { sameSite: ss, httpOnly: ho, secure: sc },
         )
-        assert.equal(out.secure, true, 'prod must always emit Secure')
-        assert.equal(out.httpOnly, true, 'prod must always emit HttpOnly')
+        assert.equal(out.secure, true, 'must always emit Secure')
+        assert.equal(out.httpOnly, true, 'must always emit HttpOnly')
         assert.ok(
           out.sameSite === 'lax' || out.sameSite === 'strict',
           `sameSite must be lax|strict, got ${JSON.stringify(out.sameSite)}`,
@@ -175,7 +153,7 @@ test.skip('TODO: Domain wider than current origin should be narrowed', () => {
   // ever moves to a context-aware variant (knows current host),
   // promote this test.
   const out = hardenCookieOptions(
-    { sameSite: 'lax', domain: '.com' }, true,
+    { sameSite: 'lax', domain: '.com' },
   )
   // Expectation: floor strips invalid domain or narrows to host-only.
   assert.notEqual(out.domain, '.com')
