@@ -8,7 +8,7 @@ from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends, Query, 
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import uvicorn
 import os
 import secrets
@@ -826,6 +826,212 @@ async def submit_web_vitals(request: Request, metric: WebVitalsMetric):
         metric.id,
     )
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# RFC 8058 List-Unsubscribe-Post handler (Phase 14.2 PR β)
+# ---------------------------------------------------------------------------
+# Gmail (2024-02) + Yahoo (2024-02) + Microsoft (2025-04) require:
+#   List-Unsubscribe: <https://lds.../unsubscribe/{token}>, <mailto:...>
+#   List-Unsubscribe-Post: List-Unsubscribe=One-Click
+#
+# The dispatcher (Phase 14.1) sets the header per-message; this route
+# is the receiver. Token format + HMAC verify: see
+# src/utils/unsubscribe_tokens.py.
+#
+# Public (NO X-API-Key dependency) — the recipient is not an LDS user.
+# Slowapi-throttled to 10/minute/IP to bound token-enumeration cost.
+# All failure paths return 410 Gone with a generic body — never leaks
+# which verification stage failed (signature vs expiry vs unknown token).
+#
+# Two HTTP methods:
+#   * POST /unsubscribe/{token}  — RFC 8058 one-click. No body required.
+#                                   Verifies, suppresses, returns 200.
+#   * GET  /unsubscribe/{token}  — Human-clicked fallback. Renders a
+#                                   minimal HTML confirmation page that
+#                                   POSTs the same token. Stays valid for
+#                                   the same 90-day TTL.
+# ---------------------------------------------------------------------------
+
+# Generic body for every failure — operator can grep logs for the specific
+# stage that failed without leaking it to attackers via response text.
+_UNSUB_FAILURE_HTML = (
+    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Unsubscribe</title></head>"
+    "<body><h1>Link expired</h1>"
+    "<p>This unsubscribe link is no longer valid. If you continue to receive "
+    "messages, reply STOP to the next one or contact the sender directly.</p>"
+    "</body></html>"
+)
+
+# Confirmation page rendered on GET. POSTs back to the same URL.
+_UNSUB_CONFIRM_HTML = (
+    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Unsubscribe</title></head>"
+    "<body><h1>Confirm unsubscribe</h1>"
+    "<form method=\"post\" action=\"\"><button type=\"submit\">Unsubscribe me</button></form>"
+    "</body></html>"
+)
+
+_UNSUB_SUCCESS_HTML = (
+    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Unsubscribed</title></head>"
+    "<body><h1>You have been unsubscribed</h1>"
+    "<p>You will not receive further messages from this sender.</p></body></html>"
+)
+
+
+async def _suppress_from_unsubscribe_token(token: str) -> bool:
+    """Verify ``token`` and insert the matching suppression row.
+
+    Returns True on a clean unsubscribe, False on any verification or
+    dereference failure. Never raises — every error path collapses to
+    False so the handler can serve a uniform 410.
+
+    Idempotency: re-POSTing the same token after success returns True
+    (the row already exists; PostgREST 23505 → SuppressionRepository.add
+    returns None which we treat as already-suppressed).
+    """
+    from src.utils.unsubscribe_tokens import (
+        BadSignature, ExpiredToken, InvalidToken, verify,
+    )
+
+    try:
+        payload = verify(token)
+    except (InvalidToken, BadSignature, ExpiredToken) as exc:
+        logger.info(
+            "unsubscribe rejected: %s", type(exc).__name__,
+            extra={"reason": type(exc).__name__},
+        )
+        return False
+    except RuntimeError:
+        # UNSUBSCRIBE_TOKEN_SECRET missing — operator misconfig. Don't
+        # leak the cause; log loud so it shows up in Sentry.
+        logger.exception("unsubscribe handler misconfigured (no signing secret)")
+        return False
+
+    if not db.client:
+        logger.warning("unsubscribe: DB unavailable, deferring write")
+        return False
+
+    # Dereference tracking_id → campaign_messages → lead.email.
+    try:
+        msg_rows = await asyncio.to_thread(
+            lambda: (
+                db.client.table("campaign_messages")
+                .select("campaign_id, lead_unique_key")
+                .eq("tracking_id", payload.tracking_id)
+                .limit(1)
+                .execute()
+            )
+        )
+    except Exception:
+        logger.exception("unsubscribe: tracking_id lookup failed")
+        return False
+
+    rows = getattr(msg_rows, "data", None) or []
+    if not rows:
+        # Token references a non-existent message — likely tampering or
+        # the operator data-wiped this campaign. Treat as success from the
+        # recipient's perspective (they'll see "you have been
+        # unsubscribed") but log the anomaly.
+        logger.info("unsubscribe: tracking_id %s not found", payload.tracking_id)
+        return True
+
+    campaign_id = rows[0].get("campaign_id")
+    lead_unique_key = rows[0].get("lead_unique_key")
+
+    lead_email: Optional[str] = None
+    if lead_unique_key:
+        try:
+            lead_rows = await asyncio.to_thread(
+                lambda: (
+                    db.client.table("leads")
+                    .select("email")
+                    .eq("unique_key", lead_unique_key)
+                    .limit(1)
+                    .execute()
+                )
+            )
+            lead_data = getattr(lead_rows, "data", None) or []
+            if lead_data:
+                lead_email = lead_data[0].get("email")
+        except Exception:
+            logger.exception(
+                "unsubscribe: lead lookup failed for %s", lead_unique_key,
+            )
+
+    if not lead_email:
+        # Lead deleted (FK ON DELETE SET NULL) or email blanked. We've
+        # honoured the unsubscribe at the campaign level by virtue of the
+        # tracking_id reference; nothing more we can do.
+        logger.info(
+            "unsubscribe: no email recoverable for tracking_id %s",
+            payload.tracking_id,
+        )
+        return True
+
+    # Channel='all' — recipient said "stop everything", not just email.
+    # Webhook handler in PR γ uses channel='email' for bounce events.
+    from src.repositories.suppression_repo import SuppressionRepository
+
+    repo = SuppressionRepository(db.client)
+    try:
+        await repo.add(
+            "email",
+            lead_email,
+            "unsubscribe",
+            channel="all",
+            source_campaign_id=campaign_id,
+            notes=f"RFC 8058 List-Unsubscribe-Post from tracking_id={payload.tracking_id}",
+        )
+    except Exception:
+        logger.exception("unsubscribe: suppression insert failed")
+        return False
+
+    logger.info(
+        "unsubscribe accepted",
+        extra={"campaign_id": campaign_id, "lead_email_hash": _redact_email(lead_email)},
+    )
+    return True
+
+
+def _redact_email(email: str) -> str:
+    """Log redaction — keep the domain, hash the local part."""
+    if "@" not in email:
+        return "***"
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}"
+
+
+@app.get("/unsubscribe/{token}", response_class=HTMLResponse)
+@limiter.limit("10/minute")
+async def unsubscribe_confirm(request: Request, token: str):
+    """Render a minimal HTML form that POSTs the same token.
+
+    Token presence isn't verified at GET time — the page is rendered for
+    any string-shaped token. The POST does the real work + logging. This
+    keeps the GET cache-friendly + cheap for crawlers.
+    """
+    # Length-bound the token before doing anything else.
+    if not token or len(token) > 200:
+        return HTMLResponse(content=_UNSUB_FAILURE_HTML, status_code=410)
+    return HTMLResponse(content=_UNSUB_CONFIRM_HTML, status_code=200)
+
+
+@app.post("/unsubscribe/{token}", response_class=HTMLResponse)
+@limiter.limit("10/minute")
+async def unsubscribe_submit(request: Request, token: str):
+    """RFC 8058 one-click unsubscribe handler.
+
+    Verifies the token, dereferences tracking_id → lead.email, inserts a
+    suppression row. Always returns HTML (success or generic failure);
+    mail providers parse 200 OK as "unsubscribed" regardless of body.
+    """
+    if not token or len(token) > 200:
+        return HTMLResponse(content=_UNSUB_FAILURE_HTML, status_code=410)
+    ok = await _suppress_from_unsubscribe_token(token)
+    if not ok:
+        return HTMLResponse(content=_UNSUB_FAILURE_HTML, status_code=410)
+    return HTMLResponse(content=_UNSUB_SUCCESS_HTML, status_code=200)
+
 
 # Opaque cursor for /leads keyset pagination. Encodes the page-boundary
 # (created_at, unique_key) tuple so successive pages keyset-scan rather

@@ -646,3 +646,70 @@ COMMENT ON COLUMN public.suppressions.source_provider IS
     'Provider that reported the suppression (resend|instantly|smtp|heyreach|manual). NULL only on legacy rows from pre-14.0; new rows always set a value. Enforced by suppressions_provider_allowed CHECK.';
 COMMENT ON COLUMN public.suppressions.identifier_type IS
     'Channel-independent identifier kind. ''email'' is the only producer today; ''domain'' / ''linkedin_url'' / ''phone'' reserved for Phase 17.x.';
+
+-- ===========================================================================
+-- Phase 14.2 (PR β) — campaign_messages thread / idempotency columns
+-- ---------------------------------------------------------------------------
+-- Three additions on campaign_messages, each backed by a partial index
+-- on its only lookup shape:
+--
+--   * thread_id              — provider-side conversation key (Instantly
+--                              "campaign_step" || "lead_email" pair). The
+--                              webhook handler (PR γ) joins on this to roll
+--                              up email_replied events to the campaign.
+--   * in_reply_to_message_id — points at a previously-sent message in the
+--                              same thread; nullable on the initial touch.
+--                              Lets reply-classifier (Phase 16) walk the
+--                              chain backwards to fetch context.
+--   * tracking_id            — LDS-side opaque UUID, minted on row creation,
+--                              used by the unsubscribe-link signer to bind
+--                              the token to a specific outbound message
+--                              without leaking the row id. PostgREST never
+--                              exposes id directly; tracking_id can be
+--                              embedded in a public URL safely.
+--
+-- All three additive — no destructive changes. No CHECK constraints (free-
+-- form opaque IDs from third-party providers). UNIQUE on tracking_id is
+-- added because it's the only field the webhook / unsubscribe handler can
+-- use to look up an LDS row without trusting the (mutable) email recipient
+-- string.
+-- ===========================================================================
+
+-- One ALTER per column so schema_drift_check.py's regex
+-- (single-column `ALTER TABLE ... ADD COLUMN <name>`) sees each
+-- declaration; the multi-clause form is parsed as a single match and
+-- skips the later columns silently.
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS thread_id TEXT;
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS in_reply_to_message_id TEXT;
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS tracking_id UUID DEFAULT gen_random_uuid();
+
+-- Backfill pre-existing rows (DEFAULT does not apply retroactively).
+UPDATE public.campaign_messages
+   SET tracking_id = gen_random_uuid()
+ WHERE tracking_id IS NULL;
+
+DO $$ BEGIN
+    ALTER TABLE public.campaign_messages
+        ADD CONSTRAINT campaign_messages_tracking_id_unique
+        UNIQUE (tracking_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Partial indexes — both nullable columns are NULL on most rows (pending /
+-- initial-touch / no-thread-yet); partial-index skips the NULL pile.
+CREATE INDEX IF NOT EXISTS idx_campaign_messages_thread_id
+    ON public.campaign_messages(thread_id)
+    WHERE thread_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_campaign_messages_in_reply_to
+    ON public.campaign_messages(in_reply_to_message_id)
+    WHERE in_reply_to_message_id IS NOT NULL;
+
+COMMENT ON COLUMN public.campaign_messages.thread_id IS
+    'Provider-side conversation key (Instantly/HeyReach). Used by the webhook handler to attribute replies back to the originating thread. NULL on the first touch of a new thread.';
+COMMENT ON COLUMN public.campaign_messages.in_reply_to_message_id IS
+    'Points at the previously-sent message in the same thread; NULL on the initial touch. Enables reply-classifier (Phase 16) to walk the chain backwards.';
+COMMENT ON COLUMN public.campaign_messages.tracking_id IS
+    'LDS-side opaque UUID for unsubscribe-link binding. Embedded in the RFC 8058 List-Unsubscribe token (HMAC-signed) so the unsubscribe handler can suppress the right (lead_unique_key, channel) tuple without trusting the recipient-side email value.';
