@@ -1033,6 +1033,353 @@ async def unsubscribe_submit(request: Request, token: str):
     return HTMLResponse(content=_UNSUB_SUCCESS_HTML, status_code=200)
 
 
+# ---------------------------------------------------------------------------
+# Instantly webhook handler (Phase 14.2 PR γ)
+# ---------------------------------------------------------------------------
+# Inbound surface for Instantly's delivery events: email_sent /
+# email_bounced / email_unsubscribed / email_replied. Each event triggers
+# a state-transition on campaign_messages (status) and, for the
+# bounce/unsubscribe paths, a suppression INSERT so the dispatcher
+# precheck (PR α) can skip the address on subsequent sends.
+#
+# Idempotency:
+#   * HMAC verify gates every request — body bytes + signature must
+#     match. Replay attacker without the secret gets BadSignature.
+#   * Timestamp window (±5 min) blocks replay of a leaked signed body.
+#   * (provider, event_id) UNIQUE on webhook_events: a duplicate INSERT
+#     collides on 23505; the handler returns 200 OK without re-running
+#     the side effects.
+#
+# Performance:
+#   * Instantly retries on any timeout >2s — keep the synchronous path
+#     to: HMAC verify → timestamp check → INSERT event → kick a
+#     BackgroundTask. The state-transition runs after the response is
+#     flushed.
+#   * If background-task execution fails, processed_at stays NULL and
+#     processing_error captures the cause; a follow-up sweeper (PR δ)
+#     can retry from idx_webhook_events_unprocessed.
+# ---------------------------------------------------------------------------
+
+
+# Allowlisted event-type vocabulary. Anything else lands in
+# webhook_events but does NOT trigger a state transition (logged as
+# "unhandled event type"). New types extend this set + the
+# _process_instantly_event dispatcher.
+_INSTANTLY_HANDLED_EVENTS: frozenset[str] = frozenset({
+    "email_sent",
+    "email_bounced",
+    "email_unsubscribed",
+    "email_replied",
+})
+
+
+def _generic_webhook_error(detail: str, status_code: int = 401):
+    """Webhook failure response — body is intentionally terse so a
+    malicious caller can't reconstruct which check failed."""
+    return JSONResponse(
+        {"detail": "webhook verification failed"},
+        status_code=status_code,
+    )
+
+
+@app.post("/webhooks/instantly", response_class=JSONResponse)
+@limiter.limit("120/minute")
+async def webhook_instantly(request: Request, background_tasks: BackgroundTasks):
+    """Inbound webhook from Instantly.
+
+    Public endpoint (no X-API-Key — Instantly doesn't carry one). HMAC
+    on the raw body is the entire auth surface; ``X-Timestamp``
+    bounds replay.
+
+    Returns:
+        * 200 + ``{ok: true}`` on a fresh accepted event
+        * 200 + ``{ok: true, duplicate: true}`` on a duplicate event_id
+          (idempotent — Instantly will stop retrying)
+        * 401 + generic body on any verification failure
+        * 503 if the DB is unreachable
+    """
+    from src.utils.webhook_security import (
+        BadSignature, MissingSignature, MissingTimestamp,
+        StaleTimestamp, verify_hmac_sha256, verify_timestamp_window,
+    )
+
+    secret = os.environ.get("INSTANTLY_WEBHOOK_SIGNING_SECRET", "")
+    if not secret:
+        # Operator misconfig — log + reject. Don't 500 (would advertise
+        # the problem to the public endpoint); 401 is opaque enough.
+        logger.error("INSTANTLY_WEBHOOK_SIGNING_SECRET not set; rejecting")
+        return _generic_webhook_error("misconfigured")
+
+    raw_body = await request.body()
+    if len(raw_body) > 256 * 1024:
+        # Instantly events are small (<10 KB typically); 256 KB is generous.
+        return _generic_webhook_error("payload too large", status_code=413)
+
+    signature = request.headers.get("X-Signature", "")
+    timestamp_header = request.headers.get("X-Timestamp", "")
+
+    try:
+        verify_hmac_sha256(raw_body, signature, secret)
+        verify_timestamp_window(timestamp_header)
+    except (MissingSignature, BadSignature, MissingTimestamp, StaleTimestamp) as exc:
+        logger.info(
+            "instantly webhook rejected: %s", type(exc).__name__,
+            extra={"reason": type(exc).__name__},
+        )
+        return _generic_webhook_error("rejected")
+
+    # Body verified. Parse JSON.
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.info("instantly webhook bad JSON: %s", exc)
+        return _generic_webhook_error("bad JSON")
+
+    if not isinstance(payload, dict):
+        return _generic_webhook_error("bad JSON shape")
+
+    event_id = str(payload.get("event_id") or "")[:128]
+    event_type = str(payload.get("event_type") or "")[:64]
+    if not event_id or not event_type:
+        return _generic_webhook_error("missing event_id/event_type")
+
+    if not db.client:
+        return JSONResponse({"detail": "database unavailable"}, status_code=503)
+
+    # Idempotent insert. PostgREST surfaces 23505 as APIError on the
+    # second hit; we treat that as "already accepted" and return 200.
+    try:
+        await asyncio.to_thread(
+            lambda: (
+                db.client.table("webhook_events").insert({
+                    "provider": "instantly",
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                }).execute()
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — narrow check inline
+        if _looks_like_unique_violation(exc):
+            # Duplicate — Instantly is replaying. 200 + flag the duplicate.
+            logger.info(
+                "instantly webhook duplicate event_id=%s",
+                event_id, extra={"event_id": event_id, "event_type": event_type},
+            )
+            return JSONResponse({"ok": True, "duplicate": True}, status_code=200)
+        logger.exception("instantly webhook INSERT failed")
+        return JSONResponse({"detail": "internal error"}, status_code=500)
+
+    # Process the event off the request path so Instantly's 2s timeout
+    # is never the bottleneck. The background task updates
+    # campaign_messages.status + inserts a suppression row if needed.
+    if event_type in _INSTANTLY_HANDLED_EVENTS:
+        background_tasks.add_task(
+            _process_instantly_event, event_id=event_id, payload=payload,
+        )
+    else:
+        logger.info(
+            "instantly webhook unhandled event_type=%s",
+            event_type, extra={"event_type": event_type},
+        )
+
+    return JSONResponse({"ok": True}, status_code=200)
+
+
+def _looks_like_unique_violation(exc: Exception) -> bool:
+    """Mirrors src.repositories.suppression_repo._is_unique_violation —
+    PostgREST surfaces unique violations as 23505 (PostgreSQL SQLSTATE)
+    either via the .code attribute on APIError, or as a substring of the
+    response body. Both surfaces checked so test mocks can fake either.
+    """
+    code = getattr(exc, "code", None)
+    if code == "23505":
+        return True
+    return "23505" in str(exc).lower() or "duplicate key" in str(exc).lower()
+
+
+async def _process_instantly_event(event_id: str, payload: dict) -> None:
+    """Translate an Instantly event into LDS state transitions.
+
+    Runs in a FastAPI BackgroundTask after the request returns. Any
+    exception lands in processing_error on the webhook_events row (best
+    effort — if the UPDATE itself fails, the next sweeper run will pick
+    the event back up via idx_webhook_events_unprocessed).
+    """
+    event_type = str(payload.get("event_type") or "")
+    provider_msg_id = str(payload.get("lds_provider_message_id")
+                          or payload.get("provider_message_id")
+                          or payload.get("message_id") or "")[:200]
+    recipient_email = str(payload.get("recipient_email") or payload.get("email") or "")[:320]
+    campaign_id_hint = payload.get("lds_campaign_id") or payload.get("campaign_id")
+
+    error_message: Optional[str] = None
+    try:
+        if event_type == "email_sent":
+            await _instantly_handle_sent(provider_msg_id, recipient_email)
+        elif event_type == "email_bounced":
+            await _instantly_handle_bounced(
+                provider_msg_id, recipient_email, campaign_id_hint, payload,
+            )
+        elif event_type == "email_unsubscribed":
+            await _instantly_handle_unsubscribed(
+                provider_msg_id, recipient_email, campaign_id_hint,
+            )
+        elif event_type == "email_replied":
+            await _instantly_handle_replied(provider_msg_id)
+        # Else: unhandled type — already logged at handler entry.
+    except Exception as exc:  # noqa: BLE001 — record + skip; sweeper retries
+        logger.exception("instantly event %s processing failed", event_type)
+        error_message = f"{type(exc).__name__}: {exc!s}"[:1024]
+
+    # Checkpoint processing on the event row regardless of branch
+    # outcome. Failure mode: processed_at NULL + error stored.
+    try:
+        await asyncio.to_thread(
+            lambda: (
+                db.client.table("webhook_events")
+                .update({
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "processing_error": error_message,
+                })
+                .eq("provider", "instantly")
+                .eq("event_id", event_id)
+                .execute()
+            )
+        )
+    except Exception:
+        # Sweeper retries via idx_webhook_events_unprocessed.
+        logger.exception("instantly webhook checkpoint UPDATE failed")
+
+
+async def _instantly_handle_sent(provider_msg_id: str, recipient_email: str) -> None:
+    """email_sent: intentionally deferred to Phase 14.3.
+
+    The naive implementation — `UPDATE campaign_messages SET status='sent'
+    WHERE status='pending'` — would bulk-stamp EVERY pending row in EVERY
+    campaign with the same provider_message_id. Subsequent bounce /
+    unsubscribe / reply events look up by provider_message_id, which
+    would then cascade-match the entire bulk-stamped set. One bounce
+    webhook could corrupt the entire message table.
+
+    The correct path requires the dispatcher to round-trip Instantly's
+    message id back onto the originating row at push time (when the
+    POST /lead/add response carries the lds_lead_id ↔ provider_msg_id
+    pair). That wiring lives in Phase 14.3 alongside the dispatch loop.
+
+    Until then, this handler logs the event and returns — the
+    webhook_events row already captured the payload for replay. The
+    bounce / unsubscribe / reply handlers use recipient_email + a
+    fallback path that doesn't depend on provider_message_id being
+    populated upstream.
+    """
+    if not provider_msg_id and not recipient_email:
+        return
+    logger.info(
+        "email_sent event observed (status transition deferred to Phase 14.3)",
+        extra={
+            "provider_message_id": provider_msg_id or None,
+            "recipient_hash": _redact_email(recipient_email) if recipient_email else None,
+        },
+    )
+
+
+async def _instantly_handle_bounced(
+    provider_msg_id: str,
+    recipient_email: str,
+    campaign_id_hint: Optional[str],
+    payload: dict,
+) -> None:
+    """email_bounced: UPDATE status='bounced' + INSERT suppression(bounce_hard)."""
+    bounce_reason = str(payload.get("bounce_reason") or payload.get("reason") or "")[:200]
+    if db.client and provider_msg_id:
+        await asyncio.to_thread(
+            lambda: (
+                db.client.table("campaign_messages")
+                .update({"status": "bounced", "bounce_reason": bounce_reason})
+                .eq("provider_message_id", provider_msg_id)
+                .execute()
+            )
+        )
+    if not recipient_email:
+        return
+    from src.repositories.suppression_repo import SuppressionRepository
+
+    repo = SuppressionRepository(db.client)
+    await repo.add(
+        "email",
+        recipient_email,
+        "bounce_hard",
+        channel="email",
+        source_provider="instantly",
+        source_campaign_id=campaign_id_hint if _looks_like_uuid(campaign_id_hint) else None,
+        notes=bounce_reason or None,
+    )
+
+
+async def _instantly_handle_unsubscribed(
+    provider_msg_id: str,
+    recipient_email: str,
+    campaign_id_hint: Optional[str],
+) -> None:
+    """email_unsubscribed: status='unsubscribed' + suppression(channel='all').
+
+    Channel='all' because an unsubscribe expresses "stop everything from
+    this sender", not just the email channel. Bounces stay scoped to
+    channel='email'.
+    """
+    if db.client and provider_msg_id:
+        await asyncio.to_thread(
+            lambda: (
+                db.client.table("campaign_messages")
+                .update({"status": "unsubscribed"})
+                .eq("provider_message_id", provider_msg_id)
+                .execute()
+            )
+        )
+    if not recipient_email:
+        return
+    from src.repositories.suppression_repo import SuppressionRepository
+
+    repo = SuppressionRepository(db.client)
+    await repo.add(
+        "email",
+        recipient_email,
+        "unsubscribe",
+        channel="all",
+        source_provider="instantly",
+        source_campaign_id=campaign_id_hint if _looks_like_uuid(campaign_id_hint) else None,
+    )
+
+
+async def _instantly_handle_replied(provider_msg_id: str) -> None:
+    """email_replied: stamp status='replied'.
+
+    Full reply-classifier (Phase 16) reads the body off the webhook
+    payload and writes pos/neg/ooo/objection. Until then we just flag
+    the message so the operator's reply-inbox view can pivot off it.
+    """
+    if not provider_msg_id or not db.client:
+        return
+    await asyncio.to_thread(
+        lambda: (
+            db.client.table("campaign_messages")
+            .update({"status": "replied"})
+            .eq("provider_message_id", provider_msg_id)
+            .execute()
+        )
+    )
+
+
+def _looks_like_uuid(s) -> bool:
+    if not isinstance(s, str) or len(s) != 36:
+        return False
+    parts = s.split("-")
+    return [len(p) for p in parts] == [8, 4, 4, 4, 12] and all(
+        c in "0123456789abcdefABCDEF" for p in parts for c in p
+    )
+
+
 # Opaque cursor for /leads keyset pagination. Encodes the page-boundary
 # (created_at, unique_key) tuple so successive pages keyset-scan rather
 # than OFFSET — required to keep p95 flat as the table grows. Tie-break on

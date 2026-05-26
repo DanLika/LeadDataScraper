@@ -13,12 +13,12 @@ Assertions:
 - Every column declared in ``supabase_schema.sql`` exists in DB.
 - Every column in DB is declared in ``supabase_schema.sql`` (no silent drift).
 - RLS enabled on leads, campaigns, campaign_messages, orchestration_jobs,
-  account_deletions, email_send_ledger, suppressions.
+  account_deletions, email_send_ledger, suppressions, webhook_events.
 - A deny-all policy (AS RESTRICTIVE, qual=false, with_check=false,
-  anon+authenticated, FOR ALL) exists on each of those 7 tables. RESTRICTIVE
+  anon+authenticated, FOR ALL) exists on each of those 8 tables. RESTRICTIVE
   is enforced so a future ad-hoc PERMISSIVE qual=true policy added in Studio
   cannot OR over the deny.
-- No GRANT to anon / authenticated / PUBLIC on those 7 tables.
+- No GRANT to anon / authenticated / PUBLIC on those 8 tables.
 - ``add_lead_column`` function is ``SECURITY DEFINER``, owned by ``postgres``,
   with ``search_path`` set, and has no EXECUTE grant to anon/authenticated/PUBLIC.
 
@@ -46,6 +46,7 @@ TABLES: tuple[str, ...] = (
     "account_deletions",
     "email_send_ledger",
     "suppressions",
+    "webhook_events",
 )
 TABLE_CONSTRAINT_KEYWORDS = {
     "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "EXCLUDE", "LIKE",
@@ -82,6 +83,9 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     },
     "email_send_ledger": {
         "email_send_ledger_provider_allowed",
+    },
+    "webhook_events": {
+        "webhook_events_provider_allowed",
     },
 }
 

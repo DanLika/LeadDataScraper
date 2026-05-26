@@ -126,6 +126,12 @@ Calling `send()` raises `NotImplementedError` — the DispatcherRouter
 | `email_suppression` | `email TEXT PRIMARY KEY` + `reason CHECK` | PR #286 (renamed in Phase 14.2 — see `suppressions` row below) |
 | `email_suppression` | `source TEXT NULL` CHECK allowlist incl. `'instantly'` | PR #319 (renamed to `source_provider` in Phase 14.2) |
 | `suppressions` | RENAME from `email_suppression`; generic `(identifier_type, identifier_value, channel)` shape; `source_provider` replaces `source`; reason allowlist extended for webhook taxonomy + RFC 8058 + GDPR | PR α (Phase 14.2) |
+| `campaign_messages` | `thread_id`, `in_reply_to_message_id`, `tracking_id UUID DEFAULT gen_random_uuid() UNIQUE` | PR β (Phase 14.2) |
+| `webhook_events` | `(provider, event_id) UNIQUE` idempotency table; provider CHECK allowlist; RLS deny-all; partial index on `processed_at IS NULL` | PR γ (Phase 14.2) |
+| `campaign_messages.status` | allowlist extended with `'unsubscribed'` | PR γ (Phase 14.2) |
+
+Webhook security (HMAC + replay window + idempotency): see
+[`docs/integrations/webhook-security.md`](webhook-security.md).
 
 Suppression precheck is **fail-OPEN**: a transient PostgREST blip
 returns an empty suppression set rather than blocking the dispatch.
