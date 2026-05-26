@@ -252,6 +252,7 @@ async def run_tick(
 
     leads_payload: list[dict[str, Any]] = []
     message_ids: dict[str, str] = {}
+    list_unsubscribe_urls: dict[str, str] = {}
 
     for row in claimed:
         msg_id = str(row.get("id") or "")
@@ -367,6 +368,8 @@ async def run_tick(
 
         leads_payload.append(payload.as_lead_dict())
         message_ids[uk] = msg_id
+        if payload.list_unsubscribe_url:
+            list_unsubscribe_urls[uk] = payload.list_unsubscribe_url
 
     if not leads_payload:
         result.elapsed_seconds = _monotonic_now() - started
@@ -385,6 +388,7 @@ async def run_tick(
         push_result = await dispatch_impl.push_leads(
             leads=leads_payload,
             message_ids=message_ids,
+            list_unsubscribe_urls=list_unsubscribe_urls,
         )
         result.dispatched = int(getattr(push_result, "success_count", 0))
         # Additive — result.failed already carries pre-dispatch rejects

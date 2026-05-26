@@ -144,6 +144,7 @@ class InstantlyDispatcher(EmailDispatcher):
         campaign_id: Optional[str] = None,
         personalizations: Optional[dict[str, str]] = None,
         message_ids: Optional[dict[str, str]] = None,
+        list_unsubscribe_urls: Optional[dict[str, str]] = None,
     ) -> InstantlyPushResult:
         """Push 1..N LDS leads to an Instantly campaign in batches.
 
@@ -161,6 +162,15 @@ class InstantlyDispatcher(EmailDispatcher):
         contract). Callers in the dispatch loop (Phase 15) must
         pre-create the campaign_messages row with status='pending'
         BEFORE calling push_leads so the lookup ID exists.
+
+        ``list_unsubscribe_urls`` maps ``unique_key → bare unsubscribe URL``
+        (no angle brackets). The dispatcher wraps each as
+        ``<URL>`` per Instantly's custom-vars-to-header bridge
+        convention and threads via ``custom_variables.list_unsubscribe``
+        + ``list_unsubscribe_post``. RFC 8058 / Gmail-Yahoo 2024
+        one-click compliance — without this kwarg the per-lead
+        List-Unsubscribe header is not threaded and compliance falls
+        back to whatever Instantly's campaign-level config sets.
 
         Suppression precheck is a single batch SELECT against
         ``suppressions`` filtered to (identifier_type='email', channel ∈
@@ -207,12 +217,15 @@ class InstantlyDispatcher(EmailDispatcher):
                 skipped_count += 1
                 continue
             uk = lead.get("unique_key") or ""
+            bare_unsub = (list_unsubscribe_urls or {}).get(uk)
+            wrapped_unsub = f"<{bare_unsub}>" if bare_unsub else None
             payloads.append(
                 InstantlyLeadPayload.from_lds_lead(
                     lead,
                     personalization=(personalizations or {}).get(uk),
                     dispatched_at=dispatched_at,
                     lds_message_id=(message_ids or {}).get(uk),
+                    list_unsubscribe=wrapped_unsub,
                 )
             )
 
