@@ -83,19 +83,27 @@ Long-form invariants with rationale + test pins. CLAUDE.md keeps the quick-refer
   intermediate caches after logout. Client-side `apiFetch` already passes
   `cache: 'no-store'` on the request — the response-side stamp is the
   matching defense.
-- Destructive endpoints `DELETE /leads/clear` + `DELETE /leads/demo`
-  (Phase 13.3) additionally require `X-Admin-Token` matching `ADMIN_TOKEN`
-  env (defense-in-depth even if API key leaks). The Next.js proxy injects
-  `X-Admin-Token` from its own server-side env for the paths in the
-  `ADMIN_TOKEN_PATHS` allowlist at
-  `frontend/app/api/proxy/[...path]/route.ts` (`leads/clear`, `leads/demo`
-  — exact match on joined dynamic segments, so prefix collisions like
-  `leads/clear-cache` can't accidentally inherit the admin token).
-  Clients cannot set this header themselves; the in-browser auth gate
-  (Supabase session) is the only thing that lets a user reach the proxy
-  at all. Setting `ADMIN_TOKEN` in both backend `.env` AND frontend
-  `.env.local` (must match) is required — without it the UI's "Clear
-  All Leads" + "Remove all demo data" buttons hit 403.
+- Destructive endpoints additionally require `X-Admin-Token` matching
+  `ADMIN_TOKEN` env (defense-in-depth even if API key leaks). Four
+  endpoints currently gate on `verify_admin_token`:
+  - `DELETE /leads/clear` (Phase 13.3 — wipe all leads)
+  - `DELETE /leads/demo` (Phase 13.3 — wipe demo seed rows)
+  - `DELETE /operator/account` (GDPR Article 17 erasure)
+  - `GET /admin/gemini-budget` (cost-cap inspection)
+
+  The Next.js proxy injects `X-Admin-Token` from its own server-side env
+  for paths in the `ADMIN_TOKEN_PATHS` allowlist at
+  `frontend/app/api/proxy/[...path]/route.ts`: `leads/clear`,
+  `leads/demo`, `operator/account`, `admin/gemini-budget` — exact match
+  on joined dynamic segments, so prefix collisions like
+  `leads/clear-cache` can't accidentally inherit the admin token.
+  Aligned with backend in [PR #348](https://github.com/DanLika/LeadDataScraper/pull/348)
+  after a /vibe-security audit caught the parity drift (proxy had only
+  2 of 4). Clients cannot set this header themselves; the in-browser
+  auth gate (Supabase session) is the only thing that lets a user reach
+  the proxy at all. Setting `ADMIN_TOKEN` in both backend `.env` AND
+  frontend `.env.local` (must match) is required — without it the UI's
+  "Clear All Leads" + "Remove all demo data" buttons hit 403.
 - Phase 13.3 demo-data flag: `leads.is_demo BOOLEAN NOT NULL DEFAULT
   FALSE` (+ partial index `WHERE is_demo = TRUE`) seeded by
   `src/scripts/seed_demo_data.py` (20 Croatian leads, idempotent via
