@@ -35,6 +35,19 @@ each item is where it is.
 
 ## Next (1–2 months)
 
+### Outreach pipeline — Phase 14 (Instantly cold path)
+Follows Phase 13.5 (warm path) reaching dogfood-ready. Pivot
+context in [`docs/email-dispatch-architecture.md`](email-dispatch-architecture.md) §0.
+- [ ] **14.0** — `EmailDispatcher` Protocol refactor + `provider`
+      column on `email_send_ledger` (forward-additive ALTER, no
+      breakage to Resend warm path). Follow-up to PR #286.
+- [ ] **14.1** — `InstantlyEmailSender` module + Instantly webhook
+      handler (`POST /webhooks/instantly`) with provider-specific
+      HMAC verify + replay-window check.
+- [ ] **14.2** — Cold/warm queue routing in dispatcher. Cold goes to
+      Instantly's pool (rotating identity); warm stays on Resend
+      owned-domain reputation.
+
 ### Resilience (Gemini SEV-2 reduction)
 - [ ] **Circuit breaker around Gemini calls**. Open after N failures
       in M seconds; fail fast for cool-down. See
@@ -76,17 +89,37 @@ each item is where it is.
 
 ## Later (3–6 months)
 
+### Outreach pipeline — Phase 17 (HeyReach LinkedIn)
+Follows Phase 14 (Instantly cold) reaching production. LinkedIn is
+a separate medium from email — own send ledger, own suppression
+list, own auth model (per-LinkedIn-account, not domain-bound).
+- [ ] **17.0** — LinkedIn surface decision. Two options:
+      (a) parallel `linkedin_send_ledger` + `linkedin_suppression`
+          tables (cleanest separation; some code duplication).
+      (b) rename `email_*` → `outreach_*` + add `channel`
+          discriminator (DRY, but breaking migration).
+      Decide based on traffic volume at the time + how
+      different the LinkedIn event taxonomy turns out to be.
+- [ ] **17.1** — `HeyReachLinkedInSender` module + HeyReach webhook
+      handler with HeyReach-specific signature verify.
+- [ ] **17.2** — LinkedIn dispatcher cron job + frontend Send-LinkedIn
+      surface. Reuses the Phase 14.x cold/warm routing if available.
+
 ### [BookBed.io] Commercialization track
 > **Phase 13 scope (2026-05-22) — dogfood-only cut.** Items below
 > were the original Phase 13 commercial track for LDS but were
 > moved here because LDS is single-tenant by design (ADR-001) and
 > billing / multi-tenancy / signup work belongs in the BookBed
 > repos, not throwaway on LDS. The LDS dogfood path keeps:
-> 13.1 hr-HR i18n, 13.3 demo seed, 13.4 email dispatch, 13.5
-> DKIM/SPF/DMARC, 13.14 crossover doc (shipped above), 13.15
-> 2-week dogfood. See
+> 13.1 hr-HR i18n, 13.3 demo seed,
+> **13.5 warm email path** (folds the original 13.4 dispatch code +
+> 13.5 DKIM/SPF/DMARC into one phase per 2026-05-25 multi-dispatcher
+> pivot in [`email-dispatch-architecture.md`](email-dispatch-architecture.md) §0),
+> 13.14 crossover doc (shipped above), 13.15 2-week dogfood. See
 > [`docs/bookbed-crossover.md`](bookbed-crossover.md) Phase A→E
-> for what ports across.
+> for what ports across. Phase 14 (Instantly cold) + Phase 17
+> (HeyReach LinkedIn) are NEW phases tracking the broader outreach
+> stack — see "Outreach pipeline phases" below.
 
 - [ ] **Marketing site** — landing page with value prop, demo video,
       pricing, signup. Out of scope for the personal deployment.
