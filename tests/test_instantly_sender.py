@@ -93,7 +93,13 @@ class TestInstantlyPushResult:
 
 
 class _FakeQuery:
-    """Minimal supabase-py query stub: .table().select().in_().execute()."""
+    """Minimal supabase-py query stub: .table().select().eq().in_().execute().
+
+    ``.eq()`` was added in Phase 14.2 to support the suppressions
+    table's (identifier_type='email', channel IN [...]) predicate; the
+    captured eq/in_ filters surface in ``captured`` so tests can assert
+    the precheck SQL shape.
+    """
     def __init__(self, data: list[dict[str, Any]]):
         self._data = data
         self.captured: dict[str, Any] = {}
@@ -101,8 +107,16 @@ class _FakeQuery:
     def select(self, _cols: str) -> "_FakeQuery":
         return self
 
+    def eq(self, col: str, value: Any) -> "_FakeQuery":
+        self.captured.setdefault("eq", {})[col] = value
+        return self
+
     def in_(self, col: str, values: list[Any]) -> "_FakeQuery":
-        self.captured = {"col": col, "values": list(values)}
+        self.captured.setdefault("in_", {})[col] = list(values)
+        # Back-compat: keep the old single-filter capture for existing
+        # ledger-side assertions that look at .captured['col'] / ['values'].
+        self.captured["col"] = col
+        self.captured["values"] = list(values)
         return self
 
     def insert(self, rows: list[dict[str, Any]]) -> "_FakeQuery":
@@ -124,8 +138,10 @@ class _FakeDB:
         self.inserted_ledger: list[dict[str, Any]] = []
 
     def table(self, name: str) -> _FakeQuery:
-        if name == "email_suppression":
-            q = _FakeQuery([{"email": e} for e in self.suppressed])
+        if name == "suppressions":
+            # Phase 14.2 renamed email_suppression → suppressions; email
+            # rows surface under identifier_value.
+            q = _FakeQuery([{"identifier_value": e} for e in self.suppressed])
         elif name == "email_send_ledger":
             q = _FakeQuery([])
             # Capture ledger inserts.

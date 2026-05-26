@@ -292,17 +292,41 @@ CREATE TABLE email_send_ledger (
 CREATE INDEX idx_email_send_ledger_domain_sent
   ON email_send_ledger(recipient_domain, sent_at DESC);
 
-CREATE TABLE email_suppression (
-  email TEXT PRIMARY KEY,
-  reason TEXT NOT NULL,  -- 'bounce' / 'complaint' / 'manual'
-  added_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- Phase 14.2: renamed from email_suppression to a generic multi-channel
+-- table. identifier_type ∈ {email, domain, linkedin_url, phone}, channel ∈
+-- {email, linkedin, sms, all}. Dispatcher predicate filters on
+-- (identifier_type='email', channel ∈ {email, all}).
+CREATE TABLE suppressions (
+  id BIGSERIAL PRIMARY KEY,
+  identifier_type TEXT NOT NULL DEFAULT 'email',
+  identifier_value TEXT NOT NULL,
+  reason TEXT NOT NULL,  -- 'bounce' / 'bounce_hard' / 'bounce_soft_3x' /
+                         -- 'complaint' / 'manual' / 'unsubscribe' /
+                         -- 'gdpr_request' / 'spam_trap'
+  channel TEXT NOT NULL DEFAULT 'email',
+  source_provider TEXT,         -- 'resend' / 'instantly' / 'smtp' / 'heyreach' / 'manual'
+  source_campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by TEXT,
+  notes TEXT,
+  UNIQUE (identifier_type, identifier_value, channel)
 );
+CREATE INDEX idx_suppressions_lookup
+  ON suppressions (identifier_value, channel)
+  WHERE channel IN ('email', 'all');
 
 ALTER TABLE email_send_ledger ENABLE ROW LEVEL SECURITY;
-ALTER TABLE email_suppression ENABLE ROW LEVEL SECURITY;
+ALTER TABLE suppressions ENABLE ROW LEVEL SECURITY;
 -- + deny-all policies matching the 5-table pattern, + GRANT REVOKE
 -- on anon/authenticated, + schema_drift_check.py TABLES tuple update.
 ```
+
+**Repository layer (Phase 14.2):** `src/repositories/suppression_repo.py`
+provides `is_suppressed()`, `filter_suppressed()` (single batch query),
+`add()` (duplicate-tolerant via DB UNIQUE constraint), and
+`bulk_import()` (operator paste-500-emails workflow via PostgREST
+`upsert(ignore_duplicates=True)`). Dispatcher precheck is unchanged
+behaviour — just rewired to the new table + columns.
 
 ---
 
@@ -388,7 +412,9 @@ is 100% complete:
 
 → PR 2: Schema additions
     - provider_message_id + bounce_reason on campaign_messages
-    - email_send_ledger + email_suppression tables (+RLS, +grants)
+    - email_send_ledger + suppressions tables (+RLS, +grants)
+    - (Phase 14.2) suppressions renamed from email_suppression, extended
+      to multi-channel identifier_type + channel
     - schema_drift_check.py + check_grants_matrix.py allowlist updates
 
 → PR 3: Webhook handler

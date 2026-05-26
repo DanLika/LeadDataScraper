@@ -13,7 +13,7 @@ Assertions:
 - Every column declared in ``supabase_schema.sql`` exists in DB.
 - Every column in DB is declared in ``supabase_schema.sql`` (no silent drift).
 - RLS enabled on leads, campaigns, campaign_messages, orchestration_jobs,
-  account_deletions, email_send_ledger, email_suppression.
+  account_deletions, email_send_ledger, suppressions.
 - A deny-all policy (AS RESTRICTIVE, qual=false, with_check=false,
   anon+authenticated, FOR ALL) exists on each of those 7 tables. RESTRICTIVE
   is enforced so a future ad-hoc PERMISSIVE qual=true policy added in Studio
@@ -45,7 +45,7 @@ TABLES: tuple[str, ...] = (
     "orchestration_jobs",
     "account_deletions",
     "email_send_ledger",
-    "email_suppression",
+    "suppressions",
 )
 TABLE_CONSTRAINT_KEYWORDS = {
     "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "EXCLUDE", "LIKE",
@@ -74,9 +74,11 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
         "campaign_messages_channel_allowed",
         "campaign_messages_status_allowed",
     },
-    "email_suppression": {
-        "email_suppression_reason_allowed",
-        "email_suppression_source_allowed",
+    "suppressions": {
+        "suppressions_identifier_type_allowed",
+        "suppressions_reason_allowed",
+        "suppressions_channel_allowed",
+        "suppressions_provider_allowed",
     },
     "email_send_ledger": {
         "email_send_ledger_provider_allowed",

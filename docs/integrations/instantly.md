@@ -101,7 +101,7 @@ Returns `InstantlyPushResult`:
 ```python
 class InstantlyPushResult(BaseModel):
     success_count: int          # leads Instantly accepted
-    skipped_suppressed: int     # in email_suppression at push time
+    skipped_suppressed: int     # in suppressions table at push time
     failed_count: int           # Instantly rejected (auth, rate, validation)
     errors: list[InstantlyError]
     raw_response: dict          # last-batch API body (debug-only)
@@ -123,8 +123,9 @@ Calling `send()` raises `NotImplementedError` — the DispatcherRouter
 |---|---|---|
 | `email_send_ledger` | `provider TEXT` CHECK allowlist incl. `'instantly'` | PR #319 |
 | `email_send_ledger` | `recipient_domain TEXT NULL` (LinkedIn relaxation) | PR #319 |
-| `email_suppression` | `email TEXT PRIMARY KEY` + `reason CHECK` | PR #286 |
-| `email_suppression` | `source TEXT NULL` CHECK allowlist incl. `'instantly'` | PR #319 |
+| `email_suppression` | `email TEXT PRIMARY KEY` + `reason CHECK` | PR #286 (renamed in Phase 14.2 — see `suppressions` row below) |
+| `email_suppression` | `source TEXT NULL` CHECK allowlist incl. `'instantly'` | PR #319 (renamed to `source_provider` in Phase 14.2) |
+| `suppressions` | RENAME from `email_suppression`; generic `(identifier_type, identifier_value, channel)` shape; `source_provider` replaces `source`; reason allowlist extended for webhook taxonomy + RFC 8058 + GDPR | PR α (Phase 14.2) |
 
 Suppression precheck is **fail-OPEN**: a transient PostgREST blip
 returns an empty suppression set rather than blocking the dispatch.

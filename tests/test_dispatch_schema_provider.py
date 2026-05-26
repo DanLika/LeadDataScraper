@@ -93,51 +93,62 @@ class TestEmailSendLedgerProvider:
             )
 
 
-class TestEmailSuppressionSource:
-    """`email_suppression.source` (nullable forensic column) + CHECK."""
+class TestSuppressionsSourceProvider:
+    """``suppressions.source_provider`` (forensic column) + CHECK.
 
-    def test_source_optional_for_manual_adds(self, conn):
+    Renamed from ``email_suppression.source`` in Phase 14.2 alongside the
+    table itself (see ``supabase_schema.sql`` § Phase 14.2). Existing
+    invariants preserved; new identifier_type / channel columns get
+    targeted coverage in ``test_suppressions_multichannel.py`` (not
+    in this PR — added when the LinkedIn dispatcher lands in Phase 17.x).
+    """
+
+    def test_source_provider_optional_for_manual_adds(self, conn):
         email = f"manual-{uuid.uuid4().hex[:8]}@example"
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO public.email_suppression "
-                "(email, reason, source) VALUES (%s, %s, %s)",
-                (email, "manual", None),
+                "INSERT INTO public.suppressions "
+                "(identifier_type, identifier_value, reason, channel, source_provider) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                ("email", email, "manual", "email", None),
             )
 
-    def test_source_records_provider_for_webhook_adds(self, conn):
+    def test_source_provider_records_provider_for_webhook_adds(self, conn):
         email = f"hook-{uuid.uuid4().hex[:8]}@example"
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO public.email_suppression "
-                "(email, reason, source) VALUES (%s, %s, %s) "
-                "RETURNING source",
-                (email, "bounce", "resend"),
+                "INSERT INTO public.suppressions "
+                "(identifier_type, identifier_value, reason, channel, source_provider) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING source_provider",
+                ("email", email, "bounce", "email", "resend"),
             )
             row = cur.fetchone()
         assert row is not None
         assert row[0] == "resend"
 
-    def test_rejects_unknown_source(self, conn):
+    def test_rejects_unknown_source_provider(self, conn):
         # Webhook-fed column; CHECK guards against attacker-influenced
         # bodies poisoning the forensic record.
         email = f"bad-source-{uuid.uuid4().hex[:8]}@example"
         with pytest.raises(psycopg.errors.CheckViolation):
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO public.email_suppression "
-                    "(email, reason, source) VALUES (%s, %s, %s)",
-                    (email, "bounce", "mailgun"),
+                    "INSERT INTO public.suppressions "
+                    "(identifier_type, identifier_value, reason, channel, source_provider) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    ("email", email, "bounce", "email", "mailgun"),
                 )
 
     @pytest.mark.parametrize(
-        "source", ["resend", "instantly", "smtp", "heyreach"]
+        "source_provider",
+        ["resend", "instantly", "smtp", "heyreach", "manual"],
     )
-    def test_accepts_allowlisted_source(self, conn, source):
+    def test_accepts_allowlisted_source_provider(self, conn, source_provider):
         email = f"src-ok-{uuid.uuid4().hex[:8]}@example"
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO public.email_suppression "
-                "(email, reason, source) VALUES (%s, %s, %s)",
-                (email, "bounce", source),
+                "INSERT INTO public.suppressions "
+                "(identifier_type, identifier_value, reason, channel, source_provider) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                ("email", email, "bounce", "email", source_provider),
             )

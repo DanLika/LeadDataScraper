@@ -399,9 +399,11 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 --   2. email_send_ledger — append-only per-domain throttle ledger. The
 --      dispatcher consults it before sending to avoid same-domain bursts
 --      (Gmail/Outlook penalize) — currently 3/hr/domain target.
---   3. email_suppression — opt-out + bounce list. dispatcher SKIPs any row
---      whose lead.email is here. Webhook populates on `email.bounced` /
---      `email.complained` events.
+--   3. suppressions — opt-out + bounce list (renamed from email_suppression
+--      in Phase 14.2 to support multi-channel identifiers). dispatcher
+--      SKIPs any row whose (identifier_type, identifier_value, channel)
+--      matches. Webhook populates on `email.bounced` / `email.complained`
+--      / unsubscribe events. Generic shape unblocks LinkedIn (Phase 17.x).
 --
 -- All three additive — no destructive changes to existing tables. RLS
 -- deny-all + REVOKE on anon/authenticated/PUBLIC mirror the 5-table
@@ -428,38 +430,11 @@ CREATE TABLE IF NOT EXISTS public.email_send_ledger (
 CREATE INDEX IF NOT EXISTS idx_email_send_ledger_domain_sent
     ON public.email_send_ledger(recipient_domain, sent_at DESC);
 
-CREATE TABLE IF NOT EXISTS public.email_suppression (
-    email     TEXT PRIMARY KEY,
-    reason    TEXT NOT NULL,
-    added_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Reason allowlist matches the webhook handler's event taxonomy plus
--- operator-initiated manual adds. New values land here AND in
--- schema_drift_check.py::EXPECTED_CHECK_CONSTRAINTS in the same PR.
-DO $$ BEGIN
-    ALTER TABLE public.email_suppression
-        ADD CONSTRAINT email_suppression_reason_allowed
-        CHECK (reason IN ('bounce', 'complaint', 'manual'));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
 ALTER TABLE public.email_send_ledger ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.email_suppression ENABLE ROW LEVEL SECURITY;
-
-REVOKE ALL ON public.email_send_ledger, public.email_suppression
-    FROM anon, authenticated, PUBLIC;
+REVOKE ALL ON public.email_send_ledger FROM anon, authenticated, PUBLIC;
 
 DO $$ BEGIN
     CREATE POLICY email_send_ledger_deny_all ON public.email_send_ledger
-        AS RESTRICTIVE
-        FOR ALL
-        TO anon, authenticated
-        USING (false)
-        WITH CHECK (false);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE POLICY email_suppression_deny_all ON public.email_suppression
         AS RESTRICTIVE
         FOR ALL
         TO anon, authenticated
@@ -471,9 +446,11 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Phase 14.0 — multi-dispatcher provider columns (additive to PR #286)
 -- ---------------------------------------------------------------------------
 -- Adds `provider` to email_send_ledger so the dispatcher can throttle
--- per-provider AND maintain per-provider cost accounting. Adds optional
--- `source` to email_suppression for forensic ("which provider reported
--- this bounce"). LinkedIn (HeyReach) is included in the provider
+-- per-provider AND maintain per-provider cost accounting. The forensic
+-- provider column on the suppression table (formerly
+-- email_suppression.source, renamed to suppressions.source_provider in
+-- Phase 14.2) is declared in the suppressions section above. LinkedIn
+-- (HeyReach) is included in the provider
 -- allowlist because the LinkedIn-surface decision (parallel tables vs
 -- email_*→outreach_* rename) is deferred to Phase 17.0 — until then,
 -- HeyReach writes land here, which is functionally fine: domain/email
@@ -503,19 +480,169 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS idx_email_send_ledger_provider_domain_sent
     ON public.email_send_ledger (provider, recipient_domain, sent_at DESC);
 
-ALTER TABLE public.email_suppression
-    ADD COLUMN IF NOT EXISTS source TEXT;
+-- ===========================================================================
+-- Phase 14.2 — generic multi-channel suppressions table
+-- ---------------------------------------------------------------------------
+-- Renames email_suppression → suppressions and extends to multi-channel
+-- identifiers (email|domain|linkedin_url|phone × channel∈{email|linkedin|
+-- sms|all}). The existing dispatcher precheck in
+-- src/integrations/instantly_sender.py is rewired to predicate on
+-- identifier_type='email' AND channel IN ('email','all') against the
+-- renamed table — additive, no schema-side data loss.
+--
+-- Why now: persistent suppression is the #1 blocker before any live cold
+-- send. In-process bounced_emails set is restart-fragile; one Render
+-- redeploy mid-campaign torches domain reputation. Webhook handler (PR γ)
+-- INSERTs into this table on every bounce/unsub event so /webhooks/
+-- instantly is idempotent + restart-safe.
+--
+-- Migration path:
+--   * Fresh DB → CREATE TABLE IF NOT EXISTS creates new shape directly;
+--     DO $$ rename block no-ops (email_suppression doesn't exist).
+--   * Live DB (Phase 14.0/14.1 active) → DO $$ rename block fires,
+--     existing rows backfill via column defaults (identifier_type='email',
+--     channel='email'); CREATE TABLE IF NOT EXISTS no-ops; ADD COLUMN IF
+--     NOT EXISTS adds the new columns; constraint DROP+ADD swaps the
+--     reason allowlist + adds the multi-channel CHECKs.
+--
+-- Reason allowlist extended from {bounce,complaint,manual} to include:
+--   * bounce_hard / bounce_soft_3x — webhook taxonomy (Instantly + Resend)
+--   * unsubscribe — RFC 8058 List-Unsubscribe-Post (PR β)
+--   * gdpr_request — Article 17 erasure suppression
+--   * spam_trap — operator-initiated after seed-list bounce
+-- Old values ('bounce', 'complaint') stay in the allowlist so existing
+-- rows survive the constraint swap.
+-- ===========================================================================
 
--- Source allowlist mirrors email_send_ledger.provider — webhook handlers
--- (PR 3) write attacker-influenced bodies; without a DB-level CHECK the
--- forensic column accepts arbitrary text. NULL stays valid for manual
--- operator adds. New providers land here AND in
--- schema_drift_check.py::EXPECTED_CHECK_CONSTRAINTS in the same PR.
+-- 1. Rename + restructure existing email_suppression if it exists (live DB).
 DO $$ BEGIN
-    ALTER TABLE public.email_suppression
-        ADD CONSTRAINT email_suppression_source_allowed
-        CHECK (source IS NULL OR source IN ('resend', 'instantly', 'smtp', 'heyreach'));
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema='public' AND table_name='email_suppression'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema='public' AND table_name='suppressions'
+    ) THEN
+        ALTER TABLE public.email_suppression RENAME TO suppressions;
+        ALTER TABLE public.suppressions RENAME COLUMN email TO identifier_value;
+        ALTER TABLE public.suppressions RENAME COLUMN added_at TO created_at;
+        -- `source` column was added in Phase 14.0; rename to spec name.
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='suppressions'
+              AND column_name='source'
+        ) THEN
+            ALTER TABLE public.suppressions RENAME COLUMN source TO source_provider;
+        END IF;
+        -- Old PK was on `email` (now `identifier_value`); drop so (id) can be PK.
+        ALTER TABLE public.suppressions DROP CONSTRAINT IF EXISTS email_suppression_pkey;
+        -- Old CHECK constraints survive RENAME with the old name; drop them so
+        -- the new wider allowlist replaces them cleanly below.
+        ALTER TABLE public.suppressions DROP CONSTRAINT IF EXISTS email_suppression_reason_allowed;
+        ALTER TABLE public.suppressions DROP CONSTRAINT IF EXISTS email_suppression_source_allowed;
+        -- Old policy survives RENAME with its old name; rename to match new table.
+        ALTER POLICY email_suppression_deny_all ON public.suppressions RENAME TO suppressions_deny_all;
+    END IF;
+EXCEPTION WHEN undefined_object THEN NULL; END $$;
+
+-- 2. End-state shape. For fresh DBs this is the authoritative CREATE; for
+--    upgraded DBs the rename above has already produced the table and the
+--    IF NOT EXISTS clauses make this a no-op.
+CREATE TABLE IF NOT EXISTS public.suppressions (
+    id                BIGSERIAL PRIMARY KEY,
+    identifier_type   TEXT NOT NULL DEFAULT 'email',
+    identifier_value  TEXT NOT NULL,
+    reason            TEXT NOT NULL,
+    channel           TEXT NOT NULL DEFAULT 'email',
+    source_provider   TEXT,
+    source_campaign_id UUID REFERENCES public.campaigns(id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by        TEXT,
+    notes             TEXT
+);
+
+-- 3. Additive columns for upgraded DBs (no-op on fresh DBs where CREATE
+--    above already added them).
+ALTER TABLE public.suppressions
+    ADD COLUMN IF NOT EXISTS id BIGSERIAL,
+    ADD COLUMN IF NOT EXISTS identifier_type TEXT NOT NULL DEFAULT 'email',
+    ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'email',
+    ADD COLUMN IF NOT EXISTS source_provider TEXT,
+    ADD COLUMN IF NOT EXISTS source_campaign_id UUID REFERENCES public.campaigns(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS created_by TEXT,
+    ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Upgraded DBs land here without a PK (we dropped email_suppression_pkey
+-- above). Attach (id) PK if missing. Fresh DBs already got the PK via the
+-- CREATE TABLE statement.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema='public' AND table_name='suppressions'
+          AND constraint_type='PRIMARY KEY'
+    ) THEN
+        ALTER TABLE public.suppressions ADD CONSTRAINT suppressions_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+-- 4. CHECK constraint suite. Each in its own DO block so a single rerun
+--    on a partially-migrated DB recovers idempotently.
+DO $$ BEGIN
+    ALTER TABLE public.suppressions
+        ADD CONSTRAINT suppressions_identifier_type_allowed
+        CHECK (identifier_type IN ('email', 'domain', 'linkedin_url', 'phone'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-COMMENT ON COLUMN public.email_suppression.source IS
-    'Provider that reported the suppression (resend|instantly|smtp|heyreach). NULL for manual operator add. Enforced by email_suppression_source_allowed CHECK.';
+DO $$ BEGIN
+    ALTER TABLE public.suppressions
+        ADD CONSTRAINT suppressions_reason_allowed
+        CHECK (reason IN ('bounce', 'bounce_hard', 'bounce_soft_3x', 'complaint',
+                          'manual', 'unsubscribe', 'gdpr_request', 'spam_trap'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.suppressions
+        ADD CONSTRAINT suppressions_channel_allowed
+        CHECK (channel IN ('email', 'linkedin', 'sms', 'all'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.suppressions
+        ADD CONSTRAINT suppressions_provider_allowed
+        CHECK (source_provider IS NULL OR
+               source_provider IN ('resend', 'instantly', 'smtp', 'heyreach', 'manual'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- (identifier_type, identifier_value, channel) is the natural lookup key.
+-- Replaces the implicit uniqueness the old email PRIMARY KEY provided.
+DO $$ BEGIN
+    ALTER TABLE public.suppressions
+        ADD CONSTRAINT suppressions_unique
+        UNIQUE (identifier_type, identifier_value, channel);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 5. Hot-path index for the dispatcher precheck — partial index on
+--    channel∈{email,all} (the email dispatcher's only lookup shape).
+--    LinkedIn dispatcher (Phase 17.x) gets a sibling partial index.
+CREATE INDEX IF NOT EXISTS idx_suppressions_lookup
+    ON public.suppressions (identifier_value, channel)
+    WHERE channel IN ('email', 'all');
+
+-- 6. RLS deny-all (matches the canonical pattern; upgraded DBs already
+--    have RLS enabled + policy renamed above — re-running is idempotent).
+ALTER TABLE public.suppressions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.suppressions FROM anon, authenticated, PUBLIC;
+
+DO $$ BEGIN
+    CREATE POLICY suppressions_deny_all ON public.suppressions
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+COMMENT ON COLUMN public.suppressions.source_provider IS
+    'Provider that reported the suppression (resend|instantly|smtp|heyreach|manual). NULL only on legacy rows from pre-14.0; new rows always set a value. Enforced by suppressions_provider_allowed CHECK.';
+COMMENT ON COLUMN public.suppressions.identifier_type IS
+    'Channel-independent identifier kind. ''email'' is the only producer today; ''domain'' / ''linkedin_url'' / ''phone'' reserved for Phase 17.x.';
