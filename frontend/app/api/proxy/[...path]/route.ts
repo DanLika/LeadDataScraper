@@ -44,6 +44,8 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const ADMIN_TOKEN_PATHS = new Set<string>([
   'leads/clear',
   'leads/demo',
+  'operator/account',
+  'admin/gemini-budget',
 ]);
 
 // Match backend `/upload`'s MAX_UPLOAD_BYTES (50 MB). Defense-in-depth
