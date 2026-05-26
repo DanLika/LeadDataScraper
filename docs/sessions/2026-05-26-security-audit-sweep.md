@@ -183,6 +183,89 @@ Full dead-vs-alive partition saved to `memory/phase_15_1_deletion_scope.md`.
    the PR title overstates and confuses reviewers. Use the precise
    frame.
 
+## Admin-merge ops note
+
+Merging this session's PRs (#349 / #350 / #351 / #352) requires
+operator action because **CI baseline is pre-existing red on main**,
+not introduced by these PRs. Same degraded-mode pattern from the
+2026-05-26 stack merge (`docs/sessions/session_2026-05-26_phase14-15-stack.md`).
+
+### Pre-merge sanity (operator runs)
+
+For each PR, confirm the green checks include `main-matrix` / `e2e` /
+`Playwright E2E` / `Concurrency` / `npm test` — the meaningful
+functional gates. The 12 red checks are baseline rot, NOT regression:
+
+| Red check | Pre-existing reason |
+|---|---|
+| `pytest (cov >= 95%)` | Total coverage 46.90% — gate set for future ratchet; main HEAD same |
+| `ruff + mypy --strict` | `src/utils/ssrf_guard.py:70` mypy `_BaseAddress` attr-defined errors — pre-session |
+| `Quality ratchet (...)` | Composite of the above + ESLint baseline |
+| `pre-commit (local-CI parity)` | Same lint debt surfaced via pre-commit hooks |
+| `pip-audit --strict` | Dep-CVE gate strictness vs current pin; orthogonal to PR content |
+| `gitleaks (full git history)` | Repo history scan; addressed separately by #316 (open baseline) |
+| `License compliance (no copyleft)` | Pre-existing repo-wide check |
+| `Container scan (Trivy + Grype + SBOM)` | Container image baselines; main-tracked |
+| `Schema drift + RLS posture` | Operator-side Supabase project mismatch; not changed by these PRs |
+| `Lighthouse CI (Faza 4.3)` | Performance budget; orthogonal |
+| `ESLint (no warnings)` | Frontend lint debt baseline |
+| `synthetic-monitor` | Live prod monitor; tracks Render redeploy state (see `memory/smoke_test_blocked_2026-05-26.md`) |
+
+Verify on each PR's GitHub status page that **only the above 12**
+remain red. If a 13th red appears, that one IS a regression — fix
+before merging.
+
+### Merge order
+
+Strict order (per-PR dependency graph):
+
+1. **#349 magic-byte** — independent; no dependents.
+2. **#351 cookie Secure** — independent; no dependents.
+3. **#352 docs** — independent; no code dependents.
+4. **#350 list_unsubscribe** — independent BUT unlocks Phase 15.1
+   deletion follow-up. Merge last to keep deletion's branch-off-main
+   clean.
+
+### Admin-merge commands
+
+For each (replace `<N>`):
+
+```bash
+gh pr merge <N> --admin --squash --delete-branch
+```
+
+`--admin` overrides the red checks; `--squash` produces one commit
+per PR on main; `--delete-branch` reaps the worktree-branch.
+
+### Post-merge verification
+
+```bash
+# Confirm main advanced + commit messages match PR titles
+git fetch origin main
+git log origin/main --oneline -5
+
+# Re-run a fresh main CI to confirm the 12 baselines are stable
+# (none of these PRs should regress an existing GREEN check)
+gh run watch $(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')
+
+# Render redeploy if any backend change merged (only #349 + #350 touch backend/src)
+# — operator decides whether to trigger from Render dashboard
+```
+
+### After #350 merges → unblock Phase 15.1 deletion
+
+```bash
+git fetch origin main
+git worktree add -b chore/phase-15-1-delete-templates \
+    ../LeadDataScraper-15-1-delete origin/main
+# Then follow memory/phase_15_1_deletion_scope.md partition:
+# - DELETE: src/services/template_renderer.py + thread_builder.py
+# - DELETE: tests/unit/test_template_renderer.py + test_thread_builder.py
+# - REFACTOR: dispatch_tick.py + variant_service.py + sequence_variant_repo.py
+# - KEEP: variant_selector.py + sequence_advancer.py
+# - Schema column drop is a SEPARATE follow-up PR (drift gate dance)
+```
+
 ## Cross-links
 
 - `memory/phase_15_1_deletion_scope.md` — deferred deletion partition
@@ -190,7 +273,10 @@ Full dead-vs-alive partition saved to `memory/phase_15_1_deletion_scope.md`.
   survive the upcoming deletion)
 - `docs/integrations/instantly.md:114` — the campaign-owns-templates
   doc line that decided #350's scope
-- PRs: [#348](https://github.com/DanLika/LeadDataScraper/pull/348),
-  [#349](https://github.com/DanLika/LeadDataScraper/pull/349),
+- `docs/sessions/session_2026-05-26_phase14-15-stack.md` — prior
+  degraded-mode admin-merge precedent for 8 PRs through same CI rot
+- PRs: [#348](https://github.com/DanLika/LeadDataScraper/pull/348)
+  (merged), [#349](https://github.com/DanLika/LeadDataScraper/pull/349),
   [#350](https://github.com/DanLika/LeadDataScraper/pull/350),
-  [#351](https://github.com/DanLika/LeadDataScraper/pull/351)
+  [#351](https://github.com/DanLika/LeadDataScraper/pull/351),
+  [#352](https://github.com/DanLika/LeadDataScraper/pull/352)
