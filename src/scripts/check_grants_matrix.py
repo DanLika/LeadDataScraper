@@ -37,6 +37,7 @@ TABLES: tuple[str, ...] = (
     "leads", "campaigns", "campaign_messages", "orchestration_jobs",
     "account_deletions",
     "email_send_ledger", "suppressions", "webhook_events",
+    "sequences", "sequence_steps", "sequence_variants",
 )
 TABLE_LIST = list(TABLES)
 

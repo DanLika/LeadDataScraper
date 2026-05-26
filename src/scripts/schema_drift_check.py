@@ -13,12 +13,13 @@ Assertions:
 - Every column declared in ``supabase_schema.sql`` exists in DB.
 - Every column in DB is declared in ``supabase_schema.sql`` (no silent drift).
 - RLS enabled on leads, campaigns, campaign_messages, orchestration_jobs,
-  account_deletions, email_send_ledger, suppressions, webhook_events.
+  account_deletions, email_send_ledger, suppressions, webhook_events,
+  sequences, sequence_steps, sequence_variants.
 - A deny-all policy (AS RESTRICTIVE, qual=false, with_check=false,
-  anon+authenticated, FOR ALL) exists on each of those 8 tables. RESTRICTIVE
+  anon+authenticated, FOR ALL) exists on each of those 11 tables. RESTRICTIVE
   is enforced so a future ad-hoc PERMISSIVE qual=true policy added in Studio
   cannot OR over the deny.
-- No GRANT to anon / authenticated / PUBLIC on those 8 tables.
+- No GRANT to anon / authenticated / PUBLIC on those 11 tables.
 - ``add_lead_column`` function is ``SECURITY DEFINER``, owned by ``postgres``,
   with ``search_path`` set, and has no EXECUTE grant to anon/authenticated/PUBLIC.
 
@@ -47,6 +48,9 @@ TABLES: tuple[str, ...] = (
     "email_send_ledger",
     "suppressions",
     "webhook_events",
+    "sequences",
+    "sequence_steps",
+    "sequence_variants",
 )
 TABLE_CONSTRAINT_KEYWORDS = {
     "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "EXCLUDE", "LIKE",
@@ -86,6 +90,18 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     },
     "webhook_events": {
         "webhook_events_provider_allowed",
+    },
+    "sequences": {
+        "sequences_status_allowed",
+    },
+    "sequence_steps": {
+        "sequence_steps_channel_allowed",
+        "sequence_steps_branch_allowed",
+        "sequence_steps_delay_nonneg",
+    },
+    "sequence_variants": {
+        "sequence_variants_weight_positive",
+        "sequence_variants_label_format",
     },
 }
 
@@ -145,6 +161,12 @@ def parse_expected_columns(path: Path) -> dict[str, set[str]]:
         open_paren = m.end() - 1
         close_paren = _find_matching_paren(sql, open_paren)
         body = sql[open_paren + 1 : close_paren]
+        # Strip string literals BEFORE splitting on top-level commas — a
+        # default like ``send_days TEXT NOT NULL DEFAULT 'mon,tue,wed'``
+        # has commas at paren-depth 0 inside the literal that would
+        # otherwise split the column def and produce bogus "columns"
+        # named ``tue``, ``wed``, etc. (Phase 15.1 surfaced this.)
+        body = _strip_string_literals(body)
         for col_def in _split_top_level_commas(body):
             tokens = col_def.split()
             if not tokens:

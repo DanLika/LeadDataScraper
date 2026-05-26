@@ -802,3 +802,202 @@ DO $$ BEGIN
             'pending', 'sent', 'delivered', 'replied', 'bounced', 'unsubscribed'
         ));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ===========================================================================
+-- Phase 15.1 — sequencing engine tables
+-- ---------------------------------------------------------------------------
+-- Three new tables drive multi-step / A-B-variant cold outreach:
+--
+--   * sequences         — top-level container per campaign. Status drives
+--                         whether dispatch_tick picks up its steps.
+--   * sequence_steps    — ordered (sequence_id, step_index) tuple with
+--                         per-step delay, send-window, branch condition.
+--                         Channel ∈ {email, linkedin}; LinkedIn dispatch
+--                         lands in Phase 17.
+--   * sequence_variants — A/B copy split per step. Weighted random
+--                         selection at dispatch time; variant_label ∈
+--                         [A..Z] gives 26 max per step (plenty in
+--                         practice — researched cap is 3-5).
+--
+-- campaign_messages gets two FK columns (step_id, variant_id) + two
+-- scheduling fields (scheduled_at, dispatched_at). The dispatch_tick
+-- worker (Phase 15.2) consumes the partial index
+-- idx_campaign_messages_dispatch_queue to find due messages without a
+-- seq scan as the table grows.
+--
+-- All three tables share the canonical RLS deny-all + REVOKE posture
+-- (anon/authenticated/PUBLIC have zero access; service_role bypasses).
+--
+-- Research-pinned design points captured here so reviewers don't have
+-- to re-derive:
+--   * 4-5 steps over 14-21 days = empirical sweet spot
+--   * Day 1/3/7/14/21 cadence (widening, not uniform)
+--   * Steps 1-3 share a thread (blank subject → "Re:" continuation);
+--     step 4+ optionally breaks. Modeled via sequence_steps
+--     .thread_with_prior boolean.
+--   * Most replies in steps 2-4, not step 1.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS public.sequences (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id UUID NOT NULL REFERENCES public.campaigns(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'draft',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+    ALTER TABLE public.sequences
+        ADD CONSTRAINT sequences_status_allowed
+        CHECK (status IN ('draft', 'active', 'paused', 'archived'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS idx_sequences_campaign_active
+    ON public.sequences (campaign_id, status)
+    WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS public.sequence_steps (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sequence_id         UUID NOT NULL REFERENCES public.sequences(id) ON DELETE CASCADE,
+    step_index          INT NOT NULL,
+    channel             TEXT NOT NULL,
+    delay_days          INT NOT NULL DEFAULT 0,
+    delay_hours         INT NOT NULL DEFAULT 0,
+    thread_with_prior   BOOLEAN NOT NULL DEFAULT false,
+    branch_condition    TEXT NOT NULL DEFAULT 'always',
+    send_window_start   TIME NOT NULL DEFAULT '09:00',
+    send_window_end     TIME NOT NULL DEFAULT '17:00',
+    send_days           TEXT NOT NULL DEFAULT 'mon,tue,wed,thu,fri',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+    ALTER TABLE public.sequence_steps
+        ADD CONSTRAINT sequence_steps_channel_allowed
+        CHECK (channel IN ('email', 'linkedin'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.sequence_steps
+        ADD CONSTRAINT sequence_steps_branch_allowed
+        CHECK (branch_condition IN (
+            'always', 'no_reply', 'no_open',
+            'connection_accepted', 'replied'
+        ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.sequence_steps
+        ADD CONSTRAINT sequence_steps_delay_nonneg
+        CHECK (delay_days >= 0 AND delay_hours >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.sequence_steps
+        ADD CONSTRAINT sequence_steps_unique_index
+        UNIQUE (sequence_id, step_index);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS idx_sequence_steps_lookup
+    ON public.sequence_steps (sequence_id, step_index);
+
+CREATE TABLE IF NOT EXISTS public.sequence_variants (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    step_id           UUID NOT NULL REFERENCES public.sequence_steps(id) ON DELETE CASCADE,
+    variant_label     TEXT NOT NULL,
+    subject_template  TEXT,
+    body_template     TEXT NOT NULL,
+    weight            INT NOT NULL DEFAULT 50,
+    ai_model_used     TEXT,
+    ai_prompt_version TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+    ALTER TABLE public.sequence_variants
+        ADD CONSTRAINT sequence_variants_weight_positive
+        CHECK (weight > 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Single uppercase letter — A..Z gives 26 variants per step, well above
+-- any realistic A/B/C/D fan-out. Drives consistent labeling across UI +
+-- logs + analytics queries.
+DO $$ BEGIN
+    ALTER TABLE public.sequence_variants
+        ADD CONSTRAINT sequence_variants_label_format
+        CHECK (variant_label ~ '^[A-Z]$');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.sequence_variants
+        ADD CONSTRAINT sequence_variants_unique_label
+        UNIQUE (step_id, variant_label);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------------
+-- campaign_messages: add step + variant FK refs plus scheduling fields.
+-- One ALTER per column so the drift gate's single-column regex catches
+-- each declaration (multi-clause ALTER only matches the first — pinned
+-- lesson from Phase 14.2).
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS step_id UUID REFERENCES public.sequence_steps(id);
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS variant_id UUID REFERENCES public.sequence_variants(id);
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS dispatched_at TIMESTAMPTZ;
+
+-- Hot-path index — dispatch_tick scans this every minute. Partial WHERE
+-- skips the long tail of already-sent / failed rows.
+CREATE INDEX IF NOT EXISTS idx_campaign_messages_dispatch_queue
+    ON public.campaign_messages (scheduled_at)
+    WHERE status = 'pending' AND scheduled_at IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- RLS deny-all (matches the canonical pattern across all core tables)
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.sequences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sequence_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sequence_variants ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.sequences, public.sequence_steps, public.sequence_variants
+    FROM anon, authenticated, PUBLIC;
+
+DO $$ BEGIN
+    CREATE POLICY sequences_deny_all ON public.sequences
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE POLICY sequence_steps_deny_all ON public.sequence_steps
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE POLICY sequence_variants_deny_all ON public.sequence_variants
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+COMMENT ON COLUMN public.sequence_steps.thread_with_prior IS
+    'When true, dispatch builds the send payload with empty subject + in_reply_to set to the prior step provider_message_id. Instantly + Resend interpret blank-subject as Re: <prior> continuation. Research-pinned: steps 1-3 thread, step 4+ optionally breaks.';
+COMMENT ON COLUMN public.sequence_steps.branch_condition IS
+    'always = advance unconditionally on any non-failure event. no_reply = advance only when prior step status reaches sent without replied. no_open = LinkedIn-only (no open detected by reminder). connection_accepted = LinkedIn-only Phase 17. replied = advance FROM reply event (positive-reply nurture branch).';
+COMMENT ON COLUMN public.sequence_variants.weight IS
+    'Variant selector (Phase 15.3) draws weighted-random from the per-step variant set. Weight is a positive integer; values are normalized by the selector. Default 50 = equal split for two A/B variants.';
+COMMENT ON COLUMN public.campaign_messages.scheduled_at IS
+    'When dispatch_tick should attempt the send. NULL on rows generated by the legacy single-shot path (pre-Phase 15.2). Partial index idx_campaign_messages_dispatch_queue covers (status=pending AND scheduled_at IS NOT NULL) for the dispatch worker hot path.';
