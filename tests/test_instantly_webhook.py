@@ -79,7 +79,14 @@ class _RecordingDb:
         chain.eq.side_effect = lambda col, val, c=chain: (
             c._where.__setitem__(col, val) or c
         )
-        chain.in_.return_value = chain
+        # `.in_("status", ["pending","sent"])` — record under a list-aware key.
+        chain.in_.side_effect = lambda col, vals, c=chain: (
+            c._where.__setitem__(f"{col}__in", list(vals)) or c
+        )
+        # `.is_("provider_message_id", "null")` — record under an is-key.
+        chain.is_.side_effect = lambda col, val, c=chain: (
+            c._where.__setitem__(f"{col}__is", val) or c
+        )
         chain.limit.return_value = chain
 
         def insert(rows):
@@ -228,19 +235,46 @@ class TestIdempotency:
 
 
 class TestEventTransitions:
-    def test_email_sent_event_is_captured_but_no_update(self, client, _patch_db_and_limiter):
-        """email_sent does NOT write campaign_messages until Phase 14.3.
-
-        The naive UPDATE-by-status='pending' predicate would bulk-stamp
-        every pending row across every campaign with the same
-        provider_message_id, then subsequent bounce/reply webhooks would
-        cascade-match the entire bulk-stamped set. The handler defers
-        until the dispatcher round-trips provider_message_id at push
-        time (Phase 14.3); webhook_events still captures the payload.
-        """
+    def test_email_sent_with_lds_message_id_stamps_provider_message_id(
+        self, client, _patch_db_and_limiter,
+    ):
+        """Phase 14.3: email_sent does a first-hit-wins UPDATE targeting
+        ``id = lds_message_id`` with ``provider_message_id IS NULL``
+        predicate. Replays match zero rows and no-op."""
         body = _body(
             "evt-sent-1", "email_sent",
             provider_message_id="instantly-msg-001",
+            recipient_email="r@x.com",
+            sent_at="2026-05-25T10:00:00Z",
+            custom_variables={"lds_message_id": "11111111-2222-3333-4444-555555555555"},
+        )
+        resp = client.post(
+            "/webhooks/instantly",
+            content=body,
+            headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
+        )
+        assert resp.status_code == 200
+        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        sent_updates = [u for u in cms_updates if u[1].get("status") == "sent"]
+        assert len(sent_updates) == 1, f"expected 1 sent UPDATE; got {sent_updates}"
+        _, set_clause, where = sent_updates[0]
+        # SET clause: provider_message_id + status + sent_at
+        assert set_clause["provider_message_id"] == "instantly-msg-001"
+        assert set_clause["sent_at"] == "2026-05-25T10:00:00Z"
+        # Predicate: id = lds_message_id AND provider_message_id IS NULL
+        # (first-hit-wins replay guard)
+        assert where["id"] == "11111111-2222-3333-4444-555555555555"
+        assert where.get("provider_message_id__is") == "null"
+
+    def test_email_sent_without_lds_message_id_is_legacy_no_op(
+        self, client, _patch_db_and_limiter,
+    ):
+        """Legacy / pre-14.3 events without custom_variables.lds_message_id
+        cannot identify the row — handler logs + skips the UPDATE rather
+        than fall back to the pre-14.3 bulk-stamp footgun."""
+        body = _body(
+            "evt-sent-legacy", "email_sent",
+            provider_message_id="instantly-msg-legacy",
             recipient_email="r@x.com",
         )
         resp = client.post(
@@ -249,16 +283,10 @@ class TestEventTransitions:
             headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
         )
         assert resp.status_code == 200
-        # Event row landed in webhook_events for replay.
-        events = _patch_db_and_limiter.inserts.get("webhook_events", [])
-        assert any(r.get("event_id") == "evt-sent-1" for r in events)
-        # CRITICAL: no campaign_messages UPDATE — the bulk-stamp footgun.
+        # Event captured for replay; no campaign_messages.status='sent' UPDATE.
         cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
-        # checkpoint UPDATEs target webhook_events, not campaign_messages,
-        # so cms_updates should be empty.
         assert not any(u[1].get("status") == "sent" for u in cms_updates), (
-            f"email_sent must not transition campaign_messages.status until "
-            f"Phase 14.3 wires the dispatcher round-trip; got {cms_updates}"
+            f"legacy email_sent without lds_message_id must be a no-op; got {cms_updates}"
         )
 
     def test_email_bounced_updates_status_and_inserts_suppression(
@@ -331,7 +359,78 @@ class TestEventTransitions:
         )
         assert resp.status_code == 200
         cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
-        assert any(u[1].get("status") == "replied" for u in cms_updates)
+        replied_updates = [u for u in cms_updates if u[1].get("status") == "replied"]
+        assert len(replied_updates) == 1
+        # Phase 14.3: reply UPDATE enforces state-machine `sent → replied`.
+        assert replied_updates[0][2].get("status__in") == ["sent"]
+
+    def test_race_bounce_before_sent_still_inserts_suppression(
+        self, client, _patch_db_and_limiter,
+    ):
+        """Documented race: Instantly's background workers don't guarantee
+        ordering between email_sent and email_bounced. If bounce arrives
+        first, the row's provider_message_id is still NULL and the
+        campaign_messages UPDATE matches zero rows. Suppression INSERT
+        still fires via recipient_email — that's the load-bearing
+        defense for the next-send cycle."""
+        body = _body(
+            "evt-bounce-orphan", "email_bounced",
+            provider_message_id="instantly-msg-orphan",
+            recipient_email="orphan-bounce@x.com",
+            bounce_reason="550 unreachable",
+        )
+        resp = client.post(
+            "/webhooks/instantly",
+            content=body,
+            headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
+        )
+        assert resp.status_code == 200
+        # The UPDATE call was issued (predicate is what determines the
+        # 0-row match, not whether we asked); for the mock it lands in
+        # updates list either way. The KEY assertion is the suppression
+        # INSERT fires on recipient_email regardless.
+        sup_rows = _patch_db_and_limiter.inserts.get("suppressions", [])
+        assert any(
+            r.get("identifier_value") == "orphan-bounce@x.com"
+            and r.get("reason") == "bounce_hard"
+            for r in sup_rows
+        ), "suppression must INSERT via recipient_email even on race"
+
+    def test_email_sent_replay_uses_first_hit_wins_predicate(
+        self, client, _patch_db_and_limiter,
+    ):
+        """Replay coverage: same lds_message_id seen twice. Both webhook
+        deliveries reach the handler (idempotency on event_id collapses
+        only at webhook_events; the side-effects path runs each time)."""
+        common_msg_id = "22222222-3333-4444-5555-666666666666"
+        body1 = _body(
+            "evt-sent-replay-1", "email_sent",
+            provider_message_id="msg-A",
+            custom_variables={"lds_message_id": common_msg_id},
+        )
+        body2 = _body(
+            "evt-sent-replay-2", "email_sent",
+            provider_message_id="msg-A",
+            custom_variables={"lds_message_id": common_msg_id},
+        )
+        for b in (body1, body2):
+            resp = client.post(
+                "/webhooks/instantly",
+                content=b,
+                headers={"X-Signature": _sign(b), "X-Timestamp": _now_ts()},
+            )
+            assert resp.status_code == 200
+        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        sent_updates = [u for u in cms_updates if u[1].get("status") == "sent"]
+        # Each call generates one UPDATE (mock can't enforce predicate-
+        # based zero-row no-op without simulating row state). The KEY
+        # assertion is the predicate carries the IS NULL guard so a
+        # REAL Postgres execute would match zero rows on the second call.
+        assert len(sent_updates) == 2
+        for _, _, where in sent_updates:
+            assert where.get("provider_message_id__is") == "null", (
+                "every email_sent UPDATE must carry the IS NULL replay guard"
+            )
 
     def test_unknown_event_type_still_stored_no_transition(
         self, client, _patch_db_and_limiter,

@@ -129,9 +129,41 @@ Calling `send()` raises `NotImplementedError` — the DispatcherRouter
 | `campaign_messages` | `thread_id`, `in_reply_to_message_id`, `tracking_id UUID DEFAULT gen_random_uuid() UNIQUE` | PR β (Phase 14.2) |
 | `webhook_events` | `(provider, event_id) UNIQUE` idempotency table; provider CHECK allowlist; RLS deny-all; partial index on `processed_at IS NULL` | PR γ (Phase 14.2) |
 | `campaign_messages.status` | allowlist extended with `'unsubscribed'` | PR γ (Phase 14.2) |
+| `campaign_messages.id` | echoed back via `custom_variables.lds_message_id` so the email_sent webhook does a first-hit-wins targeted UPDATE | Phase 14.3 |
 
 Webhook security (HMAC + replay window + idempotency): see
 [`docs/integrations/webhook-security.md`](webhook-security.md).
+
+### State machine (Phase 14.3 close-out)
+
+```
+pending  ──► sent  ──► replied
+   │           │
+   │           ├──► bounced (terminal)
+   │           └──► unsubscribed (terminal)
+   │
+   └──► bounced (send_failed path — dispatcher-side API rejection)
+```
+
+Transitions:
+
+- `pending → sent`: `email_sent` webhook. Predicate `id = lds_message_id
+  AND provider_message_id IS NULL` (first-hit-wins replay guard).
+- `pending|sent → bounced`: `email_bounced` webhook OR dispatcher-side
+  `mark_send_failed` for API-level rejection (auth/rate/validation).
+- `pending|sent|replied → unsubscribed`: `email_unsubscribed`
+  webhook. `replied` is included because a recipient can legitimately
+  reply positively then later opt out. `bounced → unsubscribed` is
+  excluded — terminal state.
+- `sent → replied`: `email_replied` webhook. Strictly `sent`-only;
+  reply on `pending` is impossible (send hadn't happened) and reply
+  on `bounced`/`unsubscribed` is excluded as inconsistent.
+
+Every transition is implemented via PostgREST chain-API UPDATEs that
+carry the state-machine predicate inline (`.in_("status", [...])`).
+Replay-safe; out-of-order events from Instantly's background workers
+degrade gracefully (the bounce-before-sent race documented in
+`src/repositories/campaign_message_repo.py` module docstring).
 
 Suppression precheck is **fail-OPEN**: a transient PostgREST blip
 returns an empty suppression set rather than blocking the dispatch.

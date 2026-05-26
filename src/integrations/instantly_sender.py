@@ -142,6 +142,7 @@ class InstantlyDispatcher(EmailDispatcher):
         leads: list[LdsLeadRow],
         campaign_id: Optional[str] = None,
         personalizations: Optional[dict[str, str]] = None,
+        message_ids: Optional[dict[str, str]] = None,
     ) -> InstantlyPushResult:
         """Push 1..N LDS leads to an Instantly campaign in batches.
 
@@ -149,6 +150,16 @@ class InstantlyDispatcher(EmailDispatcher):
         AI-personalization layer (Phase 15) writes its output here; for
         the bare bulk-add path it can be omitted, in which case
         Instantly will fall back to its campaign-level template.
+
+        ``message_ids`` (Phase 14.3) maps ``unique_key → campaign_messages
+        .id`` (stringified UUID). When provided, every lead's payload
+        carries ``custom_variables.lds_message_id`` so the email_sent
+        webhook can round-trip ``provider_message_id`` back to the exact
+        originating row. Without this arg the webhook handler's
+        ``mark_sent`` path is a no-op (matches the lds_message_id-absent
+        contract). Callers in the dispatch loop (Phase 15) must
+        pre-create the campaign_messages row with status='pending'
+        BEFORE calling push_leads so the lookup ID exists.
 
         Suppression precheck is a single batch SELECT against
         ``suppressions`` filtered to (identifier_type='email', channel ∈
@@ -194,11 +205,13 @@ class InstantlyDispatcher(EmailDispatcher):
             if email.lower() in suppressed:
                 skipped_count += 1
                 continue
+            uk = lead.get("unique_key") or ""
             payloads.append(
                 InstantlyLeadPayload.from_lds_lead(
                     lead,
-                    personalization=(personalizations or {}).get(lead.get("unique_key") or ""),
+                    personalization=(personalizations or {}).get(uk),
                     dispatched_at=dispatched_at,
+                    lds_message_id=(message_ids or {}).get(uk),
                 )
             )
 
