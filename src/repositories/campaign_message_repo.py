@@ -492,6 +492,134 @@ class CampaignMessageRepository:
             return 0
         return len(getattr(res, "data", None) or [])
 
+    # ----- Phase 15.4 advance + cancel surface ----------------------------
+
+    async def cancel_pending_steps_for_lead(
+        self,
+        lead_unique_key: str,
+        *,
+        sequence_id: Optional[str] = None,
+        reason: str = "terminal_event",
+    ) -> int:
+        """Cancel ``status='pending'`` rows for a lead.
+
+        ``sequence_id`` semantics:
+          * concrete UUID → per-sequence cancel (used by reply / bounce
+            handlers — terminal event on one sequence shouldn't kill
+            other unrelated sequences for the same lead)
+          * ``None`` → cross-sequence cancel (used by unsubscribe —
+            opt-out kills every pending touch for this lead)
+
+        **Known race** (documented in
+        ``docs/sequencing-architecture.md`` § Known races):
+
+        Rows in ``status='dispatching'`` (claimed by the current tick,
+        in-flight to Instantly) are NOT cancelled here — predicate is
+        ``status='pending'`` only. Those messages WILL go out. The
+        webhook handler's cancellation logic re-fires on each
+        subsequent _sent event for newly-cancelled-but-already-sent
+        rows so the NEXT step gets cancelled. Mitigations: small
+        dispatch batch (100 rows, <10 s) shrinks the window; Instantly
+        server-side reply-pause is belt-and-braces; the suppression
+        table blocks redelivery to unsubscribed addresses regardless
+        of in-flight ticks.
+
+        Returns the count of cancelled rows.
+        """
+        if not self._db or not lead_unique_key:
+            return 0
+        try:
+            chain = (
+                self._db.table(self.TABLE_NAME)
+                .update({
+                    "status": "cancelled",
+                    "bounce_reason": f"cancelled:{reason}"[:200],
+                })
+                .eq("lead_unique_key", lead_unique_key)
+                .eq("status", "pending")
+            )
+            if sequence_id is not None:
+                chain = chain.eq("sequence_id", sequence_id)
+            res = await asyncio.to_thread(lambda: chain.execute())
+        except Exception:
+            logger.exception(
+                "cancel_pending_steps_for_lead failed (lead=%s seq=%s)",
+                lead_unique_key, sequence_id,
+            )
+            return 0
+        cancelled = len(getattr(res, "data", None) or [])
+        if cancelled:
+            logger.info(
+                "cancel_pending_steps_for_lead cancelled %d row(s)",
+                cancelled,
+                extra={
+                    "lead_unique_key": lead_unique_key,
+                    "sequence_id": sequence_id,
+                    "reason": reason,
+                },
+            )
+        return cancelled
+
+    async def insert_next_step_row(
+        self,
+        *,
+        lead_unique_key: str,
+        campaign_id: str,
+        sequence_id: str,
+        step_id: str,
+        channel: str,
+        scheduled_at_iso: str,
+        in_reply_to_message_id: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Insert the next-step ``campaign_messages`` row in the
+        sequence-advance path. Returns the inserted row on success;
+        ``None`` on UNIQUE collision (idempotent — duplicate _sent
+        webhook replay) OR any other failure.
+
+        The 23505 collision is the canonical idempotency lock — the
+        partial index ``uniq_message_per_lead_sequence_step``
+        prevents two _sent retries from each creating a next-step
+        row. The repo translates 23505 into None; the webhook
+        handler logs + continues.
+        """
+        if not (lead_unique_key and campaign_id and sequence_id and step_id):
+            return None
+        payload: dict[str, Any] = {
+            "lead_unique_key": lead_unique_key,
+            "campaign_id": campaign_id,
+            "sequence_id": sequence_id,
+            "step_id": step_id,
+            "channel": channel,
+            "status": "pending",
+            "scheduled_at": scheduled_at_iso,
+            "in_reply_to_message_id": in_reply_to_message_id,
+        }
+        # Strip None so DB defaults (e.g. tracking_id) apply.
+        payload = {k: v for k, v in payload.items() if v is not None}
+        try:
+            res = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .insert(payload)
+                    .execute()
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — narrow inline
+            if _is_unique_violation_exc(exc):
+                logger.info(
+                    "insert_next_step_row UNIQUE collision (idempotent _sent "
+                    "replay; lead=%s seq=%s step=%s)",
+                    lead_unique_key, sequence_id, step_id,
+                )
+                return None
+            logger.exception(
+                "insert_next_step_row failed (lead=%s step=%s)",
+                lead_unique_key, step_id,
+            )
+            return None
+        data = getattr(res, "data", None) or []
+        return data[0] if data else None
+
     async def fetch_many(
         self,
         message_ids,
@@ -530,6 +658,18 @@ class CampaignMessageRepository:
             for r in (getattr(rows, "data", None) or [])
             if r.get("id")
         }
+
+
+def _is_unique_violation_exc(exc: Exception) -> bool:
+    """PostgREST surfaces 23505 either via ``.code`` attr or message
+    body. Phase 15.4 idempotent advance relies on this for the
+    duplicate _sent webhook replay case (see
+    ``insert_next_step_row``)."""
+    code = getattr(exc, "code", None)
+    if code == "23505":
+        return True
+    msg = str(exc).lower()
+    return "23505" in msg or "duplicate key" in msg
 
 
 def _now_iso() -> str:

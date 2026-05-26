@@ -1041,3 +1041,45 @@ DO $$ BEGIN
             'replied', 'bounced', 'unsubscribed', 'cancelled', 'failed'
         ));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ===========================================================================
+-- Phase 15.4 — campaign_messages.sequence_id + advance idempotency index
+-- ---------------------------------------------------------------------------
+-- Two additions for the webhook-driven sequence advancement flow:
+--
+-- 1. Denormalize sequence_id onto campaign_messages.
+--    The sequence FK lives transitively via step_id → sequence_steps.sequence_id,
+--    but the cancel_pending_steps_for_lead query needs a direct WHERE
+--    filter (lead_unique_key, sequence_id) that doesn't require a join.
+--    Trade-off: a tiny denorm vs a 2-table join per webhook event. For
+--    Phase 15.4 volume + cancel-on-reply latency budget, denorm wins.
+--    Backfill: NULL on legacy 15.1 rows (acceptable — partial index
+--    below excludes them; legacy single-shot semantics don't need
+--    cross-sequence cancellation).
+--
+-- 2. UNIQUE (lead_unique_key, sequence_id, step_id) WHERE status != 'cancelled'.
+--    Closes the advance-idempotency loop. Two _sent webhooks for the
+--    same message (Instantly retries) would each call
+--    advance_to_next_step → each tries to INSERT the next-step row.
+--    The UNIQUE constraint fails the second insert with 23505; the
+--    handler catches + logs (matches the pattern from #323
+--    webhook_events idempotency).
+--
+--    ``WHERE status != 'cancelled'`` lets a sequence re-advance through
+--    the same step after a cancel → re-resume cycle (operator action)
+--    without tripping the unique. Also excludes rows with NULL
+--    sequence_id so legacy single-shot rows don't block new
+--    sequence-aware inserts.
+-- ===========================================================================
+
+ALTER TABLE public.campaign_messages
+    ADD COLUMN IF NOT EXISTS sequence_id UUID REFERENCES public.sequences(id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_message_per_lead_sequence_step
+    ON public.campaign_messages (lead_unique_key, sequence_id, step_id)
+    WHERE status != 'cancelled'
+      AND sequence_id IS NOT NULL
+      AND step_id IS NOT NULL;
+
+COMMENT ON COLUMN public.campaign_messages.sequence_id IS
+    'Denormalized from step_id → sequence_steps.sequence_id (Phase 15.4). Lets cancel_pending_steps_for_lead filter per-sequence without a join. NULL on legacy 15.1 rows + single-shot pre-15 rows; partial UNIQUE index uniq_message_per_lead_sequence_step excludes those.';

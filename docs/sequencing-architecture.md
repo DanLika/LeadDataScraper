@@ -12,8 +12,89 @@ their mitigations, and the operator surface.
 |---|---|
 | 15.1 | Schema (sequences / sequence_steps / sequence_variants) + repository layer + drift gate updates |
 | 15.2 | Dispatch tick worker (Render Cron entry point) + send-window resolver + atomic claim |
-| **15.3 (this PR)** | Variant selector + Jinja2 SandboxedEnvironment template renderer + thread-continuation builder + batch-fetch repos (N+1 elimination) + dispatch_tick rewire |
-| 15.4 | Webhook-driven sequence advancement (cancel-pending on bounce/unsub/reply, advance-to-next-step on sent) |
+| 15.3 | Variant selector + Jinja2 SandboxedEnvironment template renderer + thread-continuation builder + batch-fetch repos (N+1 elimination) + dispatch_tick rewire |
+| **15.4 (this PR)** | Webhook-driven sequence advancement: schedule-on-advance on _sent, branch-condition gating, per-sequence cancel on bounce/reply, cross-sequence cancel on unsubscribe, advance idempotency via partial UNIQUE index |
+
+## Phase 15.4 — sequence advancement & cancellation
+
+### Schedule-on-advance (NOT gate-on-advance)
+
+A naive design would inspect `step.branch_condition` at advance time
+("`no_reply` → only advance if no reply"). That re-introduces the
+exact race we want to avoid: the `_replied` event might land after we
+already advanced + dispatched the next step.
+
+Shipped design:
+
+| Webhook event | Action |
+|---|---|
+| `_sent` | Advance to next sequential step UNLESS next step's `branch_condition == 'replied'` (reply-nurture branch — different track) |
+| `_replied` | Per-sequence `cancel_pending_steps_for_lead`; THEN advance into the `'replied'` branch if next step is marked that way |
+| `_bounced` | Per-sequence cancel; no advance |
+| `_unsubscribed` | **Cross-sequence** cancel (every pending touch for this lead, across every sequence); no advance |
+
+Net effect: the `no_reply` branch behaves correctly without
+gate-on-advance — `_sent` schedules the next step, then `_replied`
+cancels it if a reply arrives before the schedule fires. The
+`'replied'` branch is inverted: only `_replied` advances into it.
+
+### Advance idempotency
+
+`(lead_unique_key, sequence_id, step_id)` partial UNIQUE index (where
+`status != 'cancelled' AND sequence_id IS NOT NULL AND step_id IS NOT
+NULL`) prevents two `_sent` webhook replays from creating two next-step
+rows. PostgREST 23505 collision → `insert_next_step_row` returns
+`None` → advancer surfaces `reason='insert_skipped_or_duplicate'`.
+
+`campaign_messages.sequence_id` is denormalized from `step_id →
+sequence_steps.sequence_id` so cancel queries filter without a join.
+
+### Known races
+
+These trade-offs are explicit and documented in
+`src/repositories/campaign_message_repo.py::cancel_pending_steps_for_lead`:
+
+**1. In-flight `dispatching` rows escape cancellation.**
+
+`cancel_pending_steps_for_lead` predicate is `status='pending'` only.
+If the dispatch tick has claimed a row → `status='dispatching'` → row
+is in flight to Instantly when the reply webhook arrives, the row
+WILL be sent.
+
+Mitigations:
+- Dispatch tick batch claim is 100 rows, typical completion <10 s →
+  small window
+- Instantly's own server-side reply detection pauses campaign sends
+  as a fallback (belt-and-suspenders)
+- The suppression table (channel='all' for unsubscribes) blocks
+  redelivery to the same email regardless of in-flight ticks
+- The webhook handler's cancellation logic re-fires on each
+  subsequent `_sent` event for newly-cancelled-but-already-sent rows
+  so the NEXT step gets cancelled — recovery within one cron cycle
+
+**2. `_replied` arrives before `_sent` (Instantly background-worker
+ordering not guaranteed).**
+
+`mark_replied` predicate gates on `status='sent'` only — replied on
+pending matches zero rows. The reply cancellation still INSERTs the
+suppression + fires the per-sequence cancel; the advancer's replied-
+branch advance walks step_index+1 regardless.
+
+**3. Step+variant create race with advance.**
+
+Operator could edit a `sequence_step` while a `_sent` webhook is
+mid-advance. The advancer's `get_by_index(seq, step_index+1)` reads
+the latest state — if the operator inserted a new step, the next
+schedule reflects that. Considered intentional (operator wants the
+change to take effect immediately on next advance).
+
+### Step delay validation
+
+`SequenceStepRepository.create()` rejects `delay_days=0 AND
+delay_hours=0` when `step_index > 0`. The first step (`step_index=0`)
+is exempt — that's the initial send fired at campaign-activate time.
+A zero-delay step 2+ would schedule its row immediately upon prior-
+step advance, defeating the multi-touch cadence.
 
 ## Phase 15.3 — services layer
 

@@ -1346,6 +1346,41 @@ async def _instantly_handle_sent(
         },
     )
 
+    # Phase 15.4 — schedule the next step on the sequence. The advancer
+    # is idempotent via the (lead_unique_key, sequence_id, step_id)
+    # partial UNIQUE index, so a duplicate _sent webhook replay swallows
+    # the 23505 collision and returns advanced=False. Schedule-on-advance
+    # design (vs gate-on-advance) — see sequence_advancer module docstring.
+    msg_row = await _lookup_message_by_id(lds_message_id)
+    if msg_row and msg_row.get("sequence_id") and msg_row.get("step_id"):
+        from src.repositories.sequence_step_repo import SequenceStepRepository
+        from src.services.sequence_advancer import advance_to_next_step
+
+        step_repo = SequenceStepRepository(db.client)
+        try:
+            parsed_sent = datetime.fromisoformat(
+                sent_at_iso.replace("Z", "+00:00")
+            ) if sent_at_iso else None
+        except ValueError:
+            parsed_sent = None
+        advance_result = await advance_to_next_step(
+            current_message=msg_row,
+            step_repo=step_repo,
+            message_repo=repo,
+            event_type="sent",
+            sent_at=parsed_sent,
+        )
+        logger.info(
+            "email_sent advance",
+            extra={
+                "lds_message_id": lds_message_id,
+                "advanced": advance_result.advanced,
+                "reason": advance_result.reason,
+                "next_step_id": advance_result.next_step_id,
+                "scheduled_at": advance_result.scheduled_at,
+            },
+        )
+
 
 async def _instantly_handle_bounced(
     provider_msg_id: str,
@@ -1370,11 +1405,23 @@ async def _instantly_handle_bounced(
     next send cycle.
     """
     bounce_reason = str(payload.get("bounce_reason") or payload.get("reason") or "")[:200]
+    msg_row: Optional[dict] = None
     if provider_msg_id and db.client:
         from src.repositories.campaign_message_repo import CampaignMessageRepository
         repo = CampaignMessageRepository(db.client)
         await repo.mark_bounced(provider_msg_id, bounce_reason=bounce_reason)
+        msg_row = await _lookup_message_by_provider_id(provider_msg_id)
     if not recipient_email:
+        # Even without recipient, attempt the per-sequence cancel if
+        # we have the row context.
+        if msg_row and msg_row.get("lead_unique_key") and msg_row.get("sequence_id"):
+            from src.repositories.campaign_message_repo import CampaignMessageRepository
+            cancel_repo = CampaignMessageRepository(db.client)
+            await cancel_repo.cancel_pending_steps_for_lead(
+                msg_row["lead_unique_key"],
+                sequence_id=msg_row["sequence_id"],
+                reason="bounce",
+            )
         return
     from src.repositories.suppression_repo import SuppressionRepository
 
@@ -1388,6 +1435,19 @@ async def _instantly_handle_bounced(
         source_campaign_id=campaign_id_hint if _looks_like_uuid(campaign_id_hint) else None,
         notes=bounce_reason or None,
     )
+
+    # Phase 15.4 — per-sequence cancel. A bounce on this lead in this
+    # sequence kills downstream pending steps in the same sequence.
+    # Other sequences for the same lead stay alive (different
+    # campaign / context).
+    if msg_row and msg_row.get("lead_unique_key") and msg_row.get("sequence_id"):
+        from src.repositories.campaign_message_repo import CampaignMessageRepository
+        cancel_repo = CampaignMessageRepository(db.client)
+        await cancel_repo.cancel_pending_steps_for_lead(
+            msg_row["lead_unique_key"],
+            sequence_id=msg_row["sequence_id"],
+            reason="bounce",
+        )
 
 
 async def _instantly_handle_unsubscribed(
@@ -1405,23 +1465,62 @@ async def _instantly_handle_unsubscribed(
     Channel='all' on the suppression because unsubscribe = "stop
     everything from this sender". Bounces stay scoped to channel='email'.
     """
+    msg_row: Optional[dict] = None
     if provider_msg_id and db.client:
         from src.repositories.campaign_message_repo import CampaignMessageRepository
         repo = CampaignMessageRepository(db.client)
         await repo.mark_unsubscribed(provider_msg_id)
-    if not recipient_email:
-        return
-    from src.repositories.suppression_repo import SuppressionRepository
+        msg_row = await _lookup_message_by_provider_id(provider_msg_id)
 
-    suppression_repo = SuppressionRepository(db.client)
-    await suppression_repo.add(
-        "email",
-        recipient_email,
-        "unsubscribe",
-        channel="all",
-        source_provider="instantly",
-        source_campaign_id=campaign_id_hint if _looks_like_uuid(campaign_id_hint) else None,
-    )
+    if recipient_email:
+        from src.repositories.suppression_repo import SuppressionRepository
+
+        suppression_repo = SuppressionRepository(db.client)
+        await suppression_repo.add(
+            "email",
+            recipient_email,
+            "unsubscribe",
+            channel="all",
+            source_provider="instantly",
+            source_campaign_id=campaign_id_hint if _looks_like_uuid(campaign_id_hint) else None,
+        )
+
+    # Phase 15.4 — CROSS-SEQUENCE cancel. Unlike bounce/reply
+    # (per-sequence), an unsubscribe expresses "stop everything from
+    # this sender" — kills every pending touch for this lead across
+    # EVERY sequence. The channel='all' suppression above already
+    # blocks redelivery to the same address, but explicit
+    # cancel-pending saves dispatch cycles + makes the campaign
+    # accounting honest.
+    lead_uk = None
+    if msg_row:
+        lead_uk = msg_row.get("lead_unique_key")
+    # Fall back to a lead lookup by recipient_email if no row context.
+    if not lead_uk and recipient_email and db.client:
+        try:
+            lead_rows = await asyncio.to_thread(
+                lambda: (
+                    db.client.table("leads")
+                    .select("unique_key")
+                    .eq("email", recipient_email)
+                    .limit(1)
+                    .execute()
+                )
+            )
+            data = getattr(lead_rows, "data", None) or []
+            if data:
+                lead_uk = data[0].get("unique_key")
+        except Exception:
+            logger.exception("unsubscribe cross-sequence cancel lead lookup failed")
+
+    if lead_uk and db.client:
+        from src.repositories.campaign_message_repo import CampaignMessageRepository
+        cancel_repo = CampaignMessageRepository(db.client)
+        await cancel_repo.cancel_pending_steps_for_lead(
+            lead_uk,
+            sequence_id=None,  # cross-sequence
+            reason="unsubscribed_cross_channel",
+        )
 
 
 async def _instantly_handle_replied(provider_msg_id: str) -> None:
@@ -1443,6 +1542,94 @@ async def _instantly_handle_replied(provider_msg_id: str) -> None:
     from src.repositories.campaign_message_repo import CampaignMessageRepository
     repo = CampaignMessageRepository(db.client)
     await repo.mark_replied(provider_msg_id)
+
+    # Phase 15.4 — per-sequence cancel + replied-branch advance.
+    # Cancel ANY pending step in this sequence (kills the
+    # always/no_reply continuation). Then check whether the next
+    # step is the inverted 'replied' branch — if so, advance into it.
+    msg_row = await _lookup_message_by_provider_id(provider_msg_id)
+    if not (msg_row and msg_row.get("lead_unique_key") and msg_row.get("sequence_id")):
+        return
+    await repo.cancel_pending_steps_for_lead(
+        msg_row["lead_unique_key"],
+        sequence_id=msg_row["sequence_id"],
+        reason="reply_received",
+    )
+    # Replied-branch advance — only fires when the next step is
+    # marked branch_condition='replied'.
+    if msg_row.get("step_id"):
+        from src.repositories.sequence_step_repo import SequenceStepRepository
+        from src.services.sequence_advancer import advance_to_next_step
+
+        step_repo = SequenceStepRepository(db.client)
+        advance_result = await advance_to_next_step(
+            current_message=msg_row,
+            step_repo=step_repo,
+            message_repo=repo,
+            event_type="replied",
+        )
+        logger.info(
+            "email_replied advance",
+            extra={
+                "provider_message_id": provider_msg_id,
+                "advanced": advance_result.advanced,
+                "reason": advance_result.reason,
+            },
+        )
+
+
+async def _lookup_message_by_id(message_id: str) -> Optional[dict]:
+    """One-shot SELECT to enrich the row context after a mark_* call.
+
+    Phase 15.4's sequence_advancer needs the full row dict (with
+    sequence_id, step_id, lead_unique_key, provider_message_id) to
+    compute the next-step schedule. Repo's mark_* methods don't
+    return the row; this helper fetches it via the existing
+    PostgREST chain. Returns None on miss / error.
+    """
+    if not message_id or not db.client:
+        return None
+    try:
+        rows = await asyncio.to_thread(
+            lambda: (
+                db.client.table("campaign_messages")
+                .select("*")
+                .eq("id", message_id)
+                .limit(1)
+                .execute()
+            )
+        )
+    except Exception:
+        logger.exception("_lookup_message_by_id failed for %s", message_id)
+        return None
+    data = getattr(rows, "data", None) or []
+    return data[0] if data else None
+
+
+async def _lookup_message_by_provider_id(provider_msg_id: str) -> Optional[dict]:
+    """Mirror of :func:`_lookup_message_by_id` keyed on Instantly's
+    ``provider_message_id``. Used by bounce / unsub / reply
+    handlers (which receive provider id from the webhook payload,
+    not the lds_message_id custom variable)."""
+    if not provider_msg_id or not db.client:
+        return None
+    try:
+        rows = await asyncio.to_thread(
+            lambda: (
+                db.client.table("campaign_messages")
+                .select("*")
+                .eq("provider_message_id", provider_msg_id)
+                .limit(1)
+                .execute()
+            )
+        )
+    except Exception:
+        logger.exception(
+            "_lookup_message_by_provider_id failed for %s", provider_msg_id,
+        )
+        return None
+    data = getattr(rows, "data", None) or []
+    return data[0] if data else None
 
 
 def _looks_like_uuid(s) -> bool:
