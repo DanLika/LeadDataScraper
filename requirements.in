@@ -27,7 +27,7 @@ urllib3==2.7.0
 fastapi==0.121.0
 uvicorn==0.34.0
 python-multipart==0.0.29
-supabase==2.29.0
+supabase==2.30.0
 python-dotenv==1.2.2
 aiohttp==3.13.5
 # Transitive of aiohttp on Python 3.10 (Dockerfile base image
