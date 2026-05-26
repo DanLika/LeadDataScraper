@@ -203,21 +203,21 @@ Gap-analysis + phased action plan: [`docs/bookbed-crossover.md`](docs/bookbed-cr
 
 **Phase 13 = dogfood-only** (decided 2026-05-22): 13.14 crossover doc ✅, 13.1 hr-HR i18n ✅, 13.3 demo seed ✅, 13.5 DKIM/SPF/DMARC, 13.4 email dispatch, 13.15 two-week dogfood. Commercial items (Stripe billing, multi-tenancy, signup) belong in BookBed repos — see `docs/roadmap.md` "Later > Commercialization track".
 
-## Architecture patterns (2026-05-22; full notes: [`docs/sessions/2026-05-22-patterns.md`](docs/sessions/2026-05-22-patterns.md))
+## Architecture patterns
+Full notes: [`docs/sessions/2026-05-22-patterns.md`](docs/sessions/2026-05-22-patterns.md). Load-bearing one-liners:
+- **Layered (handler → service → repository)** — `backend/main.py` routing+auth+Pydantic; `src/services/<domain>.py` business logic on typed primitives, raises typed errors; `src/repositories/<domain>.py` PostgREST I/O. Campaigns is reference (PR #192); webhook_events (PR #344).
+- **Error hierarchy** (`src/errors.py`): `DomainError` → `NotFoundError`/`ValidationError`/`ConfigurationError`/`LeadError`/`EnrichmentError`/`AuditError`. Raise specific; `except Exception` only at outermost boundary; never echo `str(exc)`.
+- **Logging idiom**: inside `except` use `logger.exception(msg, *args)`. Never `error(..., exc_info=True)` long form.
+- **Quality ratchet** (`.github/workflows/quality-ratchet.yml`): 5 metrics vs `.quality-baselines.json`; never raise baseline to silence a finding.
+- **Test org**: `tests/{unit,integration,e2e,security,quality}/`. Markers `@pytest.mark.{slow,live,security,integration,e2e}`. Directory + marker BOTH required. **Contract test** required per new producer↔verifier pair — see [audit](docs/audits/2026-05-26-contract-test-audit.md).
+- **Constants modules**: `src/utils/constants.py` + `frontend/app/lib/constants.ts`. Parity invariant `MAX_UPLOAD_BYTES` == `MAX_PROXY_BODY_BYTES` (manual review).
+- **Quality reports** — weekly Monday: 11 trackers under `tests/quality/`.
 
-- **Layered (handler → service → repository)**: `backend/main.py` routing+auth+ratelimit+Pydantic; `src/services/<domain>.py` business logic on typed primitives, raises typed errors; `src/repositories/<domain>.py` PostgREST I/O. Campaigns is reference (PR #192).
-- **Error hierarchy** (`src/errors.py`): `DomainError` → `NotFoundError`/`ValidationError`/`ConfigurationError`/`LeadError`/`EnrichmentError`/`AuditError`. Raise specific; never `raise Exception(...)`. Catch `except Exception` ONLY at outermost boundary. Never echo `str(exc)`. `src/services/exceptions.py` is back-compat shim. 61 `except Exception` audit: 27 KEEP / 34 NARROW (see `tests/quality/exception-audit.md`).
-- **Logging**: inside `except` use `logger.exception(msg, *args)`. Never the long `error(..., exc_info=True)` form.
-- **Constants**: `src/utils/constants.py` + `frontend/app/lib/constants.ts`. Cross-language parity: `MAX_UPLOAD_BYTES` (Py) == `MAX_PROXY_BODY_BYTES` (TS); manual review enforcement.
-- **Quality ratchet** (`.github/workflows/quality-ratchet.yml`): 5 metrics vs `.quality-baselines.json`. ruff/mypy/pylint lower-is-better; eslint/semgrep must stay 0. NEVER raise baseline to silence finding. Comparator uses `subprocess.run(argv, shell=False)`.
-- **Test org**: `tests/{unit,integration,e2e,security,quality}/`. Markers: `@pytest.mark.{slow,live,security,integration,e2e}`. CI default `-m "not slow and not live"`. Directory + marker BOTH required. Path resolution: `Path(__file__).resolve().parents[N] / 'src' / ...`.
-- **Quality reports** — weekly Monday: 11 trackers under `tests/quality/` + `docs/architecture/` + `docs/tech-debt-register.md`.
+Known pre-existing failure: `tests/unit/test_logging_config.py::test_setup_logging` (test-ordering, defer).
 
-**Known pre-existing test failure**: `tests/unit/test_logging_config.py::test_setup_logging` (root logger INFO vs expected DEBUG). Test-ordering issue, defer.
-
-## i18n + email stack (Phase 13 dogfood prep)
-- **Cookie-only next-intl (PR #249)**: `frontend/i18n/{routing,request}.ts` + `messages/{en,hr}.json` + `LocaleSwitcher.tsx`. `NEXT_LOCALE` cookie (Max-Age=1y, SameSite=Lax, Secure prod). `withNextIntl(withSentryConfig(...))` plugin order. `layout.tsx` `force-dynamic`. **hr.json machine-quality** — needs native review. Full: [`docs/sessions/2026-05-23-dogfood-prep.md`](docs/sessions/2026-05-23-dogfood-prep.md).
-- **Email stack (PR #243, no wiring)**: [`docs/email-deliverability.md`](docs/email-deliverability.md) + [`docs/email-dispatch-architecture.md`](docs/email-dispatch-architecture.md). `Do NOT wire` gating until DNS green + Resend live + mail-tester 10/10. Domain `mail.leaddatascraper.com`. Resend EU. DMARC ramp `none → quarantine pct=25→50→100 → reject`. 5-PR sequence: ResendEmailSender HTTP (NOT SMTP — loses webhooks); schema additions; `POST /webhooks/resend` Svix HMAC; Render Cron dispatcher (per-domain 3/hr + global 50/day + 09:00–18:00 Europe/Sarajevo); `/campaigns/{id}/send` operator endpoint.
+## Phase 13 dogfood prep (i18n + email stack)
+- **next-intl cookie-only (PR #249)** — locale via `NEXT_LOCALE` cookie; `withNextIntl(withSentryConfig(...))` plugin order; `layout.tsx` `force-dynamic`. **hr.json machine-quality** — needs native review. Full: [`docs/sessions/2026-05-23-dogfood-prep.md`](docs/sessions/2026-05-23-dogfood-prep.md).
+- **Email stack (PR #243, no wiring)** — [`docs/email-deliverability.md`](docs/email-deliverability.md) + [`docs/email-dispatch-architecture.md`](docs/email-dispatch-architecture.md). Domain `mail.leaddatascraper.com`, Resend EU, DMARC ramp `none → quarantine → reject`. 5-PR sequence: ResendEmailSender (HTTP not SMTP), schema additions, `POST /webhooks/resend` Svix HMAC, Render Cron dispatcher (3/hr per-domain, 50/day, 09–18 Europe/Sarajevo), `/campaigns/{id}/send`. **Do NOT wire** until DNS green + mail-tester 10/10.
 
 ## context-mode — MANDATORY routing rules
 
@@ -256,17 +256,16 @@ Spawning subagents (Agent tool) — routing block auto-injected. Bash-type subag
 | `ctx upgrade` | Call `ctx_upgrade`, run returned shell command, display as checklist |
 
 ## Session log archive
-
-Detailed notes extracted to `docs/sessions/`:
-- [2026-05-22 patterns (PRs #185–#199)](docs/sessions/2026-05-22-patterns.md) — layered architecture / error hierarchy / logging / constants / quality ratchet / test organization.
-- [2026-05-23 drain (PRs #235–#251)](docs/sessions/2026-05-23-drain.md) — backend security headers (#238), WebVitals reportAllChanges (#242), TOTAL LEADS → `/stats` (#244), Insights GROUND TRUTH (#245), `request.state` hop (#246), REVOKE update_updated_at_column (#250), orchestrator visibility-pause (#233/#251).
-- [2026-05-23 Phase 15 audit](docs/sessions/2026-05-23-phase15-audit.md) — 13 findings → 6 PRs + 2 retractions; lessons (macOS `pkill -f X -f Y` LAST only; stale-build click no-op; Render `no-server` ≠ free-tier sleep).
-- [2026-05-23 crossover gaps (#227 #231 #237)](docs/sessions/2026-05-23-crossover-gaps.md) — COOP/CORP/XPCDP backport, `.gitignore` frontend/exports, P0a Sign Out retraction, docs-PR stack via sequential rebase.
-- [2026-05-23 branch hygiene](docs/sessions/2026-05-23-branch-hygiene.md) — HEAD swap BETWEEN turns under parallel sessions; mitigations.
-- [2026-05-23 phase16-t3 data/obs sweep](docs/sessions/2026-05-23-phase16-t3.md) — 21 sub-tasks; REVOKE account_deletions HIGH; `idx_leads_seo_score` MEDIUM.
-- [2026-05-23 dogfood prep (PRs #243 #247 #249)](docs/sessions/2026-05-23-dogfood-prep.md) — demo data + i18n + email plan.
-- [2026-05-23 BookBed crossover (PR #457 #255)](docs/sessions/2026-05-23-bookbed-crossover.md) — Phase B Step 2; overturned findings on `checkRateLimit` + firestore type-check coverage.
-- [2026-05-26 Phase 14+15 stack merge](docs/sessions/session_2026-05-26_phase14-15-stack.md) — 21 PRs merged; chained-PR base footgun + GH Actions outage degraded admin-merge.
+Detail in `docs/sessions/`:
+- [2026-05-22 patterns (#185–#199)](docs/sessions/2026-05-22-patterns.md) — layered arch / errors / logging / ratchet / test-org.
+- [2026-05-23 drain (#235–#251)](docs/sessions/2026-05-23-drain.md) — backend security headers, WebVitals, TOTAL LEADS, Insights, request.state, REVOKE, poller backoff.
+- [2026-05-23 Phase 15 audit](docs/sessions/2026-05-23-phase15-audit.md) — pkill LAST-flag, stale-build click, Render no-server lessons.
+- [2026-05-23 crossover gaps](docs/sessions/2026-05-23-crossover-gaps.md) — COOP/CORP backport, P0a retraction, docs-PR rebase stack.
+- [2026-05-23 branch hygiene](docs/sessions/2026-05-23-branch-hygiene.md) — HEAD-swap between turns; worktree-per-session mitigation.
+- [2026-05-23 phase16-t3 data/obs](docs/sessions/2026-05-23-phase16-t3.md) — REVOKE account_deletions, seo_score partial index.
+- [2026-05-23 dogfood prep](docs/sessions/2026-05-23-dogfood-prep.md) — demo data + i18n + email plan.
+- [2026-05-23 BookBed crossover](docs/sessions/2026-05-23-bookbed-crossover.md) — Phase B Step 2; rate-limit + firestore findings.
+- [2026-05-26 Phase 14+15 stack merge](docs/sessions/session_2026-05-26_phase14-15-stack.md) — 21 PRs; chained-base + GH outage admin-merge.
 
 ## Operational gotchas (load-bearing)
 
