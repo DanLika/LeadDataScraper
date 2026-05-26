@@ -47,10 +47,11 @@ from src.utils.logging_config import (
 from src.utils.stats_cache import stats_cache
 from src.utils.gemini_budget import BudgetExceededError, get_state as _get_gemini_budget_state
 from src.types.providers import WebhookProvider
+from src.repositories.webhook_event_repo import WebhookEventRepository
 
 # Single source-of-truth provider tag for the Instantly webhook ingest path.
 # Annotated WebhookProvider so a future widening of webhook_events_provider_allowed
-# CHECK that drops 'instantly' (or a typo) trips mypy before the DB.
+# CHECK that drops 'instantly' (or a typo) trips mypy at the repo boundary.
 _INSTANTLY_WEBHOOK_PROVIDER: WebhookProvider = "instantly"
 from fastapi.responses import FileResponse
 
@@ -1152,29 +1153,26 @@ async def webhook_instantly(request: Request, background_tasks: BackgroundTasks)
     if not db.client:
         return JSONResponse({"detail": "database unavailable"}, status_code=503)
 
-    # Idempotent insert. PostgREST surfaces 23505 as APIError on the
-    # second hit; we treat that as "already accepted" and return 200.
+    # Idempotent insert via repository. Duplicate (23505) → 200 with
+    # flag. Anything else propagates and becomes a 500 below.
     try:
-        await asyncio.to_thread(
-            lambda: (
-                db.client.table("webhook_events").insert({
-                    "provider": _INSTANTLY_WEBHOOK_PROVIDER,
-                    "event_id": event_id,
-                    "event_type": event_type,
-                    "payload": payload,
-                }).execute()
-            )
+        result = await WebhookEventRepository(db.client).insert_event(
+            provider=_INSTANTLY_WEBHOOK_PROVIDER,
+            event_id=event_id,
+            event_type=event_type,
+            payload=payload,
         )
-    except Exception as exc:  # noqa: BLE001 — narrow check inline
-        if _looks_like_unique_violation(exc):
-            # Duplicate — Instantly is replaying. 200 + flag the duplicate.
-            logger.info(
-                "instantly webhook duplicate event_id=%s",
-                event_id, extra={"event_id": event_id, "event_type": event_type},
-            )
-            return JSONResponse({"ok": True, "duplicate": True}, status_code=200)
+    except Exception:
         logger.exception("instantly webhook INSERT failed")
         return JSONResponse({"detail": "internal error"}, status_code=500)
+
+    if result.duplicate:
+        # Instantly is replaying. 200 + flag the duplicate.
+        logger.info(
+            "instantly webhook duplicate event_id=%s",
+            event_id, extra={"event_id": event_id, "event_type": event_type},
+        )
+        return JSONResponse({"ok": True, "duplicate": True}, status_code=200)
 
     # Process the event off the request path so Instantly's 2s timeout
     # is never the bottleneck. The background task updates
@@ -1190,18 +1188,6 @@ async def webhook_instantly(request: Request, background_tasks: BackgroundTasks)
         )
 
     return JSONResponse({"ok": True}, status_code=200)
-
-
-def _looks_like_unique_violation(exc: Exception) -> bool:
-    """Mirrors src.repositories.suppression_repo._is_unique_violation —
-    PostgREST surfaces unique violations as 23505 (PostgreSQL SQLSTATE)
-    either via the .code attribute on APIError, or as a substring of the
-    response body. Both surfaces checked so test mocks can fake either.
-    """
-    code = getattr(exc, "code", None)
-    if code == "23505":
-        return True
-    return "23505" in str(exc).lower() or "duplicate key" in str(exc).lower()
 
 
 async def _process_instantly_event(event_id: str, payload: dict) -> None:
