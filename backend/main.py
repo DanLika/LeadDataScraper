@@ -46,6 +46,12 @@ from src.utils.logging_config import (
 )
 from src.utils.stats_cache import stats_cache
 from src.utils.gemini_budget import BudgetExceededError, get_state as _get_gemini_budget_state
+from src.types.providers import WebhookProvider
+
+# Single source-of-truth provider tag for the Instantly webhook ingest path.
+# Annotated WebhookProvider so a future widening of webhook_events_provider_allowed
+# CHECK that drops 'instantly' (or a typo) trips mypy before the DB.
+_INSTANTLY_WEBHOOK_PROVIDER: WebhookProvider = "instantly"
 from fastapi.responses import FileResponse
 
 
@@ -1152,7 +1158,7 @@ async def webhook_instantly(request: Request, background_tasks: BackgroundTasks)
         await asyncio.to_thread(
             lambda: (
                 db.client.table("webhook_events").insert({
-                    "provider": "instantly",
+                    "provider": _INSTANTLY_WEBHOOK_PROVIDER,
                     "event_id": event_id,
                     "event_type": event_type,
                     "payload": payload,
