@@ -1,0 +1,32 @@
+name: CLAUDE.md size budget
+
+on:
+  pull_request:
+    paths:
+      - CLAUDE.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-md-size-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  size-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Enforce size budget
+        run: |
+          set -euo pipefail
+          SIZE=$(wc -c < CLAUDE.md)
+          echo "CLAUDE.md: $SIZE chars"
+          if [ "$SIZE" -ge 40000 ]; then
+            echo "::error file=CLAUDE.md::CLAUDE.md ($SIZE chars) breaches 40000 hard limit — extract content to docs/"
+            exit 1
+          fi
+          if [ "$SIZE" -ge 36000 ]; then
+            echo "::warning file=CLAUDE.md::CLAUDE.md ($SIZE chars) above 36000 soft-warn — start extracting content to docs/"
+          fi
