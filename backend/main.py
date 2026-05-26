@@ -1747,6 +1747,26 @@ async def read_capped(file: UploadFile, max_bytes: int) -> tuple[Optional[bytes]
         chunks.append(chunk)
     return b"".join(chunks), None
 
+
+def validate_csv_content(contents: bytes) -> Optional[JSONResponse]:
+    """Defense-in-depth magic-byte check after Content-Type allowlist.
+
+    Why: validate_csv_metadata trusts the client-supplied Content-Type; an
+    attacker can send any header. Pandas tolerates malformed input so
+    binary blobs don't reach a parser RCE, but rejecting at the boundary
+    keeps obvious abuse out of the background task queue + temp dir.
+
+    Null bytes don't appear in valid UTF-8 CSV. Common binary magic
+    bytes (ZIP/xlsx `PK\\x03\\x04`, PDF, PNG, GIF, ELF, Mach-O) all
+    fail the null-byte check OR are explicitly rejected.
+    """
+    head = contents[:1024]
+    if b"\x00" in head:
+        return error_response("File appears to be binary, not CSV.", status_code=400)
+    if head.startswith((b"PK\x03\x04", b"%PDF", b"\x89PNG", b"GIF8", b"\x7fELF")):
+        return error_response("File appears to be binary, not CSV.", status_code=400)
+    return None
+
 @app.post("/upload", dependencies=[Depends(verify_api_key)])
 @limiter.limit("5/minute")
 async def upload_leads(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
@@ -1760,6 +1780,9 @@ async def upload_leads(request: Request, background_tasks: BackgroundTasks, file
     contents, size_error = await read_capped(file, MAX_UPLOAD_BYTES)
     if size_error:
         return size_error
+    content_error = validate_csv_content(contents)
+    if content_error:
+        return content_error
 
     # Save uploaded file temporarily — UUID name under system tempdir to
     # prevent path traversal and keep uploads out of the cwd.
