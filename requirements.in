@@ -28,6 +28,11 @@ fastapi==0.121.0
 uvicorn==0.34.0
 python-multipart==0.0.29
 supabase==2.30.0
+# Phase 15.3 — Jinja2 sandbox + autoescape for the sequence_variants
+# body_template / subject_template rendering path. ~= pins minor so
+# patch updates flow via Dependabot without auto-accepting a 3.2
+# (Jinja2's sandbox has had bypass CVEs across minors: 2019, 2024).
+jinja2~=3.1.4
 python-dotenv==1.2.2
 aiohttp==3.13.5
 # Transitive of aiohttp on Python 3.10 (Dockerfile base image

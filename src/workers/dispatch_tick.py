@@ -152,34 +152,69 @@ async def run_tick(
         result.elapsed_seconds = _monotonic_now() - started
         return result
 
-    # 3. Re-check suppression across the full claimed batch. Pull lead
-    #    emails via lead_unique_key; the repo precheck takes addresses
-    #    as a list and returns (allowed, suppressed).
+    # 3. Phase 15.3 batch-fetch — 4 PostgREST calls regardless of claim
+    #    size, instead of N+1 per claimed row. Order:
+    #       fetch_many(leads)            ← lead_unique_keys
+    #       fetch_many(steps)            ← step_ids
+    #       fetch_many_for_steps(variants) ← step_ids
+    #       fetch_many(prior_messages)   ← in_reply_to_message_ids
+    from src.repositories.lead_repo import LeadRepository
+    from src.repositories.sequence_step_repo import SequenceStepRepository
+    from src.repositories.sequence_variant_repo import SequenceVariantRepository
+    from src.services.thread_builder import (
+        PriorMessageNotReadyError,
+        ThreadBuildError,
+        build_send_payload,
+    )
+    from src.services.template_renderer import TemplateError
+    from src.services.variant_selector import select_variant
+
+    lead_repo = LeadRepository(db)
+    step_repo = SequenceStepRepository(db)
+    variant_repo = SequenceVariantRepository(db)
+
+    lead_uks = {
+        str(r["lead_unique_key"])
+        for r in claimed
+        if r.get("lead_unique_key")
+    }
+    step_ids = {
+        str(r["step_id"]) for r in claimed if r.get("step_id")
+    }
+    prior_msg_ids = {
+        str(r["in_reply_to_message_id"])
+        for r in claimed
+        if r.get("in_reply_to_message_id")
+    }
+
+    try:
+        leads_by_uk = await lead_repo.fetch_many(lead_uks)
+        steps_by_id = await step_repo.fetch_many(step_ids)
+        variants_by_step = await variant_repo.fetch_many_for_steps(step_ids)
+        prior_msgs_by_id = await msg_repo.fetch_many(prior_msg_ids)
+    except Exception:  # noqa: BLE001 — single boundary catch
+        logger.exception("dispatch_tick batch fetch failed")
+        result.errors.append("batch_fetch_failed")
+        result.elapsed_seconds = _monotonic_now() - started
+        return result
+
+    # 4. Suppression precheck — emails now sourced from leads_by_uk
+    #    (the canonical projection) rather than the campaign_messages
+    #    placeholder field from Phase 15.2.
     emails_by_msg_id: dict[str, str] = {}
     for row in claimed:
-        # Defensive — claim returns supabase row dicts; the dispatcher
-        # path needs the lead's email. Phase 15.2 reads it from
-        # lead_unique_key via a separate lookup. Until then, expect
-        # the dispatch loop to have stamped the email on the row at
-        # generate-time (NOT done yet; see Phase 15.3 / 15.4 docs).
-        # If absent, the row is skipped as "no_email"; logged below.
         msg_id = str(row.get("id") or "")
-        # Lead email resolution placeholder — replaced when Phase 15.3
-        # wires the lead-row join into the claim payload. For now we
-        # consult campaign_messages-side cached fields if present.
-        candidate_email = (
-            row.get("recipient_email")
-            or row.get("email")
-            or ""
-        )
-        if msg_id and candidate_email:
-            emails_by_msg_id[msg_id] = candidate_email
+        uk = str(row.get("lead_unique_key") or "")
+        lead = leads_by_uk.get(uk, {})
+        email = str(lead.get("email") or "").strip().lower()
+        if msg_id and email:
+            emails_by_msg_id[msg_id] = email
 
     suppressed_set: set[str] = set()
     if emails_by_msg_id:
         try:
             _, blocked = await sup_repo.filter_suppressed(
-                list(emails_by_msg_id.values()), "email",
+                list(set(emails_by_msg_id.values())), "email",
             )
             suppressed_set = set(blocked)
         except Exception:
@@ -193,16 +228,48 @@ async def run_tick(
         result.elapsed_seconds = _monotonic_now() - started
         return result
 
-    # 4. Window check + suppression filter. Out-of-window OR suppressed
-    #    rows release the claim back to 'pending'. Counter increments
-    #    per skip-reason so the operator can see the breakdown.
-    eligible_msgs: list[dict[str, Any]] = []
+    # 5. Build the per-message dispatch payloads. Filter out:
+    #     * no_email          → release as 'failed' (lead deleted /
+    #                            email blanked since schedule)
+    #     * suppression       → release as 'cancelled'
+    #     * missing step      → release as 'failed' (legacy / orphan row)
+    #     * out-of-window     → release back to 'pending' with bumped
+    #                            scheduled_at
+    #     * no variants       → release as 'failed' (config bug)
+    #     * PriorMessageNotReadyError → release as 'pending' with
+    #                            +1h bump (race vs prior step's webhook)
+    #     * render error      → release as 'failed' with error reason
+    dispatch_impl = dispatcher or _resolve_dispatcher()
+    if dispatch_impl is None:
+        result.errors.append("dispatcher_unavailable")
+        result.elapsed_seconds = _monotonic_now() - started
+        return result
+
+    operator_name = (os.environ.get("OPERATOR_NAME") or "").strip()
+    operator_signature = (os.environ.get("OPERATOR_SIGNATURE") or "").strip()
+    unsubscribe_base = (os.environ.get("UNSUBSCRIBE_BASE_URL") or "").rstrip("/")
+
+    leads_payload: list[dict[str, Any]] = []
+    message_ids: dict[str, str] = {}
+
     for row in claimed:
         msg_id = str(row.get("id") or "")
-        if not msg_id:
+        uk = str(row.get("lead_unique_key") or "")
+        if not msg_id or not uk:
             continue
+
         email = emails_by_msg_id.get(msg_id, "")
-        if email and email in suppressed_set:
+        lead = leads_by_uk.get(uk)
+        if not email or not lead:
+            await _release_claim(
+                msg_repo, msg_id,
+                target_status="failed",
+                reason="no_email_or_lead_row",
+            )
+            result.failed += 1
+            continue
+
+        if email in suppressed_set:
             result.skipped_suppressed += 1
             await _release_claim(
                 msg_repo, msg_id,
@@ -210,18 +277,96 @@ async def run_tick(
                 target_status="cancelled",
             )
             continue
-        in_window, next_start = _window_check_for_row(row)
+
+        step_id = str(row.get("step_id") or "")
+        step = steps_by_id.get(step_id) if step_id else None
+        if not step:
+            await _release_claim(
+                msg_repo, msg_id,
+                target_status="failed",
+                reason="missing_step",
+            )
+            result.failed += 1
+            continue
+
+        in_window, next_start = _window_check_for_step(
+            step, lead_timezone=lead.get("timezone"),
+        )
         if not in_window:
             result.skipped_window += 1
             await _release_claim(
                 msg_repo, msg_id,
-                next_scheduled_at=next_start.isoformat() if next_start else None,
+                next_scheduled_at=(
+                    next_start.isoformat() if next_start else None
+                ),
                 target_status="pending",
             )
             continue
-        eligible_msgs.append(row)
 
-    if not eligible_msgs:
+        step_variants = variants_by_step.get(step_id) or []
+        chosen_variant = select_variant(
+            step_variants,
+            deterministic_seed=msg_id,
+        )
+        if not chosen_variant:
+            await _release_claim(
+                msg_repo, msg_id,
+                target_status="failed",
+                reason="no_variants",
+            )
+            result.failed += 1
+            continue
+
+        prior_id = str(row.get("in_reply_to_message_id") or "")
+        prior_message = prior_msgs_by_id.get(prior_id) if prior_id else None
+
+        unsubscribe_url = (
+            f"{unsubscribe_base}/u/{row.get('tracking_id') or ''}"
+            if unsubscribe_base and row.get("tracking_id")
+            else ""
+        )
+
+        try:
+            payload = build_send_payload(
+                lds_message_id=msg_id,
+                lead=lead,
+                step=step,
+                variant=chosen_variant,
+                prior_message=prior_message,
+                operator_name=operator_name,
+                operator_signature=operator_signature,
+                unsubscribe_url=unsubscribe_url,
+            )
+        except PriorMessageNotReadyError:
+            # Step N+1 scheduled before step N's webhook landed —
+            # bump +1h, leave pending. Sweeper handles longer outages.
+            from datetime import datetime, timedelta, timezone
+            bumped = (
+                datetime.now(timezone.utc) + timedelta(hours=1)
+            ).isoformat()
+            await _release_claim(
+                msg_repo, msg_id,
+                next_scheduled_at=bumped,
+                target_status="pending",
+            )
+            result.skipped_window += 1
+            continue
+        except (TemplateError, ThreadBuildError) as exc:
+            logger.exception(
+                "dispatch_tick payload build failed for msg=%s", msg_id,
+            )
+            await _release_claim(
+                msg_repo, msg_id,
+                target_status="failed",
+                reason=f"render_error:{type(exc).__name__}",
+            )
+            result.failed += 1
+            continue
+
+        leads_payload.append(payload.as_lead_dict())
+        message_ids[uk] = msg_id
+
+    if not leads_payload:
         result.elapsed_seconds = _monotonic_now() - started
         return result
 
@@ -230,31 +375,9 @@ async def run_tick(
         result.elapsed_seconds = _monotonic_now() - started
         return result
 
-    # 5+6. Dispatch. Today Instantly only; LinkedIn arrives Phase 17.
-    dispatch_impl = dispatcher or _resolve_dispatcher()
-    if dispatch_impl is None:
-        result.errors.append("dispatcher_unavailable")
-        # Don't mark_send_failed — operator misconfig, not row-level
-        # failure. Sweeper will re-pending these after the timeout.
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
-
-    # The dispatcher push path (Phase 14.1 + 14.3) expects lead rows +
-    # message_ids dict. Phase 15.2 packs both from the claimed rows
-    # using lead_unique_key as the join key. The full lead-row payload
-    # (with first_name / company_name / etc) lives on the leads table;
-    # for 15.2 the tick reads the minimal projection it can.
-    leads_payload: list[dict[str, Any]] = []
-    message_ids: dict[str, str] = {}
-    for row in eligible_msgs:
-        msg_id = str(row.get("id") or "")
-        uk = str(row.get("lead_unique_key") or "")
-        email = emails_by_msg_id.get(msg_id, "")
-        if not (msg_id and uk and email):
-            result.skipped_window += 0  # already counted above
-            continue
-        leads_payload.append({"unique_key": uk, "email": email})
-        message_ids[uk] = msg_id
+    # leads_payload + message_ids already populated by the per-message
+    # build loop above (Phase 15.3 rewire). The dispatcher push path
+    # (Phase 14.1 + 14.3) accepts the lead-row dicts directly.
 
     try:
         push_result = await dispatch_impl.push_leads(
@@ -262,7 +385,9 @@ async def run_tick(
             message_ids=message_ids,
         )
         result.dispatched = int(getattr(push_result, "success_count", 0))
-        result.failed = int(getattr(push_result, "failed_count", 0))
+        # Additive — result.failed already carries pre-dispatch rejects
+        # (no_email / missing_step / no_variants / render errors).
+        result.failed += int(getattr(push_result, "failed_count", 0))
     except Exception as exc:  # noqa: BLE001
         logger.exception("dispatch_tick dispatcher.push_leads failed")
         result.errors.append(f"dispatch_failed:{type(exc).__name__}")
@@ -335,23 +460,27 @@ async def _release_claim(
         )
 
 
-def _window_check_for_row(row: dict[str, Any]) -> tuple[bool, Optional[datetime]]:
-    """Resolve the step's window settings + ask the resolver.
-
-    The claimed row carries step_id; Phase 15.2 reads the step's
-    send_window_* fields via a single join. Until the dispatcher-loop
-    wiring lands (Phase 15.3 ships the step.id → step row join), the
-    tick falls back to the DispatchPolicy defaults from
-    ``src/utils/dispatch_policy.py``.
+def _window_check_for_step(
+    step: Any,
+    *,
+    lead_timezone: Optional[str] = None,
+) -> tuple[bool, Optional[datetime]]:
+    """Phase 15.3: window check uses the actual ``SequenceStep`` fields
+    (PR #325 dataclass). Falls back to ``DispatchPolicy`` defaults if
+    a field is empty (shouldn't happen given the DB NOT NULL defaults,
+    but defensive).
     """
     from src.utils.dispatch_policy import DISPATCH_POLICY
     from src.utils.send_window import is_within_window
 
     check = is_within_window(
-        step_send_window_start=row.get("step_send_window_start") or DISPATCH_POLICY.send_window_start,
-        step_send_window_end=row.get("step_send_window_end") or DISPATCH_POLICY.send_window_end,
-        step_send_days=row.get("step_send_days") or ",".join(DISPATCH_POLICY.send_days),
-        timezone_name=row.get("lead_timezone"),
+        step_send_window_start=getattr(step, "send_window_start", None)
+        or DISPATCH_POLICY.send_window_start,
+        step_send_window_end=getattr(step, "send_window_end", None)
+        or DISPATCH_POLICY.send_window_end,
+        step_send_days=getattr(step, "send_days", None)
+        or ",".join(DISPATCH_POLICY.send_days),
+        timezone_name=lead_timezone,
     )
     return check.in_window, check.next_window_start_utc
 

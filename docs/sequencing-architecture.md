@@ -10,10 +10,96 @@ their mitigations, and the operator surface.
 
 | PR | Scope |
 |---|---|
-| **15.1 (this PR)** | Schema (sequences / sequence_steps / sequence_variants) + repository layer + drift gate updates |
-| 15.2 | Dispatch tick worker (Render Cron entry point) + send-window resolver |
-| 15.3 | Variant selector + Jinja2 template renderer + thread-continuation builder |
+| 15.1 | Schema (sequences / sequence_steps / sequence_variants) + repository layer + drift gate updates |
+| 15.2 | Dispatch tick worker (Render Cron entry point) + send-window resolver + atomic claim |
+| **15.3 (this PR)** | Variant selector + Jinja2 SandboxedEnvironment template renderer + thread-continuation builder + batch-fetch repos (N+1 elimination) + dispatch_tick rewire |
 | 15.4 | Webhook-driven sequence advancement (cancel-pending on bounce/unsub/reply, advance-to-next-step on sent) |
+
+## Phase 15.3 — services layer
+
+Three new services + one orchestration layer between handlers and repos:
+
+- **`src/services/template_renderer.py`** — Jinja2 `SandboxedEnvironment`
+  with `StrictUndefined` + `select_autoescape` (HTML mode only).
+  `ALLOWED_VARS` allowlist enforced at variant-CREATE time via
+  `validate_template_vars()` (walks the Jinja2 AST — trim modifiers /
+  filters don't fool the check). `assert_cold_email_unsubscribe()`
+  rejects email variants that don't reference `{{ unsubscribe_url }}`
+  (RFC 8058 + Instantly AUP). `render()` filters the binding context
+  to ALLOWED_VARS before binding — extra keys silently dropped so an
+  unbounded lead row can't smuggle data into the template.
+
+- **`src/services/variant_selector.py`** — weighted-random selection
+  by `SequenceVariant.weight`. `deterministic_seed` kwarg honored ONLY
+  when env `VARIANT_SELECTOR_ALLOW_SEED=1` (literal "1", no whitespace
+  tolerance). Production env never sets the gate; pytest fixtures do.
+  Logs warning + falls through to `SystemRandom` when seed slips
+  through without the gate.
+
+- **`src/services/thread_builder.py`** — assembles `DispatchPayload`
+  (lds_message_id, lead_unique_key, email, subject, body,
+  in_reply_to_message_id, list_unsubscribe_url) from lead + step +
+  variant + optional prior_message. `step.thread_with_prior=True`
+  + missing prior's `provider_message_id` → raises
+  `PriorMessageNotReadyError`. Worker catches and reschedules
+  `scheduled_at += 1h` (race vs prior step's webhook delivery).
+
+- **`src/services/variant_service.py`** — orchestrates
+  `validate_template_vars` → `assert_cold_email_unsubscribe`
+  (channel-conditional) → `SequenceVariantRepository.create`.
+  Returns structured `CreateVariantResult(ok, variant, error_code,
+  error_message, disallowed_vars)`. Used by Phase 18 UI + future AI
+  generator.
+
+## Phase 15.3 — batch-fetch + N+1 prevention
+
+The dispatch tick (Phase 15.2) used placeholder
+`recipient_email` fields on the `campaign_messages` row. 15.3
+replaces with a 4-PostgREST-call batch-fetch pattern across the
+claimed batch:
+
+| Repo method | Returns | Backed by |
+|---|---|---|
+| `LeadRepository.fetch_many(unique_keys)` | `{unique_key → row}` | `WHERE unique_key IN (...)` |
+| `SequenceStepRepository.fetch_many(step_ids)` | `{step_id → SequenceStep}` | `WHERE id IN (...)` |
+| `SequenceVariantRepository.fetch_many_for_steps(step_ids)` | `{step_id → list[SequenceVariant]}` | `WHERE step_id IN (...)` ordered by `variant_label` |
+| `CampaignMessageRepository.fetch_many(message_ids)` | `{id → row}` | `WHERE id IN (...)` |
+
+Total SELECTs per tick: 4 (not 4×N). Pinned by
+`tests/unit/test_batch_fetch_n1.py::TestN1Prevention`.
+
+## Phase 15.3 — dispatch_tick rewire
+
+Per-message build loop (replaces the 15.2 placeholder filter):
+
+```
+for row in claimed:
+    1. resolve lead via leads_by_uk[row.lead_unique_key]
+       - missing → release as 'failed' (no_email_or_lead_row)
+    2. suppression check
+       - hit → release as 'cancelled' (channel='all' suppression)
+    3. resolve step via steps_by_id[row.step_id]
+       - missing → release as 'failed' (missing_step)
+    4. send-window check using step's own send_window_*
+       - out → release as 'pending', scheduled_at = next_window_start_utc
+    5. variant select via select_variant(variants_by_step[step_id])
+       - empty → release as 'failed' (no_variants)
+    6. build_send_payload(lead, step, variant, prior_message=...)
+       - PriorMessageNotReadyError → release as 'pending', scheduled_at += 1h
+       - TemplateError → release as 'failed' with error reason
+    7. append payload.as_lead_dict() to leads_payload + register message_id
+```
+
+Survivors go to `dispatcher.push_leads(leads, message_ids)`.
+
+## Configuration
+
+| Env var | Purpose |
+|---|---|
+| `OPERATOR_NAME` | Injected as `{{ operator_name }}` in every render |
+| `OPERATOR_SIGNATURE` | Injected as `{{ operator_signature }}` |
+| `UNSUBSCRIBE_BASE_URL` | Base for `{{ unsubscribe_url }}` = `<base>/u/<tracking_id>` |
+| `VARIANT_SELECTOR_ALLOW_SEED` | TEST ONLY — literal `1` enables deterministic seed path. NEVER set in production. |
 
 ## Schema diagram
 

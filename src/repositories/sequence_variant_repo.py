@@ -135,6 +135,48 @@ class SequenceVariantRepository:
         data = getattr(res, "data", None) or []
         return _row_to_variant(data[0]) if data else None
 
+    async def fetch_many_for_steps(
+        self,
+        step_ids,
+    ) -> dict[str, list[SequenceVariant]]:
+        """Return ``step_id → list[SequenceVariant]`` for the given steps.
+
+        Single PostgREST round trip (``WHERE step_id IN (...)``). Phase
+        15.3 dispatch tick calls this once per claim batch and feeds
+        the per-step variant lists into :func:`variant_selector.select_variant`.
+        Variants within each step are ordered by ``variant_label`` so
+        deterministic-seed tests see a stable A,B,C order.
+        """
+        if not self._db:
+            return {}
+        ids = [s for s in (step_ids or []) if s]
+        if not ids:
+            return {}
+        unique_inputs = list(dict.fromkeys(ids))
+        try:
+            rows = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .select("*")
+                    .in_("step_id", unique_inputs)
+                    .order("variant_label", desc=False)
+                    .execute()
+                )
+            )
+        except Exception:
+            logger.exception(
+                "SequenceVariantRepository.fetch_many_for_steps failed for %d ids",
+                len(unique_inputs),
+            )
+            return {}
+        by_step: dict[str, list[SequenceVariant]] = {sid: [] for sid in unique_inputs}
+        for r in (getattr(rows, "data", None) or []):
+            step_id = r.get("step_id")
+            if not step_id:
+                continue
+            by_step.setdefault(step_id, []).append(_row_to_variant(r))
+        return by_step
+
 
 def _is_unique_violation(exc: Exception) -> bool:
     code = getattr(exc, "code", None)

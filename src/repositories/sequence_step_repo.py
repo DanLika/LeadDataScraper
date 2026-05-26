@@ -165,6 +165,43 @@ class SequenceStepRepository:
         data = getattr(res, "data", None) or []
         return _row_to_step(data[0]) if data else None
 
+    async def fetch_many(
+        self,
+        step_ids,
+    ) -> dict[str, SequenceStep]:
+        """Return a ``step_id → SequenceStep`` mapping for the given ids.
+
+        Single PostgREST round trip (``WHERE id IN (...)``). Phase 15.3
+        dispatch tick uses this to fan out step data across the
+        100-message claim batch without N+1 lookups.
+        """
+        if not self._db:
+            return {}
+        ids = [s for s in (step_ids or []) if s]
+        if not ids:
+            return {}
+        unique_inputs = list(dict.fromkeys(ids))
+        try:
+            rows = await asyncio.to_thread(
+                lambda: (
+                    self._db.table(self.TABLE_NAME)
+                    .select("*")
+                    .in_("id", unique_inputs)
+                    .execute()
+                )
+            )
+        except Exception:
+            logger.exception(
+                "SequenceStepRepository.fetch_many failed for %d ids",
+                len(unique_inputs),
+            )
+            return {}
+        return {
+            r["id"]: _row_to_step(r)
+            for r in (getattr(rows, "data", None) or [])
+            if r.get("id")
+        }
+
 
 def _is_unique_violation(exc: Exception) -> bool:
     """PostgREST surfaces 23505 either via .code attr or message body."""
