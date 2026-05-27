@@ -235,13 +235,13 @@ class CampaignMessageRepository:
         *,
         error: str,
     ) -> MarkResult:
-        """Transition pending → bounced after Instantly /leads/add rejects.
+        """Transition dispatching → bounced after Instantly /leads/add rejects.
 
-        Path: dispatcher pushed the lead, API returned 400/422/etc., the
-        row never made it through. Subsequent webhooks won't fire (the
-        send never happened). We mark bounced with a synthetic
-        ``bounce_reason`` so the campaign-messages export tells the
-        operator what happened.
+        Path: dispatch_tick claimed the row (pending → dispatching),
+        then push_leads returned a per-lead error (400/402/422/etc.).
+        The send never happened so no webhook will fire. We mark
+        bounced with a synthetic ``bounce_reason`` so the
+        campaign-messages export tells the operator what happened.
 
         The state-machine transition is intentionally re-using 'bounced'
         — Instantly's failure modes (auth, rate, validation) are all
@@ -261,7 +261,7 @@ class CampaignMessageRepository:
                         "bounce_reason": f"send_failed: {error}"[:200],
                     })
                     .eq("id", lds_message_id)
-                    .eq("status", "pending")
+                    .eq("status", "dispatching")
                     .execute()
                 )
             )
