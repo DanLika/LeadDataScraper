@@ -37,12 +37,11 @@ export async function updateSession(
           })
           // Cookie floor lives in cookie-floor.mjs (pure helper, unit-tested).
           // Supabase can tighten (Strict / longer maxAge) but never loosen.
-          const isProd = process.env.NODE_ENV === 'production'
           cookiesToSet.forEach(({ name, value, options }) => {
             supabaseResponse.cookies.set(
               name,
               value,
-              hardenCookieOptions(options, isProd),
+              hardenCookieOptions(options),
             )
           })
         },
