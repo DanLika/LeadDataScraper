@@ -3,6 +3,7 @@ import base64
 import csv
 import io
 import json
+import re
 import zipfile
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends, Query, Security, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -884,6 +885,18 @@ _UNSUB_SUCCESS_HTML = (
     "<p>You will not receive further messages from this sender.</p></body></html>"
 )
 
+# Tight CSP for the only HTML route the backend serves. XFO=DENY (stamped
+# by _security_headers_middleware) handles clickjack; this layer defends
+# against future drift (e.g. if someone later adds inline JS / external
+# resources). form-action 'self' keeps the POST same-origin even if the
+# action attribute is ever rewritten.
+_UNSUB_HTML_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'none'; form-action 'self'; "
+        "style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+    ),
+}
+
 
 async def _suppress_from_unsubscribe_token(token: str) -> bool:
     """Verify ``token`` and insert the matching suppression row.
@@ -1019,8 +1032,14 @@ async def unsubscribe_confirm(request: Request, token: str):
     """
     # Length-bound the token before doing anything else.
     if not token or len(token) > 200:
-        return HTMLResponse(content=_UNSUB_FAILURE_HTML, status_code=410)
-    return HTMLResponse(content=_UNSUB_CONFIRM_HTML, status_code=200)
+        return HTMLResponse(
+            content=_UNSUB_FAILURE_HTML, status_code=410,
+            headers=_UNSUB_HTML_HEADERS,
+        )
+    return HTMLResponse(
+        content=_UNSUB_CONFIRM_HTML, status_code=200,
+        headers=_UNSUB_HTML_HEADERS,
+    )
 
 
 @app.post("/unsubscribe/{token}", response_class=HTMLResponse)
@@ -1033,11 +1052,20 @@ async def unsubscribe_submit(request: Request, token: str):
     mail providers parse 200 OK as "unsubscribed" regardless of body.
     """
     if not token or len(token) > 200:
-        return HTMLResponse(content=_UNSUB_FAILURE_HTML, status_code=410)
+        return HTMLResponse(
+            content=_UNSUB_FAILURE_HTML, status_code=410,
+            headers=_UNSUB_HTML_HEADERS,
+        )
     ok = await _suppress_from_unsubscribe_token(token)
     if not ok:
-        return HTMLResponse(content=_UNSUB_FAILURE_HTML, status_code=410)
-    return HTMLResponse(content=_UNSUB_SUCCESS_HTML, status_code=200)
+        return HTMLResponse(
+            content=_UNSUB_FAILURE_HTML, status_code=410,
+            headers=_UNSUB_HTML_HEADERS,
+        )
+    return HTMLResponse(
+        content=_UNSUB_SUCCESS_HTML, status_code=200,
+        headers=_UNSUB_HTML_HEADERS,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1205,11 +1233,24 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
     targeted, first-hit-wins UPDATE against
     ``campaign_messages.id = lds_message_id``.
     """
-    event_type = str(payload.get("event_type") or "")
-    provider_msg_id = str(payload.get("lds_provider_message_id")
-                          or payload.get("provider_message_id")
-                          or payload.get("message_id") or "")[:200]
-    recipient_email = str(payload.get("recipient_email") or payload.get("email") or "")[:320]
+    # Defense-in-depth: provider id + email round-trip into outbound
+    # SMTP-adjacent payloads (In-Reply-To, To:). HMAC gates forgery, so
+    # this is belt-and-braces against a future compromised-provider
+    # threat model — strip CR/LF/VT/FF before length cap.
+    def _scrub(s: str, cap: int) -> str:
+        return _STRIP_CTRL_PATTERN.sub("", s)[:cap]
+
+    event_type = _scrub(str(payload.get("event_type") or ""), 64)
+    provider_msg_id = _scrub(
+        str(payload.get("lds_provider_message_id")
+            or payload.get("provider_message_id")
+            or payload.get("message_id") or ""),
+        200,
+    )
+    recipient_email = _scrub(
+        str(payload.get("recipient_email") or payload.get("email") or ""),
+        320,
+    )
     campaign_id_hint = payload.get("lds_campaign_id") or payload.get("campaign_id")
 
     # `lds_message_id` lives either at the top level OR nested in
@@ -1218,11 +1259,12 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
     custom_vars = payload.get("custom_variables") or {}
     if not isinstance(custom_vars, dict):
         custom_vars = {}
-    lds_message_id = str(
-        payload.get("lds_message_id")
-        or custom_vars.get("lds_message_id")
-        or ""
-    )[:64]
+    lds_message_id = _scrub(
+        str(payload.get("lds_message_id")
+            or custom_vars.get("lds_message_id")
+            or ""),
+        64,
+    )
 
     # Instantly's sent_at timestamp on the email_sent event, if any.
     # We pass it through as-is (ISO string) to mark_sent; the repo
@@ -1396,7 +1438,9 @@ async def _instantly_handle_bounced(
     suppression row still lands, so the address is protected on the
     next send cycle.
     """
-    bounce_reason = str(payload.get("bounce_reason") or payload.get("reason") or "")[:200]
+    bounce_reason = _STRIP_CTRL_PATTERN.sub(
+        "", str(payload.get("bounce_reason") or payload.get("reason") or ""),
+    )[:200]
     msg_row: Optional[dict] = None
     if provider_msg_id and db.client:
         from src.repositories.campaign_message_repo import CampaignMessageRepository
@@ -1641,6 +1685,20 @@ def _looks_like_uuid(s) -> bool:
 # silently lose.
 _CURSOR_KEY_MAX = 128  # match leads.unique_key column bound
 
+# Charset gate for the cursor `k` field. Producers are
+# `discovery_engine._extract_lead_data` (Google Maps `!1s<id>!` segments)
+# + the MD5-hex fallback — both restrict to base64url/hex alphabet. The
+# decoder interpolates `k` raw into a PostgREST `.or_()` predicate
+# (src/utils/supabase_helper.py), so a permissive cursor with `,` `)` or
+# `(` would escape the intended tie-break clause. service_role bypasses
+# RLS + single-tenant so this is pagination-scope escape, not
+# cross-tenant — but the dashboard contract still relies on the bound.
+_CURSOR_KEY_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{1,128}\Z")
+
+# CR/LF/VT/FF strip for webhook-supplied identifiers. Matches the same
+# control-char set _CRLFScrubFilter uses for log-line forgery defense.
+_STRIP_CTRL_PATTERN = re.compile(r"[\r\n\v\f\x00]")
+
 
 def _encode_lead_cursor(created_at: str, unique_key: str) -> str:
     payload = json.dumps({"c": created_at, "k": unique_key}, separators=(",", ":"))
@@ -1667,6 +1725,11 @@ def _decode_lead_cursor(cursor: str) -> Optional[dict]:
         if not isinstance(c, str) or not isinstance(k, str):
             return None
         if len(c) > 64 or len(k) > _CURSOR_KEY_MAX:
+            return None
+        # Charset gate — `k` interpolates raw into a PostgREST .or_()
+        # predicate downstream. Reject anything outside the producer
+        # alphabet so `,` `)` `(` etc cannot escape the tie-break clause.
+        if not _CURSOR_KEY_PATTERN.fullmatch(k):
             return None
         # ISO timestamp sanity check — parse will reject garbage.
         datetime.fromisoformat(c.replace("Z", "+00:00"))

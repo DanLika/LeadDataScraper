@@ -37,6 +37,10 @@ class SequenceVariant:
     ai_model_used: Optional[str]
     ai_prompt_version: Optional[str]
     created_at: str
+    # 'text' | 'html' — drives Jinja2 autoescape. Default placed last so
+    # callers passing positional args (incl. test fixtures) stay
+    # compatible until they opt into HTML.
+    content_type: str = "text"
 
 
 def _row_to_variant(row: dict[str, Any]) -> SequenceVariant:
@@ -50,6 +54,7 @@ def _row_to_variant(row: dict[str, Any]) -> SequenceVariant:
         ai_model_used=row.get("ai_model_used"),
         ai_prompt_version=row.get("ai_prompt_version"),
         created_at=row.get("created_at") or "",
+        content_type=str(row.get("content_type") or "text"),
     )
 
 
@@ -85,6 +90,7 @@ class SequenceVariantRepository:
         body_template: str,
         *,
         subject_template: Optional[str] = None,
+        content_type: str = "text",
         weight: int = 50,
         ai_model_used: Optional[str] = None,
         ai_prompt_version: Optional[str] = None,
@@ -107,6 +113,12 @@ class SequenceVariantRepository:
                 weight,
             )
             return None
+        if content_type not in ("text", "html"):
+            logger.info(
+                "SequenceVariantRepository.create rejected bad content_type %r",
+                content_type,
+            )
+            return None
         try:
             res = await asyncio.to_thread(
                 lambda: (
@@ -116,6 +128,7 @@ class SequenceVariantRepository:
                         "variant_label": variant_label,
                         "subject_template": subject_template,
                         "body_template": body_template,
+                        "content_type": content_type,
                         "weight": weight,
                         "ai_model_used": ai_model_used,
                         "ai_prompt_version": ai_prompt_version,
