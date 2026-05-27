@@ -266,6 +266,8 @@ Detail in `docs/sessions/`:
 - [2026-05-23 dogfood prep](docs/sessions/2026-05-23-dogfood-prep.md) — demo data + i18n + email plan.
 - [2026-05-23 BookBed crossover](docs/sessions/2026-05-23-bookbed-crossover.md) — Phase B Step 2; rate-limit + firestore findings.
 - [2026-05-26 Phase 14+15 stack merge](docs/sessions/session_2026-05-26_phase14-15-stack.md) — 21 PRs; chained-base + GH outage admin-merge.
+- [2026-05-26 Phase 14+15 sweep + ESLint fix](docs/sessions/session_2026-05-26_phase14-15-sweep.md) — pre-deploy sweep; pytest 1064/0 green; useSyncExternalStore refactor on OfflineBanner cleared eslint=0; ratchet ruff/mypy/pylint deferred; `pre-commit --all-files` splatter recipe.
+- [2026-05-26 Phase 14+15 deploy-readiness (parallel)](docs/sessions/session_2026-05-26_phase14-15-readiness.md) — same-day parallel sweep; identical pytest 1064/0; Render blocked at env-var pre-flight (5/7 keys missing in `~/.bookbed-secrets`); ruff F821 `Undefined name 'db'` at backend/main.py:2999/3009 likely PEP-562 false-positive; ruff-format splatters even when scoped.
 
 ## Operational gotchas (load-bearing)
 

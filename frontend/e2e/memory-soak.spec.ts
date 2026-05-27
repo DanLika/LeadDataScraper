@@ -161,7 +161,7 @@ test('memory soak: 50 cycles, heap growth < 50 MB, no detached-DOM creep', async
 
   // Print so a CI log shows the actual numbers — useful for tuning the
   // ceiling and for spotting near-misses before they turn into bugs.
-  // eslint-disable-next-line no-console
+
   console.log(`[memory-soak] heap ${(before.jsHeapUsedSize / 1024 / 1024).toFixed(1)} MB → ${(after.jsHeapUsedSize / 1024 / 1024).toFixed(1)} MB (Δ ${(heapDelta / 1024 / 1024).toFixed(1)} MB) ; detached ${detachedBefore} → ${detachedAfter} (Δ ${detachedDelta})`)
 
   expect(
