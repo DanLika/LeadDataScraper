@@ -79,3 +79,9 @@ pytest-asyncio>=1.0,<2.0
 pytest==9.0.3
 iniconfig==2.0.0
 pluggy==1.6.0
+# pytest-asyncio 1.4.0+ added a conditional transitive that resolves on
+# python<3.11 (our Render Docker base = python:3.10). The dep spec is a
+# range (<2,>=1.1) which --require-hashes rejects; pin explicitly. The
+# env marker scopes the install to the Docker base only — local devs on
+# py3.11+ skip the install but the entry stays in the lockfile.
+backports-asyncio-runner==1.2.0  ; python_version < "3.11"
