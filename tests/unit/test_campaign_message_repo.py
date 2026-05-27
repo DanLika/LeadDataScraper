@@ -182,15 +182,15 @@ class TestMarkReplied(unittest.TestCase):
 
 
 class TestMarkSendFailed(unittest.TestCase):
-    def test_pending_only_transition(self) -> None:
+    def test_dispatching_only_transition(self) -> None:
         client, table = _build_db([{"id": "msg-uuid"}])
         repo = CampaignMessageRepository(client)
         result = asyncio.run(repo.mark_send_failed(
             "msg-uuid", error="rate_limit",
         ))
         self.assertTrue(result.matched)
-        # State machine: only flip pending → bounced (not sent → bounced).
-        table.eq.assert_any_call("status", "pending")
+        # State machine: only flip dispatching → bounced (post-claim).
+        table.eq.assert_any_call("status", "dispatching")
         update_call = table.update.call_args.args[0]
         self.assertEqual(update_call["status"], "bounced")
         self.assertEqual(update_call["bounce_reason"], "send_failed: rate_limit")

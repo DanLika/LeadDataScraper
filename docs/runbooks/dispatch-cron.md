@@ -36,6 +36,9 @@ Why NOT slower than 5 min:
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `INSTANTLY_API_KEY`
    - `INSTANTLY_DEFAULT_CAMPAIGN_ID` _(or set per-call via API)_
+   - `UNSUBSCRIBE_BASE_URL` — base for RFC 8058 List-Unsubscribe links (e.g. `https://lead-scraper-backend-x51l.onrender.com`). Without this, sent emails carry no unsubscribe link (AUP risk).
+   - `UNSUBSCRIBE_TOKEN_SECRET` — HMAC key for unsubscribe token generation/verification.
+   - `OPERATOR_NAME` — appended to outreach signature. Unset → "Your Name" placeholder.
    - `SEND_WINDOW_DEFAULT_TZ` (default `UTC`; LDS dogfood uses `Europe/Sarajevo`)
    - `DISPATCH_TICK_BATCH_SIZE=100` _(default)_
    - `DISPATCH_CLAIM_TIMEOUT_MIN=15` _(default)_
