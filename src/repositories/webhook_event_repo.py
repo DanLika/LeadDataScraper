@@ -14,6 +14,7 @@ mirrored to the DB CHECK constraint).
 
 Producer call site: ``backend/main.py::receive_instantly_webhook``.
 """
+
 from __future__ import annotations
 
 import asyncio

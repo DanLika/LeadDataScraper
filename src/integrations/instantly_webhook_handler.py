@@ -46,6 +46,7 @@ last ``email_sent`` success" — requires a reset signal from the
 sequence engine. Tracked separately; the 30-day window is the simpler
 correct-direction policy that ships today.
 """
+
 from __future__ import annotations
 
 import logging
@@ -67,19 +68,23 @@ common ESP retention (Sendgrid event_log default) and is long enough
 to catch genuine 3-strike patterns without dragging in stale events
 from a re-engaged mailbox."""
 
-_HARD_TYPES: frozenset[str] = frozenset({
-    "hard",        # canonical
-    "permanent",   # Instantly synonym in some payloads
-    "blocked",     # 550-class refusal at recipient server
-    "rejected",    # explicit rejection (e.g. spam-block)
-})
+_HARD_TYPES: frozenset[str] = frozenset(
+    {
+        "hard",  # canonical
+        "permanent",  # Instantly synonym in some payloads
+        "blocked",  # 550-class refusal at recipient server
+        "rejected",  # explicit rejection (e.g. spam-block)
+    }
+)
 
-_SOFT_TYPES: frozenset[str] = frozenset({
-    "soft",        # canonical
-    "transient",   # 4xx SMTP
-    "temporary",   # Instantly synonym
-    "deferred",    # mailbox full / greylist
-})
+_SOFT_TYPES: frozenset[str] = frozenset(
+    {
+        "soft",  # canonical
+        "transient",  # 4xx SMTP
+        "temporary",  # Instantly synonym
+        "deferred",  # mailbox full / greylist
+    }
+)
 
 
 def decide_bounce_action(

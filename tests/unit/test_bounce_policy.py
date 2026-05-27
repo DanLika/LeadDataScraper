@@ -7,6 +7,7 @@ the new policy. The taxonomy mirrors
 
 Run targeted: ``pytest tests/unit/test_bounce_policy.py -v``
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,33 +30,30 @@ class TestBouncePolicySnapshot(unittest.TestCase):
         # --- hard family: always immediate suppression ---
         ("hard", 0, "suppress_hard"),
         ("hard", 99, "suppress_hard"),
-        ("HARD", 0, "suppress_hard"),          # case-insensitive
-        ("  hard  ", 0, "suppress_hard"),      # whitespace-trimmed
-        ("permanent", 0, "suppress_hard"),     # Instantly synonym
-        ("blocked", 0, "suppress_hard"),       # 550 recipient refusal
-        ("rejected", 0, "suppress_hard"),      # spam-block etc.
-
+        ("HARD", 0, "suppress_hard"),  # case-insensitive
+        ("  hard  ", 0, "suppress_hard"),  # whitespace-trimmed
+        ("permanent", 0, "suppress_hard"),  # Instantly synonym
+        ("blocked", 0, "suppress_hard"),  # 550 recipient refusal
+        ("rejected", 0, "suppress_hard"),  # spam-block etc.
         # --- soft family: noop under threshold, escalate at/over ---
         ("soft", 0, "noop_soft"),
         ("soft", 1, "noop_soft"),
         ("soft", 2, "noop_soft"),
-        ("soft", 3, "suppress_soft_3x"),       # threshold reached (this is strike 3+)
+        ("soft", 3, "suppress_soft_3x"),  # threshold reached (this is strike 3+)
         ("soft", 4, "suppress_soft_3x"),
         ("soft", 99, "suppress_soft_3x"),
-        ("SOFT", 3, "suppress_soft_3x"),       # case-insensitive
+        ("SOFT", 3, "suppress_soft_3x"),  # case-insensitive
         ("Transient", 3, "suppress_soft_3x"),  # synonym
         ("temporary", 3, "suppress_soft_3x"),
         ("deferred", 0, "noop_soft"),
         ("deferred", 3, "suppress_soft_3x"),
-
         # --- absent / empty: defensive → suppress_hard ---
         (None, 0, "suppress_hard"),
         ("", 0, "suppress_hard"),
         ("   ", 0, "suppress_hard"),
-
         # --- unknown values: defensive → suppress_hard (+ WARN logged) ---
         ("mystery", 0, "suppress_hard"),
-        ("greylisted", 99, "suppress_hard"),   # not in _SOFT_TYPES yet
+        ("greylisted", 99, "suppress_hard"),  # not in _SOFT_TYPES yet
         ("delayed", 0, "suppress_hard"),
     ]
 
@@ -71,7 +69,8 @@ class TestBouncePolicySnapshot(unittest.TestCase):
                 )
         if failures:
             self.fail(
-                "Bounce policy snapshot drift:\n" + "\n".join(failures)
+                "Bounce policy snapshot drift:\n"
+                + "\n".join(failures)
                 + "\n\nIf this change is intentional, update POLICY_TABLE "
                 "in this test AND `decide_bounce_action` in lockstep, "
                 "then resnapshot."
@@ -79,9 +78,12 @@ class TestBouncePolicySnapshot(unittest.TestCase):
 
     def test_threshold_constant_matches_reason_taxonomy(self) -> None:
         """SOFT_THRESHOLD=3 must align with `bounce_soft_3x` reason name."""
-        self.assertEqual(SOFT_THRESHOLD, 3,
-                         "SOFT_THRESHOLD drift would orphan the bounce_soft_3x "
-                         "suppression-reason taxonomy slot.")
+        self.assertEqual(
+            SOFT_THRESHOLD,
+            3,
+            "SOFT_THRESHOLD drift would orphan the bounce_soft_3x "
+            "suppression-reason taxonomy slot.",
+        )
 
     def test_counter_window_default(self) -> None:
         """30-day window is the documented default. Catches silent change."""
@@ -93,19 +95,29 @@ class TestBoundaryConditions(unittest.TestCase):
 
     def test_explicit_threshold_override(self) -> None:
         # Caller can pin a stricter or looser threshold per call site.
-        self.assertEqual(decide_bounce_action("soft", 2, threshold=2), "suppress_soft_3x")
+        self.assertEqual(
+            decide_bounce_action("soft", 2, threshold=2), "suppress_soft_3x"
+        )
         self.assertEqual(decide_bounce_action("soft", 1, threshold=2), "noop_soft")
         self.assertEqual(decide_bounce_action("soft", 4, threshold=5), "noop_soft")
-        self.assertEqual(decide_bounce_action("soft", 5, threshold=5), "suppress_soft_3x")
+        self.assertEqual(
+            decide_bounce_action("soft", 5, threshold=5), "suppress_soft_3x"
+        )
 
     def test_zero_threshold_always_escalates_softs(self) -> None:
         # Degenerate but well-defined. Useful for runbook/incident toggles.
-        self.assertEqual(decide_bounce_action("soft", 0, threshold=0), "suppress_soft_3x")
+        self.assertEqual(
+            decide_bounce_action("soft", 0, threshold=0), "suppress_soft_3x"
+        )
 
     def test_hard_ignores_threshold(self) -> None:
         # threshold only meaningful for the soft path.
-        self.assertEqual(decide_bounce_action("hard", 0, threshold=999), "suppress_hard")
-        self.assertEqual(decide_bounce_action("hard", 999, threshold=0), "suppress_hard")
+        self.assertEqual(
+            decide_bounce_action("hard", 0, threshold=999), "suppress_hard"
+        )
+        self.assertEqual(
+            decide_bounce_action("hard", 999, threshold=0), "suppress_hard"
+        )
 
     def test_negative_count_treated_as_zero_path(self) -> None:
         # Defensive: count source could return a negative on edge math; soft
@@ -124,8 +136,10 @@ class TestUnknownTypeLogsWarning(unittest.TestCase):
         ) as cm:
             result = decide_bounce_action("alien-bounce-class", 0)
         self.assertEqual(result, "suppress_hard")
-        self.assertTrue(any("unknown bounce_type" in line for line in cm.output),
-                        f"expected unknown bounce_type warn, got: {cm.output}")
+        self.assertTrue(
+            any("unknown bounce_type" in line for line in cm.output),
+            f"expected unknown bounce_type warn, got: {cm.output}",
+        )
 
     def test_known_types_do_not_warn(self) -> None:
         # Sanity: don't spam WARN on every normal event.
