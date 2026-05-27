@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS leads (
     linkedin_hook TEXT,
     email_hook TEXT,
     first_name TEXT,
+    last_name TEXT,
     company_name TEXT,
     priority_link TEXT,
     needs_manual_review BOOLEAN DEFAULT FALSE
@@ -230,6 +231,7 @@ ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS campaign_segment      TEXT;
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS business_summary      TEXT;
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS business_description  TEXT;
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS company_description   TEXT;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS last_name             TEXT;
 
 -- =============================================================================
 -- Demo-data flag (Phase 13.3).
