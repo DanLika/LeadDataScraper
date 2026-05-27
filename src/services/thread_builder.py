@@ -157,6 +157,14 @@ def build_send_payload(
     # intentional pattern.
     subject_template = getattr(variant, "subject_template", None) or ""
     body_template = getattr(variant, "body_template", "") or ""
+    # Variant-driven render mode. 'html' enables Jinja2 autoescape so
+    # attacker-controlled lead fields (pain_point, first_name, company,
+    # industry, city — sourced from CSV ingest + Gemini enrichment of
+    # scraped sites) can't break out of HTML context in the recipient
+    # mail client. Subject stays text-mode (RFC 5322 line, no HTML).
+    content_type = getattr(variant, "content_type", "text")
+    if content_type not in ("text", "html"):
+        content_type = "text"
 
     try:
         if threading and not subject_template:
@@ -164,7 +172,7 @@ def build_send_payload(
             subject = ""
         else:
             subject = render(subject_template, context)
-        body = render(body_template, context)
+        body = render(body_template, context, content_type=content_type)
     except TemplateError:
         # Surface as-is — caller (worker) decides whether to release
         # the claim as 'failed' or retry.

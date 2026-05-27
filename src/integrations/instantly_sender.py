@@ -341,6 +341,13 @@ class InstantlyDispatcher(EmailDispatcher):
             "User-Agent": "LeadDataScraper/1.0",
         }
         url = f"{INSTANTLY_BASE_URL}{INSTANTLY_LEADS_ADD_PATH}"
+        # Forward-compat SSRF guard. Today INSTANTLY_BASE_URL is a hardcoded
+        # constant pointing at api.instantly.ai (public). If a future
+        # multi-region / sandbox flow makes the base URL operator-configurable,
+        # this gate prevents a misconfig from redirecting the dispatch call
+        # (carrying Authorization: Bearer) at a private-IP / metadata host.
+        from src.utils.ssrf_guard import assert_safe_url
+        await assert_safe_url(url)
         try:
             async with session.post(url, json=payload, headers=headers) as resp:
                 body = await _safe_json(resp)

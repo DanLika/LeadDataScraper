@@ -414,6 +414,15 @@ ALTER TABLE public.campaign_messages
 ALTER TABLE public.campaign_messages
     ADD COLUMN IF NOT EXISTS bounce_reason TEXT;
 
+-- Hardening (post-audit): bound bounce_reason length. Repository callers
+-- already slice to 200 via `[:200]`, but a future caller forgetting the
+-- slice could store unbounded provider strings. DB-side cap matches.
+DO $$ BEGIN
+    ALTER TABLE public.campaign_messages
+        ADD CONSTRAINT campaign_messages_bounce_reason_size
+        CHECK (bounce_reason IS NULL OR length(bounce_reason) <= 200);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- Partial index — only sent rows carry a provider_message_id, so we skip
 -- the NULL pile (pending rows). Webhook lookup is by exact msg_id.
 CREATE INDEX IF NOT EXISTS idx_campaign_messages_provider_message_id
@@ -762,6 +771,17 @@ DO $$ BEGIN
         UNIQUE (provider, event_id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Hardening (post-audit): bound event_id length. UNIQUE (provider,
+-- event_id) is the idempotency lock — without a length cap a
+-- compromised-provider scenario (or future buggy code path) could
+-- poison the BTREE with multi-MB keys. Instantly + Resend event IDs
+-- are <40 chars; 256 is generous headroom.
+DO $$ BEGIN
+    ALTER TABLE public.webhook_events
+        ADD CONSTRAINT webhook_events_event_id_size
+        CHECK (length(event_id) BETWEEN 1 AND 256);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 CREATE INDEX IF NOT EXISTS idx_webhook_events_unprocessed
     ON public.webhook_events (provider, received_at)
     WHERE processed_at IS NULL;
@@ -893,6 +913,26 @@ DO $$ BEGIN
         CHECK (delay_days >= 0 AND delay_hours >= 0);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Hardening (post-audit): enforce window ordering. Without this a step
+-- with start='17:00' end='09:00' silently flips behavior in
+-- src/utils/send_window.is_within_window (treated as overnight window?
+-- crosses-midnight? — depends on resolver branch). Reject the ambiguous
+-- shape at write time.
+DO $$ BEGIN
+    ALTER TABLE public.sequence_steps
+        ADD CONSTRAINT sequence_steps_window_ordered
+        CHECK (send_window_start < send_window_end);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Hardening (post-audit): allowlist send_days tokens. Catches typos
+-- (e.g. 'monday' instead of 'mon') at write time rather than silently
+-- skipping windows at dispatch_tick.
+DO $$ BEGIN
+    ALTER TABLE public.sequence_steps
+        ADD CONSTRAINT sequence_steps_send_days_format
+        CHECK (send_days ~ '^(mon|tue|wed|thu|fri|sat|sun)(,(mon|tue|wed|thu|fri|sat|sun))*$');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 DO $$ BEGIN
     ALTER TABLE public.sequence_steps
         ADD CONSTRAINT sequence_steps_unique_index
@@ -908,11 +948,21 @@ CREATE TABLE IF NOT EXISTS public.sequence_variants (
     variant_label     TEXT NOT NULL,
     subject_template  TEXT,
     body_template     TEXT NOT NULL,
+    -- Render mode: 'text' (default) renders without HTML autoescape;
+    -- 'html' enables Jinja2 select_autoescape so attacker-controlled
+    -- lead-derived vars (pain_point, first_name, company, industry, city)
+    -- can't break out of HTML context in the recipient mail client.
+    content_type      TEXT NOT NULL DEFAULT 'text',
     weight            INT NOT NULL DEFAULT 50,
     ai_model_used     TEXT,
     ai_prompt_version TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Backfill the column for any pre-existing rows from environments where
+-- the table already existed before this column was added.
+ALTER TABLE public.sequence_variants
+    ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'text';
 
 DO $$ BEGIN
     ALTER TABLE public.sequence_variants
@@ -933,6 +983,26 @@ DO $$ BEGIN
     ALTER TABLE public.sequence_variants
         ADD CONSTRAINT sequence_variants_unique_label
         UNIQUE (step_id, variant_label);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Hardening (post-audit): bound template sizes so a service_role write
+-- of a multi-MB body can't OOM the Jinja2 renderer at dispatch_tick time.
+-- 16 KB body = ~7000 words, well above the cold-email cap. 998 chars
+-- subject = RFC 5322 line limit.
+DO $$ BEGIN
+    ALTER TABLE public.sequence_variants
+        ADD CONSTRAINT sequence_variants_body_size
+        CHECK (length(body_template) <= 16384
+            AND (subject_template IS NULL OR length(subject_template) <= 998));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Allowlist content_type values. Mirrors template_renderer.ContentType
+-- Literal. Adding a new mode (e.g. 'markdown') = update this CHECK + the
+-- _build_environment branch + the test fixtures in lockstep.
+DO $$ BEGIN
+    ALTER TABLE public.sequence_variants
+        ADD CONSTRAINT sequence_variants_content_type_allowed
+        CHECK (content_type IN ('text', 'html'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ---------------------------------------------------------------------------
