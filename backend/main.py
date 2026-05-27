@@ -1522,14 +1522,25 @@ async def _instantly_handle_bounced(
     campaign_id_hint: Optional[str],
     payload: dict,
 ) -> None:
-    """email_bounced: state-machine UPDATE pending|sent → bounced + suppression.
+    """email_bounced: state-machine UPDATE + bounce_type-aware suppression.
+
+    PR #359 added soft-vs-hard discrimination. Decision is delegated to
+    ``src.integrations.instantly_webhook_handler.decide_bounce_action``
+    which returns one of ``suppress_hard`` / ``suppress_soft_3x`` /
+    ``noop_soft``. The per-message ``mark_bounced`` UPDATE still fires
+    unconditionally — a single send attempt being marked bounced is a
+    message-level fact independent of whether the *address* should be
+    permanently suppressed.
 
     The repo enforces ``.in_("status", ["pending", "sent"])`` so a
     bounce after an unsubscribe / replied terminal state is a no-op.
-    Suppression INSERT still happens via recipient_email regardless of
-    whether the campaign_messages UPDATE matched — the dispatcher
-    precheck (PR α) gates future sends on the suppression row, which
-    is the load-bearing defense.
+    Suppression INSERT happens via recipient_email; the dispatcher
+    precheck gates future sends on the suppression row, which is the
+    load-bearing defense.
+
+    Per-sequence cancel fires only on ``suppress_*`` outcomes — on
+    ``noop_soft`` we *want* the next sequence step to retry the
+    recoverable address, that's the whole point of the soft path.
 
     Out-of-order edge case: if email_bounced arrives before email_sent
     (Instantly's background workers don't guarantee event order), the
@@ -1538,15 +1549,60 @@ async def _instantly_handle_bounced(
     suppression row still lands, so the address is protected on the
     next send cycle.
     """
+    from src.integrations.instantly_webhook_handler import (
+        SOFT_COUNTER_WINDOW_DAYS,
+        decide_bounce_action,
+    )
+
     bounce_reason = _STRIP_CTRL_PATTERN.sub(
         "", str(payload.get("bounce_reason") or payload.get("reason") or ""),
     )[:200]
+    bounce_type = _STRIP_CTRL_PATTERN.sub(
+        "", str(payload.get("bounce_type") or ""),
+    )[:32]
+
     msg_row: Optional[dict] = None
     if provider_msg_id and db.client:
         from src.repositories.campaign_message_repo import CampaignMessageRepository
         repo = CampaignMessageRepository(db.client)
         await repo.mark_bounced(provider_msg_id, bounce_reason=bounce_reason)
         msg_row = await _lookup_message_by_provider_id(provider_msg_id)
+
+    # Soft-bounce strike count (includes current event since webhook_events
+    # INSERT already ran in _process_instantly_event). On counter failure
+    # we override the policy decision to suppress_hard so a DB hiccup
+    # never silently shrinks the strike count to zero (which would mean
+    # soft bounces never escalate).
+    soft_count = 0
+    counter_failed = False
+    if recipient_email and db.client and bounce_type:
+        from src.repositories.webhook_event_repo import WebhookEventRepository
+        we_repo = WebhookEventRepository(db.client)
+        try:
+            soft_count = await we_repo.count_soft_bounces_for_recipient(
+                recipient_email, window_days=SOFT_COUNTER_WINDOW_DAYS,
+            )
+        except Exception:
+            counter_failed = True
+            logger.exception(
+                "soft-bounce counter failed; falling back to suppress_hard",
+            )
+
+    action = "suppress_hard" if counter_failed else decide_bounce_action(
+        bounce_type, soft_count,
+    )
+
+    if action == "noop_soft":
+        logger.info(
+            "soft bounce under threshold — no suppression",
+            extra={
+                "bounce_type": bounce_type or None,
+                "soft_count": soft_count,
+                "provider_msg_id": provider_msg_id or None,
+            },
+        )
+        return
+
     if not recipient_email:
         # Even without recipient, attempt the per-sequence cancel if
         # we have the row context.
@@ -1559,13 +1615,17 @@ async def _instantly_handle_bounced(
                 reason="bounce",
             )
         return
+
     from src.repositories.suppression_repo import SuppressionRepository
 
+    suppression_reason = (
+        "bounce_soft_3x" if action == "suppress_soft_3x" else "bounce_hard"
+    )
     suppression_repo = SuppressionRepository(db.client)
     await suppression_repo.add(
         "email",
         recipient_email,
-        "bounce_hard",
+        suppression_reason,
         channel="email",
         source_provider="instantly",
         source_campaign_id=campaign_id_hint if _looks_like_uuid(campaign_id_hint) else None,
@@ -1575,7 +1635,8 @@ async def _instantly_handle_bounced(
     # Phase 15.4 — per-sequence cancel. A bounce on this lead in this
     # sequence kills downstream pending steps in the same sequence.
     # Other sequences for the same lead stay alive (different
-    # campaign / context).
+    # campaign / context). PR #359: cancel applies only on suppress_*
+    # outcomes — noop_soft returned above before reaching this point.
     if msg_row and msg_row.get("lead_unique_key") and msg_row.get("sequence_id"):
         from src.repositories.campaign_message_repo import CampaignMessageRepository
         cancel_repo = CampaignMessageRepository(db.client)

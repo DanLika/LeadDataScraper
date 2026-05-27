@@ -14,11 +14,13 @@ mirrored to the DB CHECK constraint).
 
 Producer call site: ``backend/main.py::receive_instantly_webhook``.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.types.providers import WebhookProvider
@@ -80,6 +82,49 @@ class WebhookEventRepository:
             if _is_unique_violation(exc):
                 return InsertResult(inserted=False, duplicate=True)
             raise
+
+    async def count_soft_bounces_for_recipient(
+        self,
+        recipient_email: str,
+        *,
+        window_days: int = 30,
+        provider: WebhookProvider = "instantly",
+    ) -> int:
+        """Count ``email_bounced`` events with ``bounce_type='soft'`` for
+        ``recipient_email`` in the last ``window_days``.
+
+        Powers the PR #359 soft-bounce strike counter consumed by
+        ``src.integrations.instantly_webhook_handler.decide_bounce_action``.
+        Match is ILIKE on ``payload->>bounce_type`` so case variants
+        ('Soft', 'SOFT') all count, and exact-eq on
+        ``payload->>recipient_email`` (Instantly preserves casing per
+        message; matching by exact string is consistent within a
+        single recipient's event stream).
+
+        Raises on DB errors so the caller can choose a fail-safe (the
+        handler falls back to ``suppress_hard`` on count failure rather
+        than silently shrinking the bounce strike count toward zero,
+        which would never escalate to permanent suppression).
+        """
+        if not self._db or not recipient_email:
+            return 0
+        cutoff_iso = (
+            datetime.now(timezone.utc) - timedelta(days=window_days)
+        ).isoformat()
+        res = await asyncio.to_thread(
+            lambda: (
+                self._db.table("webhook_events")
+                .select("id", count="exact")
+                .eq("provider", provider)
+                .eq("event_type", "email_bounced")
+                .ilike("payload->>bounce_type", "soft")
+                .eq("payload->>recipient_email", recipient_email)
+                .gte("received_at", cutoff_iso)
+                .limit(1)
+                .execute()
+            )
+        )
+        return int(getattr(res, "count", 0) or 0)
 
 
 def _is_unique_violation(exc: Exception) -> bool:
