@@ -112,8 +112,15 @@ async def sweep_once(
     )
 
     if db is None:
-        from src.utils.supabase_helper import db as _db
-        db = _db
+        # supabase_helper exports SupabaseHelper *class*; the lazy
+        # singleton lives on backend.main (PEP 562 __getattr__).
+        # Render Cron runs scripts/webhook_sweeper.py as a one-shot
+        # process — no lifespan to prime backend.main.db — so we
+        # instantiate fresh per tick. Each cron invocation gets its
+        # own client + connection pool; cheap relative to the
+        # PostgREST work the tick does anyway.
+        from src.utils.supabase_helper import SupabaseHelper
+        db = SupabaseHelper()
     if process_instantly_event is None:
         from backend.main import _process_instantly_event
         process_instantly_event = _process_instantly_event
