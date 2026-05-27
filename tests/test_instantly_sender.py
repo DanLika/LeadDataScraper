@@ -82,6 +82,28 @@ class TestInstantlyLeadPayload:
             "list_unsubscribe", "list_unsubscribe_post",
         })
 
+    def test_from_lds_lead_threads_list_unsubscribe(self):
+        # Caller passes the angle-bracketed value Instantly expects per
+        # the custom-vars-to-header bridge convention. from_lds_lead must
+        # set both list_unsubscribe AND list_unsubscribe_post when the
+        # kwarg is provided — Gmail/Yahoo 2024 one-click compliance
+        # requires both headers.
+        p = InstantlyLeadPayload.from_lds_lead(
+            {"email": "c@example.com", "unique_key": "u-002"},
+            list_unsubscribe="<https://leaddatascraper.example/unsubscribe/abc>",
+        )
+        assert p.custom_variables["list_unsubscribe"] == (
+            "<https://leaddatascraper.example/unsubscribe/abc>"
+        )
+        assert p.custom_variables["list_unsubscribe_post"] == (
+            "List-Unsubscribe=One-Click"
+        )
+
+    def test_from_lds_lead_omits_list_unsubscribe_when_none(self):
+        p = InstantlyLeadPayload.from_lds_lead({"email": "d@example.com"})
+        assert "list_unsubscribe" not in p.custom_variables
+        assert "list_unsubscribe_post" not in p.custom_variables
+
 
 class TestInstantlyPushResult:
     def test_total_attempted_property(self):
@@ -248,6 +270,72 @@ class TestDryRunBehavior:
         assert result.success_count == 2
         assert result.failed_count == 0
         assert db.inserted_ledger == []
+
+
+class TestListUnsubscribeThreading:
+    """push_leads wraps each bare URL in ``<>`` and threads via
+    ``custom_variables.list_unsubscribe`` per Instantly's bridge.
+
+    Closes the Phase 15.2 wiring drift surfaced by /security-audit:run.
+    """
+
+    @pytest.mark.asyncio
+    async def test_push_leads_wraps_and_threads_unsubscribe(
+        self, monkeypatch,
+    ):
+        captured: list[dict[str, Any]] = []
+        original_from_lds_lead = InstantlyLeadPayload.from_lds_lead
+
+        def _spy(cls, lead, **kwargs):
+            captured.append({"uk": lead.get("unique_key"), **kwargs})
+            return original_from_lds_lead(lead, **kwargs)
+
+        monkeypatch.setattr(
+            InstantlyLeadPayload, "from_lds_lead", classmethod(_spy),
+        )
+
+        db = _FakeDB()
+        d = InstantlyDispatcher(api_key="k", default_campaign_id="c",
+                                dry_run=True, db=db)
+        leads = [
+            {"email": "a@x.com", "unique_key": "u1"},
+            {"email": "b@x.com", "unique_key": "u2"},
+        ]
+        await d.push_leads(
+            leads,
+            list_unsubscribe_urls={
+                "u1": "https://leaddatascraper.example/unsubscribe/tok1",
+                # u2 absent — must not appear in custom_vars
+            },
+        )
+
+        by_uk = {c["uk"]: c for c in captured}
+        assert by_uk["u1"]["list_unsubscribe"] == (
+            "<https://leaddatascraper.example/unsubscribe/tok1>"
+        )
+        assert by_uk["u2"]["list_unsubscribe"] is None
+
+    @pytest.mark.asyncio
+    async def test_push_leads_no_unsub_kwarg_keeps_existing_behavior(
+        self, monkeypatch,
+    ):
+        captured: list[dict[str, Any]] = []
+        original = InstantlyLeadPayload.from_lds_lead
+
+        def _spy(cls, lead, **kwargs):
+            captured.append(kwargs)
+            return original(lead, **kwargs)
+
+        monkeypatch.setattr(
+            InstantlyLeadPayload, "from_lds_lead", classmethod(_spy),
+        )
+
+        d = InstantlyDispatcher(api_key="k", default_campaign_id="c",
+                                dry_run=True, db=_FakeDB())
+        await d.push_leads([{"email": "a@x.com", "unique_key": "u1"}])
+        # Backwards compat: callers that omit list_unsubscribe_urls see
+        # the same behaviour as before — no list_unsubscribe in vars.
+        assert captured[0]["list_unsubscribe"] is None
 
 
 # ---------------------------------------------------------------------------
