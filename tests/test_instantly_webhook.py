@@ -228,6 +228,149 @@ class TestIdempotency:
         assert resp2.status_code == 200
         assert resp2.json() == {"ok": True, "duplicate": True}
 
+    def test_duplicate_path_schedules_background_task(
+        self, client, _patch_db_and_limiter,
+    ):
+        """Path B (2026-05-27): the duplicate path must also fire the
+        background task. Otherwise an earlier delivery that returned
+        500 on a transport error (row committed but response dropped)
+        is unrecoverable when Instantly retries — the retry hits the
+        idempotency lock and returns 200 with no state transition,
+        leaving the event stranded with ``processed_at IS NULL``.
+        Handlers are idempotent (mark_sent gates on
+        ``provider_message_id IS NULL``), so re-firing is safe.
+        """
+        body = _body(
+            "evt-dup-bg", "email_sent",
+            provider_message_id="instantly-msg-dup",
+            recipient_email="r@x.com",
+            sent_at="2026-05-27T12:00:00Z",
+            custom_variables={"lds_message_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
+        )
+        headers = {"X-Signature": _sign(body), "X-Timestamp": _now_ts()}
+        client.post("/webhooks/instantly", content=body, headers=headers)
+        sent_after_first = sum(
+            1 for u in _patch_db_and_limiter.updates
+            if u[0] == "campaign_messages" and u[1].get("status") == "sent"
+        )
+        assert sent_after_first == 1
+        resp2 = client.post("/webhooks/instantly", content=body, headers=headers)
+        assert resp2.status_code == 200
+        assert resp2.json() == {"ok": True, "duplicate": True}
+        sent_after_dup = sum(
+            1 for u in _patch_db_and_limiter.updates
+            if u[0] == "campaign_messages" and u[1].get("status") == "sent"
+        )
+        assert sent_after_dup == 2, (
+            "duplicate path must schedule the background task; the mock "
+            "doesn't enforce the .is_(provider_message_id, null) predicate "
+            "so two UPDATEs land. In real DB the second is a no-op."
+        )
+
+
+class TestTransportRecovery:
+    """Path C (2026-05-27): when supabase-py raises an httpx/httpcore
+    transport error AFTER PostgREST has committed the INSERT, the
+    handler re-reads ``webhook_events`` and surfaces 200 + scheduled
+    background task instead of misleading 500. Verified against
+    Render Cloudflare → Supabase under N=200 burst test where
+    ``httpcore.RemoteProtocolError: Server disconnected`` landed at
+    ~8-23% with the row already committed."""
+
+    def test_transport_error_post_commit_re_read_finds_row_returns_200(
+        self, client, _patch_db_and_limiter, monkeypatch,
+    ):
+        import httpx
+        import main as backend_main
+        from src.repositories.webhook_event_repo import (
+            InsertResult, WebhookEventRepository,
+        )
+
+        async def fake_insert(self, **kwargs):
+            raise httpx.RemoteProtocolError("Server disconnected")
+
+        async def fake_exists(provider: str, event_id: str) -> bool:
+            return True
+
+        monkeypatch.setattr(
+            WebhookEventRepository, "insert_event", fake_insert, raising=True,
+        )
+        monkeypatch.setattr(
+            backend_main, "_webhook_event_exists", fake_exists, raising=True,
+        )
+
+        body = _body("evt-transport-1", "email_sent")
+        resp = client.post(
+            "/webhooks/instantly",
+            content=body,
+            headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "recovered": True}
+
+    def test_transport_error_pre_commit_no_row_returns_500(
+        self, client, _patch_db_and_limiter, monkeypatch,
+    ):
+        import httpx
+        import main as backend_main
+        from src.repositories.webhook_event_repo import WebhookEventRepository
+
+        async def fake_insert(self, **kwargs):
+            raise httpx.RemoteProtocolError("Server disconnected")
+
+        async def fake_exists(provider: str, event_id: str) -> bool:
+            return False
+
+        monkeypatch.setattr(
+            WebhookEventRepository, "insert_event", fake_insert, raising=True,
+        )
+        monkeypatch.setattr(
+            backend_main, "_webhook_event_exists", fake_exists, raising=True,
+        )
+
+        body = _body("evt-transport-2", "email_sent")
+        resp = client.post(
+            "/webhooks/instantly",
+            content=body,
+            headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
+        )
+        assert resp.status_code == 500
+        assert resp.json() == {"detail": "internal error"}
+
+    def test_non_transport_error_unchanged_returns_500(
+        self, client, _patch_db_and_limiter, monkeypatch,
+    ):
+        """Non-transport errors (e.g., a real PostgREST APIError that
+        is NOT a 23505) must still surface as 500. The re-read path
+        is only the recovery for transport-class errors."""
+        import main as backend_main
+        from src.repositories.webhook_event_repo import WebhookEventRepository
+
+        async def fake_insert(self, **kwargs):
+            raise RuntimeError("non-transport DB error")
+
+        called = {"exists": 0}
+
+        async def fake_exists(provider: str, event_id: str) -> bool:
+            called["exists"] += 1
+            return True  # would mask the bug if branch fires; assert it doesn't
+
+        monkeypatch.setattr(
+            WebhookEventRepository, "insert_event", fake_insert, raising=True,
+        )
+        monkeypatch.setattr(
+            backend_main, "_webhook_event_exists", fake_exists, raising=True,
+        )
+
+        body = _body("evt-non-transport", "email_sent")
+        resp = client.post(
+            "/webhooks/instantly",
+            content=body,
+            headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
+        )
+        assert resp.status_code == 500
+        assert called["exists"] == 0, "re-read should only run for transport-class errors"
+
 
 # ---------------------------------------------------------------------------
 # Event-type → state-transition matrix

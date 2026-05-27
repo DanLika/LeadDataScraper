@@ -1117,6 +1117,73 @@ def _generic_webhook_error(detail: str, status_code: int = 401):
     )
 
 
+_TRANSPORT_ERROR_TYPES: tuple[type[BaseException], ...] = ()
+
+
+def _is_transport_error(exc: BaseException) -> bool:
+    """True iff ``exc`` is an httpx/httpcore transport-layer error.
+
+    Important: these errors can land AFTER PostgREST has already
+    committed the INSERT. Under burst load against Supabase from
+    Render's single uvicorn worker, ``httpcore.RemoteProtocolError:
+    Server disconnected`` is observed at ~8-23% rate on the webhook
+    handler — the row is in webhook_events but the response body
+    never reaches supabase-py, which raises. Caller MUST verify
+    row existence before deciding 200 vs 500.
+    """
+    global _TRANSPORT_ERROR_TYPES
+    if not _TRANSPORT_ERROR_TYPES:
+        try:
+            import httpx
+        except ImportError:
+            return False
+        types: list[type[BaseException]] = [
+            httpx.RemoteProtocolError,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.NetworkError,
+        ]
+        try:
+            import httpcore
+            types.append(httpcore.RemoteProtocolError)
+            types.append(httpcore.NetworkError)
+        except ImportError:
+            pass
+        _TRANSPORT_ERROR_TYPES = tuple(types)
+    return isinstance(exc, _TRANSPORT_ERROR_TYPES)
+
+
+async def _webhook_event_exists(provider: str, event_id: str) -> bool:
+    """Best-effort lookup against ``webhook_events``. Bounded 1.5s.
+
+    Returns True iff a ``(provider, event_id)`` row already exists.
+    Used to recover from transport-class errors where the INSERT
+    may have committed despite the dropped response. Any error
+    (including timeout) returns False — caller falls through to
+    the 500 path and Instantly's retry + the sweeper recover.
+    """
+    if not db.client:
+        return False
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: db.client.table("webhook_events")
+                .select("id")
+                .eq("provider", provider)
+                .eq("event_id", event_id)
+                .limit(1)
+                .execute()
+            ),
+            timeout=1.5,
+        )
+    except Exception:
+        return False
+    return bool(getattr(result, "data", None))
+
+
 @app.post("/webhooks/instantly", response_class=JSONResponse)
 @limiter.limit("120/minute")
 async def webhook_instantly(request: Request, background_tasks: BackgroundTasks):
@@ -1182,7 +1249,9 @@ async def webhook_instantly(request: Request, background_tasks: BackgroundTasks)
         return JSONResponse({"detail": "database unavailable"}, status_code=503)
 
     # Idempotent insert via repository. Duplicate (23505) → 200 with
-    # flag. Anything else propagates and becomes a 500 below.
+    # flag. Transport-class errors can land AFTER the row commits to
+    # Postgres (httpcore RemoteProtocolError on the response read);
+    # re-read the table on those before deciding 500.
     try:
         result = await WebhookEventRepository(db.client).insert_event(
             provider=_INSTANTLY_WEBHOOK_PROVIDER,
@@ -1190,16 +1259,47 @@ async def webhook_instantly(request: Request, background_tasks: BackgroundTasks)
             event_type=event_type,
             payload=payload,
         )
-    except Exception:
+    except Exception as exc:
+        if _is_transport_error(exc) and await _webhook_event_exists(
+            _INSTANTLY_WEBHOOK_PROVIDER, event_id,
+        ):
+            # Row landed despite the dropped response. Treat as a
+            # fresh accepted event (idempotency lock guarantees we
+            # are the original writer; a concurrent retry would not
+            # reach this branch because its INSERT would 23505).
+            logger.warning(
+                "instantly webhook transport error post-commit; row exists, scheduling bg task",
+                extra={
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+            if event_type in _INSTANTLY_HANDLED_EVENTS:
+                background_tasks.add_task(
+                    _process_instantly_event, event_id=event_id, payload=payload,
+                )
+            return JSONResponse({"ok": True, "recovered": True}, status_code=200)
         logger.exception("instantly webhook INSERT failed")
         return JSONResponse({"detail": "internal error"}, status_code=500)
 
     if result.duplicate:
-        # Instantly is replaying. 200 + flag the duplicate.
+        # Instantly is replaying — typically because an earlier
+        # delivery returned 500 (transport error after row commit;
+        # see _is_transport_error). Schedule the background task so
+        # the duplicate path is the recovery path: handlers are
+        # idempotent (mark_sent gates on .is_("provider_message_id",
+        # "null"); suppressions use upsert ignore_duplicates), so
+        # re-firing is safe even when the original delivery DID
+        # complete cleanly.
         logger.info(
             "instantly webhook duplicate event_id=%s",
             event_id, extra={"event_id": event_id, "event_type": event_type},
         )
+        if event_type in _INSTANTLY_HANDLED_EVENTS:
+            background_tasks.add_task(
+                _process_instantly_event, event_id=event_id, payload=payload,
+            )
         return JSONResponse({"ok": True, "duplicate": True}, status_code=200)
 
     # Process the event off the request path so Instantly's 2s timeout
