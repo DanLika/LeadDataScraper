@@ -9,6 +9,7 @@ load_dotenv()
 
 logger = get_logger(__name__)
 
+
 class SupabaseHelper:
     def __init__(self):
         url: str = os.environ.get("SUPABASE_URL")
@@ -50,7 +51,9 @@ class SupabaseHelper:
         except Exception as e:
             if "column" in str(e) and "does not exist" in str(e):
                 logger.error("DATABASE SCHEMA MISMATCH: %s", e)
-                logger.warning("Please run the SQL migration script provided in the implementation plan.")
+                logger.warning(
+                    "Please run the SQL migration script provided in the implementation plan."
+                )
             else:
                 logger.error("Error upserting leads: %s", e, exc_info=True)
             # Returns None on failure; callers must check the return value and
@@ -66,9 +69,16 @@ class SupabaseHelper:
             return None
 
         try:
-            return self.client.table("leads").update(data).eq("unique_key", unique_key).execute()
+            return (
+                self.client.table("leads")
+                .update(data)
+                .eq("unique_key", unique_key)
+                .execute()
+            )
         except Exception as e:
-            logger.error("Error updating lead info for %s: %s", unique_key, e, exc_info=True)
+            logger.error(
+                "Error updating lead info for %s: %s", unique_key, e, exc_info=True
+            )
             return None
 
     def update_audit(self, unique_key: str, audit_data: dict):
@@ -78,10 +88,7 @@ class SupabaseHelper:
         if not self.client:
             return None
 
-        update_data = {
-            "audit_status": "Completed",
-            "audit_results": audit_data
-        }
+        update_data = {"audit_status": "Completed", "audit_results": audit_data}
 
         # Extract intelligence fields if present
         if "emails" in audit_data and audit_data["emails"]:
@@ -97,9 +104,16 @@ class SupabaseHelper:
             update_data["high_risk_flag"] = bool(audit_data["high_risk_flag"])
 
         try:
-            return self.client.table("leads").update(update_data).eq("unique_key", unique_key).execute()
+            return (
+                self.client.table("leads")
+                .update(update_data)
+                .eq("unique_key", unique_key)
+                .execute()
+            )
         except Exception as e:
-            logger.error("Error updating audit for %s: %s", unique_key, e, exc_info=True)
+            logger.error(
+                "Error updating audit for %s: %s", unique_key, e, exc_info=True
+            )
             return None
 
     # ---- async wrappers for hot read paths -----------------------------
@@ -147,20 +161,28 @@ class SupabaseHelper:
         upload, Google-Maps scrape) write `is_demo=false` so the filter
         is a no-op for them.
         """
+
         def _query():
             q = self.client.table("leads").select("*")
             if not include_demo:
                 q = q.eq("is_demo", False)
-            if cursor and isinstance(cursor.get("c"), str) and isinstance(cursor.get("k"), str):
+            if (
+                cursor
+                and isinstance(cursor.get("c"), str)
+                and isinstance(cursor.get("k"), str)
+            ):
                 c = cursor["c"]
                 k = cursor["k"]
                 # PostgREST `or` syntax: f1,f2 — top level is OR. Nested
                 # `and(...)` lets us express the tie-break atomically.
-                q = q.or_(
-                    f"created_at.lt.{c},and(created_at.eq.{c},unique_key.lt.{k})"
-                )
-            q = q.order("created_at", desc=True).order("unique_key", desc=True).limit(limit)
+                q = q.or_(f"created_at.lt.{c},and(created_at.eq.{c},unique_key.lt.{k})")
+            q = (
+                q.order("created_at", desc=True)
+                .order("unique_key", desc=True)
+                .limit(limit)
+            )
             return q.execute()
+
         response = await asyncio.to_thread(_query)
         return response.data
 
@@ -173,14 +195,15 @@ class SupabaseHelper:
         excluded from the dashboard's stats by default so demo data
         doesn't inflate the operator's real-lead counts.
         """
+
         def _query():
-            q = (
-                self.client.table("leads")
-                .select("audit_status", "audit_results", "seo_score", "lead_source")
+            q = self.client.table("leads").select(
+                "audit_status", "audit_results", "seo_score", "lead_source"
             )
             if not include_demo:
                 q = q.eq("is_demo", False)
             return q.execute()
+
         response = await asyncio.to_thread(_query)
         return response.data
 
@@ -207,7 +230,11 @@ class SupabaseHelper:
             .eq("is_demo", True)
             .execute()
         )
-        demo_keys = [row["unique_key"] for row in (demo_keys_resp.data or []) if row.get("unique_key")]
+        demo_keys = [
+            row["unique_key"]
+            for row in (demo_keys_resp.data or [])
+            if row.get("unique_key")
+        ]
 
         messages_deleted = 0
         if demo_keys:
@@ -219,18 +246,14 @@ class SupabaseHelper:
             )
             messages_deleted = len(msg_resp.data or [])
 
-        leads_resp = (
-            self.client.table("leads")
-            .delete()
-            .eq("is_demo", True)
-            .execute()
-        )
+        leads_resp = self.client.table("leads").delete().eq("is_demo", True).execute()
         leads_deleted = len(leads_resp.data or [])
         return {"leads_deleted": leads_deleted, "messages_deleted": messages_deleted}
 
     async def find_running_job(self):
         """Async wrapper for orchestrator's resume-check on /process-lead /
         /process-all path. Returns the response.data list (0 or 1 row)."""
+
         def _query():
             return (
                 self.client.table("orchestration_jobs")
@@ -239,14 +262,17 @@ class SupabaseHelper:
                 .limit(1)
                 .execute()
             )
+
         response = await asyncio.to_thread(_query)
         return response.data
 
     async def insert_orchestration_job(self, job_data: dict):
         """Async wrapper used by run_massive_pipeline before dispatching the
         background task. Returns the inserted-row response.data."""
+
         def _query():
             return self.client.table("orchestration_jobs").insert(job_data).execute()
+
         response = await asyncio.to_thread(_query)
         return response.data
 
@@ -257,7 +283,12 @@ class SupabaseHelper:
         if not self.client:
             return []
 
-        return self.client.table("leads").select("*").eq("audit_status", "Pending").execute()
+        return (
+            self.client.table("leads")
+            .select("*")
+            .eq("audit_status", "Pending")
+            .execute()
+        )
 
     def delete_all_leads(self):
         """
@@ -269,7 +300,12 @@ class SupabaseHelper:
         """
         if not self.client:
             return None
-        return self.client.table("leads").delete().gte("created_at", "1970-01-01").execute()
+        return (
+            self.client.table("leads")
+            .delete()
+            .gte("created_at", "1970-01-01")
+            .execute()
+        )
 
     def delete_all_jobs(self):
         """
@@ -280,7 +316,12 @@ class SupabaseHelper:
         """
         if not self.client:
             return None
-        return self.client.table("orchestration_jobs").delete().gte("created_at", "1970-01-01").execute()
+        return (
+            self.client.table("orchestration_jobs")
+            .delete()
+            .gte("created_at", "1970-01-01")
+            .execute()
+        )
 
     def check_schema(self):
         """
@@ -299,21 +340,48 @@ class SupabaseHelper:
         # invisible at boot and only surfaced on the next user upload.
         required_cols = [
             # Core ingest columns — referenced by /upload + the CSV pipeline.
-            "address", "name", "email", "website", "lead_source", "updated_at",
-            "audit_status", "audit_results",
+            "address",
+            "name",
+            "email",
+            "website",
+            "lead_source",
+            "updated_at",
+            "audit_status",
+            "audit_results",
             # Enrichment columns — referenced by /hunt-lead + orchestrator.
-            "enrichment_status", "high_risk_flag", "seo_score", "company_size",
-            "leadership_team", "key_offerings", "contact_details", "business_details",
-            "target_clients", "pain_points", "facebook", "instagram", "linkedin",
-            "outreach_score", "phone", "segment", "linkedin_hook", "email_hook",
-            "tiktok", "pinterest", "first_name", "company_name", "priority_link", "needs_manual_review"
+            "enrichment_status",
+            "high_risk_flag",
+            "seo_score",
+            "company_size",
+            "leadership_team",
+            "key_offerings",
+            "contact_details",
+            "business_details",
+            "target_clients",
+            "pain_points",
+            "facebook",
+            "instagram",
+            "linkedin",
+            "outreach_score",
+            "phone",
+            "segment",
+            "linkedin_hook",
+            "email_hook",
+            "tiktok",
+            "pinterest",
+            "first_name",
+            "company_name",
+            "priority_link",
+            "needs_manual_review",
         ]
 
         try:
             # Optimization 1: Attempt to select all columns in a single row query
             # This handles the common case where all columns exist with only 1 query.
             try:
-                self.client.table("leads").select(",".join(required_cols)).limit(1).execute()
+                self.client.table("leads").select(",".join(required_cols)).limit(
+                    1
+                ).execute()
                 return []
             except Exception as e:
                 # If selection fails, it's likely because one or more columns are missing
@@ -352,7 +420,10 @@ class SupabaseHelper:
             if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\Z", col_str):
                 valid_columns.append(col_str)
             else:
-                logger.warning("Auto-migration: Skipping invalid column name '%s' to prevent SQL injection", col_str)
+                logger.warning(
+                    "Auto-migration: Skipping invalid column name '%s' to prevent SQL injection",
+                    col_str,
+                )
 
         if not valid_columns:
             logger.warning("Auto-migration: No valid columns to migrate.")
@@ -371,6 +442,7 @@ class SupabaseHelper:
                 logger.warning(
                     "Auto-migration: add_lead_column(%s) failed (the RPC may not "
                     "exist yet — run the latest supabase_schema.sql): %s",
-                    col, e,
+                    col,
+                    e,
                 )
         return success_any

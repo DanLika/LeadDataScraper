@@ -14,10 +14,9 @@ export interface SupabaseCookieOptions {
 export interface HardenedCookieOptions extends SupabaseCookieOptions {
   sameSite: 'lax' | 'strict'
   httpOnly: true
-  secure: boolean
+  secure: true
 }
 
 export function hardenCookieOptions(
   options: SupabaseCookieOptions | undefined,
-  isProd: boolean,
 ): HardenedCookieOptions

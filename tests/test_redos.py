@@ -55,6 +55,7 @@ HARD_CAP_SECONDS = 2.0
 # Bounded matcher.
 # ---------------------------------------------------------------------------
 
+
 class _ReDoSAlarm(Exception):
     """Raised by SIGALRM when a regex blows past the hard cap."""
 
@@ -101,8 +102,8 @@ def _match_with_cap(pattern: re.Pattern, payload: str) -> tuple[float, bool]:
 LONG_A = "a" * 50_000
 LONG_DIGITS = "1" * 50_000
 LONG_SPACES = " " * 50_000
-EVIL_EMAIL_INPUT = "a@" + LONG_A + "!"          # user's spec
-EVIL_URL_INPUT = "http://" + LONG_A             # user's spec
+EVIL_EMAIL_INPUT = "a@" + LONG_A + "!"  # user's spec
+EVIL_URL_INPUT = "http://" + LONG_A  # user's spec
 
 
 REGISTRY: dict[str, tuple[re.Pattern, list[str]]] = {
@@ -121,39 +122,36 @@ REGISTRY: dict[str, tuple[re.Pattern, list[str]]] = {
             re.IGNORECASE,
         ),
         [
-            "user@example.com",                  # legitimate
+            "user@example.com",  # legitimate
             EVIL_EMAIL_INPUT,
             "a@b.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "x" + "@x" * 5000 + "x",             # alternation-style
+            "x" + "@x" * 5000 + "x",  # alternation-style
             # Bound the dot/charset-overlap payload to a size the
             # production 50 KB cap also tolerates. The regex itself is
             # O(n²) past that — the cap is the defense, not the regex.
             ("a@" + "a." * 1000 + "x")[:50_000],
         ],
     ),
-
     "smtp_recipient_email_sender": (
         re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
         [
             "user@example.com",
-            EVIL_EMAIL_INPUT,                    # no dot → fails fast
-            "a@" + LONG_A + ".com",              # legitimate-shape, long
-            "a@" + LONG_A + "@" + LONG_A,        # double-@ smuggling
-            "@" + LONG_A + ".com",               # leading @ trick
+            EVIL_EMAIL_INPUT,  # no dot → fails fast
+            "a@" + LONG_A + ".com",  # legitimate-shape, long
+            "a@" + LONG_A + "@" + LONG_A,  # double-@ smuggling
+            "@" + LONG_A + ".com",  # leading @ trick
         ],
     ),
-
     "phone_discovery_engine": (
         re.compile(r"(\+?\d{1,4}[\s.-]?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}"),
         [
-            "+1 (555) 555-5555",                 # legitimate
-            LONG_DIGITS,                         # all-digits bomb
+            "+1 (555) 555-5555",  # legitimate
+            LONG_DIGITS,  # all-digits bomb
             "5555555" + LONG_DIGITS,
-            "(((((" + LONG_DIGITS + ")))))",     # paren bomb
+            "(((((" + LONG_DIGITS + ")))))",  # paren bomb
             "+" + "0" * 5000 + "-" + LONG_DIGITS,
         ],
     ),
-
     "outreach_subject_agentic_router": (
         # The CURRENT (fixed) pattern. The vulnerable form was
         # `^\s*Subject\s*:\s*(.+?)\s*\n+` — O(n²) on whitespace-padded
@@ -163,46 +161,42 @@ REGISTRY: dict[str, tuple[re.Pattern, list[str]]] = {
             re.IGNORECASE,
         ),
         [
-            "Subject: Hi\n\nBody",               # legitimate
-            "Subject: " + LONG_SPACES + "X",     # the ReDoS killer
+            "Subject: Hi\n\nBody",  # legitimate
+            "Subject: " + LONG_SPACES + "X",  # the ReDoS killer
             "Subject:" + LONG_SPACES + "no-newline-tail",
             "  Subject:   hello world   \nbody",
-            "\n\nSubject: hi\nbody",             # leading newlines
+            "\n\nSubject: hi\nbody",  # leading newlines
             "no-subject-line\n" + LONG_A,
         ],
     ),
-
     "numeric_host_ssrf_guard": (
         re.compile(r"^[\d.]+$"),
         [
             "127.0.0.1",
             "1.1.1.1",
             LONG_DIGITS,
-            "1." * 25000,                        # alternating dots+digits
+            "1." * 25000,  # alternating dots+digits
             "01234567." * 6000,
         ],
     ),
-
     "supabase_column_name": (
         re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z"),
         [
             "valid_col",
-            "a" + LONG_A,                        # long but valid
-            LONG_A + "!",                        # fails on '!'
-            LONG_DIGITS,                         # fails on leading digit
+            "a" + LONG_A,  # long but valid
+            LONG_A + "!",  # fails on '!'
+            LONG_DIGITS,  # fails on leading digit
         ],
     ),
-
     "code_fence_json_helper_open": (
         re.compile(r"```(?:json)?\s*"),
         [
             "```json\n{}",
             "```\n",
-            "```" + LONG_SPACES + "x",           # whitespace after fence
-            LONG_A,                              # no fence at all
+            "```" + LONG_SPACES + "x",  # whitespace after fence
+            LONG_A,  # no fence at all
         ],
     ),
-
     "code_fence_json_helper_close": (
         re.compile(r"```\s*$"),
         [
@@ -212,32 +206,29 @@ REGISTRY: dict[str, tuple[re.Pattern, list[str]]] = {
             LONG_A,
         ],
     ),
-
     "subject_line_seo_url_match": (
         re.compile(r"(\+?\d{1,4}[\s.-]?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}"),
         # Same regex as `phone_discovery_engine` — but separated so a future
         # divergence between the two files is caught.
         [
             "+44 20 1234 5678",
-            EVIL_URL_INPUT,                       # url-shaped, no phone
+            EVIL_URL_INPUT,  # url-shaped, no phone
             LONG_DIGITS,
         ],
     ),
-
     "leadhunter_segment_keywords_security": (
         re.compile(r"critical|missing ssl|security"),
         [
             "Audit found: missing ssl warnings",
-            LONG_A,                              # no keyword present
+            LONG_A,  # no keyword present
             "criticalcriticalcritical" + LONG_A,
         ],
     ),
-
     "leadhunter_split_tokens": (
         re.compile(r"[,\s&|/()]+"),
         [
             "tag1, tag2 & tag3",
-            "," * 50_000,                        # delimiter-only bomb
+            "," * 50_000,  # delimiter-only bomb
             LONG_SPACES + "x",
             "(" * 50_000,
         ],
@@ -249,25 +240,29 @@ REGISTRY: dict[str, tuple[re.Pattern, list[str]]] = {
 # Per-regex bounded match test.
 # ---------------------------------------------------------------------------
 
-class TestReDoSBound(unittest.TestCase):
 
-    def _run_regex_set(self, label: str, regex: re.Pattern,
-                       payloads: list[str]):
+class TestReDoSBound(unittest.TestCase):
+    def _run_regex_set(self, label: str, regex: re.Pattern, payloads: list[str]):
         slow: list[tuple[str, float, bool]] = []
         for payload in payloads:
             elapsed_ms, completed = _match_with_cap(regex, payload)
             if not completed or elapsed_ms > PER_MATCH_CAP_MS:
-                slow.append((payload[:60] + ("…" if len(payload) > 60 else ""),
-                             elapsed_ms, completed))
+                slow.append(
+                    (
+                        payload[:60] + ("…" if len(payload) > 60 else ""),
+                        elapsed_ms,
+                        completed,
+                    )
+                )
         self.assertEqual(
-            slow, [],
+            slow,
+            [],
             f"\n  Catastrophic / slow matches in regex {label!r}:\n  "
             + "\n  ".join(
-                f"  - input={p!r} elapsed={ms:.1f}ms completed={c}"
-                for p, ms, c in slow
+                f"  - input={p!r} elapsed={ms:.1f}ms completed={c}" for p, ms, c in slow
             )
             + f"\n  Cap: {PER_MATCH_CAP_MS} ms. Rewrite with atomic groups "
-              f"or bounded character classes."
+            f"or bounded character classes.",
         )
 
     def test_bounded_match_time_per_regex(self):
@@ -281,8 +276,8 @@ class TestReDoSBound(unittest.TestCase):
 # Catches anyone re-introducing the old form.
 # ---------------------------------------------------------------------------
 
-class TestSubjectParserReDoSRegression(unittest.TestCase):
 
+class TestSubjectParserReDoSRegression(unittest.TestCase):
     def test_old_vulnerable_pattern_is_catastrophic(self):
         """Run the OLD pattern against the killer input and assert it
         either exceeds the cap OR doesn't complete within the hard cap.
@@ -290,7 +285,8 @@ class TestSubjectParserReDoSRegression(unittest.TestCase):
         fast), the bound numbers below need updating — but it should
         never pass quickly with the current CPython re engine."""
         old_pat = re.compile(
-            r"^\s*Subject\s*:\s*(.+?)\s*\n+", re.IGNORECASE,
+            r"^\s*Subject\s*:\s*(.+?)\s*\n+",
+            re.IGNORECASE,
         )
         # Smaller payload than 50K so the alarm doesn't fire while we
         # measure — we just want to prove the pattern is O(n²).
@@ -303,7 +299,7 @@ class TestSubjectParserReDoSRegression(unittest.TestCase):
             f"on a {n}-space payload — that's unexpectedly fast. "
             f"Either CPython hardened the regex engine, or the payload "
             f"shape no longer reproduces. Verify the fix is still "
-            f"needed in src/core/agentic_router.py."
+            f"needed in src/core/agentic_router.py.",
         )
 
     def test_current_fixed_pattern_is_linear(self):
@@ -316,7 +312,8 @@ class TestSubjectParserReDoSRegression(unittest.TestCase):
             elapsed_ms, completed = _match_with_cap(fixed_pat, payload)
             self.assertTrue(completed, f"fixed pattern hung at n={n}")
             self.assertLess(
-                elapsed_ms, PER_MATCH_CAP_MS,
+                elapsed_ms,
+                PER_MATCH_CAP_MS,
                 f"Fixed pattern n={n}: {elapsed_ms:.1f}ms (cap {PER_MATCH_CAP_MS}ms)",
             )
 
@@ -326,11 +323,11 @@ class TestSubjectParserReDoSRegression(unittest.TestCase):
             re.IGNORECASE,
         )
         cases = [
-            ("Subject: Hello\n\nBody",                 "Hello"),
-            ("Subject: Hi\r\n\r\nBody",                "Hi"),
-            ("  Subject:   hello world   \nbody",      "hello world"),
-            ("\n\nSubject: hi\nbody",                  "hi"),
-            ('Subject: "quoted"\nbody',                "quoted"),
+            ("Subject: Hello\n\nBody", "Hello"),
+            ("Subject: Hi\r\n\r\nBody", "Hi"),
+            ("  Subject:   hello world   \nbody", "hello world"),
+            ("\n\nSubject: hi\nbody", "hi"),
+            ('Subject: "quoted"\nbody', "quoted"),
         ]
         for raw, expected in cases:
             with self.subTest(raw=raw[:40]):
@@ -351,6 +348,7 @@ class TestSubjectParserReDoSRegression(unittest.TestCase):
 # Production-cap enforcement: every email-extraction call site must
 # slice the input before passing to `re.findall` / `re.search`.
 # ---------------------------------------------------------------------------
+
 
 class TestEmailRegexInputBounded(unittest.TestCase):
     """The email regex itself is O(n²) under unbounded `findall`. Every
@@ -379,8 +377,10 @@ class TestEmailRegexInputBounded(unittest.TestCase):
             # already-sliced value. Either is acceptable evidence of
             # an explicit cap.
             for line_num, line in enumerate(text.splitlines(), start=1):
-                if "re.findall(email_regex" not in line and \
-                   "re.search(email_regex" not in line:
+                if (
+                    "re.findall(email_regex" not in line
+                    and "re.search(email_regex" not in line
+                ):
                     continue
                 m = re.search(
                     r"re\.(?:findall|search)\(email_regex,\s*([^,)]+)",
@@ -401,7 +401,8 @@ class TestEmailRegexInputBounded(unittest.TestCase):
                 )
 
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "Email-regex callers without [:N] input cap (CPU DoS surface):\n  "
             + "\n  ".join(offenders),
         )
@@ -415,6 +416,7 @@ class TestEmailRegexInputBounded(unittest.TestCase):
 
 try:
     from hypothesis import given, settings, strategies as st
+
     HAS_HYPOTHESIS = True
 except ImportError:
     HAS_HYPOTHESIS = False

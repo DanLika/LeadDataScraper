@@ -45,6 +45,32 @@ services:
       - key: PYTHON_ENV
         value: production
 
+  # Webhook Sweeper (Cron) — Path A recovery for stranded webhook_events
+  # rows where supabase-py raised an httpx/httpcore transport exception
+  # AFTER PostgREST committed the INSERT (see PR #357 for Path B + C at
+  # the handler layer; this is the catchall). Every 2 minutes; reuses
+  # the backend Docker image so dependency drift between web and cron
+  # is impossible. ~50-row batch, 50s runtime cap (Render Cron hard
+  # ceiling is 60s).
+  - type: cron
+    name: lead-scraper-webhook-sweeper
+    env: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile
+    schedule: "*/2 * * * *"
+    dockerCommand: python scripts/webhook_sweeper.py
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
+      - key: PYTHON_ENV
+        value: production
+
   # Frontend Service (Next.js) — talks to the backend ONLY via a server-side
   # proxy route. The backend X-API-Key is held server-side and must never use
   # the NEXT_PUBLIC_ prefix.

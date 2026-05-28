@@ -49,12 +49,30 @@ class GeminiMapper:
             return {}
 
         standard_columns = [
-            "name", "company_name", "website", "email", "phone", "address",
-            "facebook", "instagram", "linkedin", "tiktok", "pinterest",
-            "company_size", "leadership_team", "key_offerings", "business_details",
-            "target_clients", "pain_points", "segment",
-            "rating", "reviews", "seo_score", "outreach_score",
-            "email_hook", "linkedin_hook"
+            "name",
+            "company_name",
+            "website",
+            "email",
+            "phone",
+            "address",
+            "facebook",
+            "instagram",
+            "linkedin",
+            "tiktok",
+            "pinterest",
+            "company_size",
+            "leadership_team",
+            "key_offerings",
+            "business_details",
+            "target_clients",
+            "pain_points",
+            "segment",
+            "rating",
+            "reviews",
+            "seo_score",
+            "outreach_score",
+            "email_hook",
+            "linkedin_hook",
         ]
 
         # messy_columns come from arbitrary CSV uploads — fence them so a
@@ -89,7 +107,7 @@ class GeminiMapper:
         try:
             response = guarded_generate_content(
                 self.client,
-                model='gemini-flash-latest',
+                model="gemini-flash-latest",
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=_UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
@@ -98,8 +116,8 @@ class GeminiMapper:
                 estimate_input=estimate_tokens_from_text(prompt),
                 estimate_output=2048,
             )
-            raw_text = response.text.strip('`').strip()
-            if raw_text.startswith('json'):
+            raw_text = response.text.strip("`").strip()
+            if raw_text.startswith("json"):
                 raw_text = raw_text[4:].strip()
 
             mapping = json.loads(raw_text)
@@ -117,10 +135,14 @@ class GeminiMapper:
                 if not isinstance(src, str) or not isinstance(dst, str):
                     continue
                 if src not in input_set:
-                    logger.warning("AI mapper proposed unknown source column %r; dropped.", src)
+                    logger.warning(
+                        "AI mapper proposed unknown source column %r; dropped.", src
+                    )
                     continue
                 if dst not in allowed:
-                    logger.warning("AI mapper proposed unknown target column %r; dropped.", dst)
+                    logger.warning(
+                        "AI mapper proposed unknown target column %r; dropped.", dst
+                    )
                     continue
                 safe_mapping[src] = dst
             return safe_mapping

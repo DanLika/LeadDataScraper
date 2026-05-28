@@ -24,6 +24,7 @@ Test surface:
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise. Supabase is mocked.
 """
+
 import asyncio
 import json
 import os
@@ -44,42 +45,137 @@ OPERATOR_NAME_FIXTURE = "Test Operator"
 # as Latin-1 / Windows-1252. If any of these shows up in a draft, the text
 # was double-encoded somewhere along the wire.
 MOJIBAKE_SUBSTRINGS = (
-    "Ã¡", "Ã©", "Ã­", "Ã³", "Ãº",
-    "Å¡", "Å¾", "Å ", "Å½",
-    "Ä‡", "Ä�", "ÄŒ", "Ä�", "Ä‘",
-    "Ä�ev", "Ä‡ev",
-    "Â ", "â€™", "â€œ", "â€�", "â€"
+    "Ã¡",
+    "Ã©",
+    "Ã­",
+    "Ã³",
+    "Ãº",
+    "Å¡",
+    "Å¾",
+    "Å ",
+    "Å½",
+    "Ä‡",
+    "Ä�",
+    "ÄŒ",
+    "Ä�",
+    "Ä‘",
+    "Ä�ev",
+    "Ä‡ev",
+    "Â ",
+    "â€™",
+    "â€œ",
+    "â€�",
+    "â€",
 )
 
 # Bosnian / Croatian function-word stopwords. If a draft is supposed to be
 # English but contains 2+ of these, it's mixed-language slop. The list is
 # deliberately conservative — common words ONLY, never proper nouns.
 BCS_FUNCTION_WORDS = {
-    "vaš", "vaša", "vaše", "vaši", "vašu", "vašom",
-    "moj", "moja", "moje", "moji", "moju",
-    "ja", "ti", "mi", "vi", "oni", "ona", "ono", "ovaj", "ova", "ovo",
-    "taj", "ta", "to", "onaj", "ona",
-    "je", "su", "smo", "ste", "sam", "si",
-    "biti", "imati", "ima", "imaju",
-    "dobar", "dobra", "dobro", "loš", "loša",
-    "kako", "što", "šta", "gdje", "kada", "kad", "zašto", "ko",
-    "za", "na", "u", "od", "do", "sa", "po", "iz",
-    "ali", "ili", "kao", "iako", "jer", "dok", "ako",
-    "samo", "već", "još", "uvijek", "nikad",
-    "možete", "možemo", "želite", "želimo", "trebate", "trebamo",
-    "puno", "vrlo", "malo", "više", "manje",
-    "vidio", "vidjeli", "vidim",
-    "pomoći", "pomoć", "pomagati",
-    "molim", "hvala", "pozdrav", "srdačno",
-    "stranice", "stranica", "stranicu", "stranici",
-    "preduzeće", "tvrtka", "firma", "firme",
+    "vaš",
+    "vaša",
+    "vaše",
+    "vaši",
+    "vašu",
+    "vašom",
+    "moj",
+    "moja",
+    "moje",
+    "moji",
+    "moju",
+    "ja",
+    "ti",
+    "mi",
+    "vi",
+    "oni",
+    "ona",
+    "ono",
+    "ovaj",
+    "ova",
+    "ovo",
+    "taj",
+    "ta",
+    "to",
+    "onaj",
+    "ona",
+    "je",
+    "su",
+    "smo",
+    "ste",
+    "sam",
+    "si",
+    "biti",
+    "imati",
+    "ima",
+    "imaju",
+    "dobar",
+    "dobra",
+    "dobro",
+    "loš",
+    "loša",
+    "kako",
+    "što",
+    "šta",
+    "gdje",
+    "kada",
+    "kad",
+    "zašto",
+    "ko",
+    "za",
+    "na",
+    "u",
+    "od",
+    "do",
+    "sa",
+    "po",
+    "iz",
+    "ali",
+    "ili",
+    "kao",
+    "iako",
+    "jer",
+    "dok",
+    "ako",
+    "samo",
+    "već",
+    "još",
+    "uvijek",
+    "nikad",
+    "možete",
+    "možemo",
+    "želite",
+    "želimo",
+    "trebate",
+    "trebamo",
+    "puno",
+    "vrlo",
+    "malo",
+    "više",
+    "manje",
+    "vidio",
+    "vidjeli",
+    "vidim",
+    "pomoći",
+    "pomoć",
+    "pomagati",
+    "molim",
+    "hvala",
+    "pozdrav",
+    "srdačno",
+    "stranice",
+    "stranica",
+    "stranicu",
+    "stranici",
+    "preduzeće",
+    "tvrtka",
+    "firma",
+    "firme",
 }
 
 
 def _strip_diacritics(s: str) -> str:
     return "".join(
-        ch for ch in unicodedata.normalize("NFD", s)
-        if not unicodedata.combining(ch)
+        ch for ch in unicodedata.normalize("NFD", s) if not unicodedata.combining(ch)
     )
 
 
@@ -176,8 +272,10 @@ def _fixture_leads_outreach() -> list[dict]:
 
 # ---- Fake Supabase (LinkedIn draft path needs DB) ---------------------------
 
+
 class _FakeExecResult:
-    def __init__(self, rows): self.data = rows
+    def __init__(self, rows):
+        self.data = rows
 
 
 class _FakeQuery:
@@ -185,12 +283,17 @@ class _FakeQuery:
         self._lbk = leads_by_key
         self._eq_filter = None
 
-    def select(self, *_a, **_k): return self
+    def select(self, *_a, **_k):
+        return self
+
     def eq(self, col, val):
         if col == "unique_key":
             self._eq_filter = val
         return self
-    def limit(self, _n): return self
+
+    def limit(self, _n):
+        return self
+
     def execute(self):
         if self._eq_filter is not None:
             lead = self._lbk.get(self._eq_filter)
@@ -201,10 +304,13 @@ class _FakeQuery:
 class _FakeSupabaseClient:
     def __init__(self, leads_by_key: dict):
         self._lbk = leads_by_key
-    def table(self, _name): return _FakeQuery(self._lbk)
+
+    def table(self, _name):
+        return _FakeQuery(self._lbk)
 
 
 # ---- Per-draft validators (shared by outreach + linkedin tests) -------------
+
 
 def _check_no_mojibake(label: str, text: str, failures: list[str]) -> None:
     hits = _has_mojibake(text)
@@ -219,7 +325,9 @@ def _check_no_bcs_slop(label: str, text: str, failures: list[str]) -> None:
         failures.append(f"{label}: mixed-language slop, BCS tokens {hits[:6]}")
 
 
-def _check_diacritics_preserved(label: str, lead: dict, text: str, failures: list[str]) -> None:
+def _check_diacritics_preserved(
+    label: str, lead: dict, text: str, failures: list[str]
+) -> None:
     """
     For every diacritic-bearing fragment in the lead's name, EITHER:
       - it appears in the draft verbatim (good), OR
@@ -240,10 +348,12 @@ def _check_diacritics_preserved(label: str, lead: dict, text: str, failures: lis
 
 
 async def _gen_outreach(router, lead: dict) -> dict:
-    return await router._generate_outreach_draft({
-        "unique_key": lead["unique_key"],
-        "lead_data": lead,
-    })
+    return await router._generate_outreach_draft(
+        {
+            "unique_key": lead["unique_key"],
+            "lead_data": lead,
+        }
+    )
 
 
 async def _gen_linkedin(router, lead: dict) -> dict:
@@ -252,16 +362,20 @@ async def _gen_linkedin(router, lead: dict) -> dict:
 
 # ---- Outreach + LinkedIn i18n test class ------------------------------------
 
+
 @pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestOutreachI18n(unittest.IsolatedAsyncioTestCase):
     """Bosnian/Croatian inputs through /draft-outreach and /draft-linkedin."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-            "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+                "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
+            },
+        )
         self.env_patcher.start()
 
         self.leads = _fixture_leads_outreach()
@@ -273,6 +387,7 @@ class TestOutreachI18n(unittest.IsolatedAsyncioTestCase):
         sb_mock.return_value.client = _FakeSupabaseClient(leads_by_key)
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
         self.assertIsNotNone(self.router.client, "Gemini client must initialize")
 
@@ -309,27 +424,33 @@ class TestOutreachI18n(unittest.IsolatedAsyncioTestCase):
     def test_outreach_no_mojibake(self):
         failures = []
         for lead, d in zip(self.leads, self.outreach):
-            text = (d.get("subject", "") + " " + d.get("draft", ""))
+            text = d.get("subject", "") + " " + d.get("draft", "")
             _check_no_mojibake(f"{lead['unique_key']} outreach", text, failures)
         self.assertFalse(failures, "Mojibake in outreach:\n" + "\n".join(failures))
 
     def test_linkedin_no_mojibake(self):
         failures = []
         for lead, d in zip(self.leads, self.linkedin):
-            _check_no_mojibake(f"{lead['unique_key']} linkedin", d.get("draft", ""), failures)
+            _check_no_mojibake(
+                f"{lead['unique_key']} linkedin", d.get("draft", ""), failures
+            )
         self.assertFalse(failures, "Mojibake in linkedin:\n" + "\n".join(failures))
 
     def test_outreach_no_bcs_slop(self):
         """Default = English. >=2 Bosnian/Croatian function words = slop."""
         failures = []
         for lead, d in zip(self.leads, self.outreach):
-            _check_no_bcs_slop(f"{lead['unique_key']} outreach", d.get("draft", ""), failures)
+            _check_no_bcs_slop(
+                f"{lead['unique_key']} outreach", d.get("draft", ""), failures
+            )
         self.assertFalse(failures, "Mixed-language outreach:\n" + "\n".join(failures))
 
     def test_linkedin_no_bcs_slop(self):
         failures = []
         for lead, d in zip(self.leads, self.linkedin):
-            _check_no_bcs_slop(f"{lead['unique_key']} linkedin", d.get("draft", ""), failures)
+            _check_no_bcs_slop(
+                f"{lead['unique_key']} linkedin", d.get("draft", ""), failures
+            )
         self.assertFalse(failures, "Mixed-language linkedin:\n" + "\n".join(failures))
 
     def test_outreach_diacritics_preserved(self):
@@ -341,7 +462,8 @@ class TestOutreachI18n(unittest.IsolatedAsyncioTestCase):
                 f"{lead['unique_key']} outreach", lead, text, failures
             )
         self.assertFalse(
-            failures, "Silent ASCII transliteration in outreach:\n" + "\n".join(failures)
+            failures,
+            "Silent ASCII transliteration in outreach:\n" + "\n".join(failures),
         )
 
     def test_linkedin_diacritics_preserved(self):
@@ -351,11 +473,13 @@ class TestOutreachI18n(unittest.IsolatedAsyncioTestCase):
                 f"{lead['unique_key']} linkedin", lead, d.get("draft", ""), failures
             )
         self.assertFalse(
-            failures, "Silent ASCII transliteration in linkedin:\n" + "\n".join(failures)
+            failures,
+            "Silent ASCII transliteration in linkedin:\n" + "\n".join(failures),
         )
 
 
 # ---- AI mapper i18n ---------------------------------------------------------
+
 
 @pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
@@ -363,12 +487,16 @@ class TestMapperI18n(unittest.IsolatedAsyncioTestCase):
     """Croatian CSV header row through GeminiMapper.get_column_mapping."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+            },
+        )
         self.env_patcher.start()
 
         from src.processors.ai_mapper import GeminiMapper
+
         self.mapper = GeminiMapper()
         self.assertIsNotNone(self.mapper.client, "Gemini client must initialize")
 
@@ -385,10 +513,10 @@ class TestMapperI18n(unittest.IsolatedAsyncioTestCase):
         headers = [
             "Naziv tvrtke",  # company name
             "Web stranica",  # website
-            "E-pošta",       # email
-            "Telefon",       # phone
-            "Mjesto",        # city (no standard target — should be ignored)
-            "Računovođa",    # accountant (no target — ignored, diacritic stress)
+            "E-pošta",  # email
+            "Telefon",  # phone
+            "Mjesto",  # city (no standard target — should be ignored)
+            "Računovođa",  # accountant (no target — ignored, diacritic stress)
         ]
         mapping = await asyncio.to_thread(self.mapper.get_column_mapping, headers)
         self.assertIsInstance(mapping, dict, f"non-dict return: {type(mapping)}")
@@ -404,7 +532,9 @@ class TestMapperI18n(unittest.IsolatedAsyncioTestCase):
             got = mapping.get(src)
             if got != want:
                 failures.append(f"{src!r} → {got!r}, expected {want!r}")
-        self.assertFalse(failures, "Croatian header mapping misses:\n" + "\n".join(failures))
+        self.assertFalse(
+            failures, "Croatian header mapping misses:\n" + "\n".join(failures)
+        )
 
         # Mojibake check on the keys the mapper echoed back — Gemini sometimes
         # round-trips strings through a non-UTF-8 path and corrupts diacritics
@@ -421,8 +551,8 @@ class TestMapperI18n(unittest.IsolatedAsyncioTestCase):
             "Web adresa",
             "Email adresa",
             "Telefon",
-            "Adresa",            # no target
-            "računovodstvo",     # no target, lowercase diacritic stress
+            "Adresa",  # no target
+            "računovodstvo",  # no target, lowercase diacritic stress
         ]
         mapping = await asyncio.to_thread(self.mapper.get_column_mapping, headers)
         self.assertIsInstance(mapping, dict)
@@ -439,7 +569,9 @@ class TestMapperI18n(unittest.IsolatedAsyncioTestCase):
             got = mapping.get(src)
             if got != want:
                 failures.append(f"{src!r} → {got!r}, expected {want!r}")
-        self.assertFalse(failures, "Bosnian header mapping misses:\n" + "\n".join(failures))
+        self.assertFalse(
+            failures, "Bosnian header mapping misses:\n" + "\n".join(failures)
+        )
 
         mojibake = [k for k in mapping if _has_mojibake(k)]
         self.assertFalse(mojibake, f"Mojibake in mapping keys: {mojibake}")

@@ -54,8 +54,11 @@ def _load_env() -> dict[str, str]:
                 if v and k not in merged:
                     merged[k] = v
     for k in (
-        "RUN_IDOR_SWEEP", "BACKEND_URL", "API_SECRET_KEY",
-        "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
+        "RUN_IDOR_SWEEP",
+        "BACKEND_URL",
+        "API_SECRET_KEY",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
         "NEXT_PUBLIC_SUPABASE_URL",
     ):
         v = os.environ.get(k)
@@ -82,6 +85,7 @@ pytestmark = pytest.mark.skipif(
 # Helpers.
 # ---------------------------------------------------------------------------
 
+
 def _service_client():
     url = ENV.get("SUPABASE_URL") or ENV.get("NEXT_PUBLIC_SUPABASE_URL")
     key = ENV.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -89,14 +93,17 @@ def _service_client():
         return None
     try:
         from supabase import create_client
+
         return create_client(url, key)
     except Exception:
         return None
 
 
 def _h(*, key: Optional[str] = None) -> dict[str, str]:
-    return {"X-API-Key": key if key is not None else API_KEY,
-            "Content-Type": "application/json"}
+    return {
+        "X-API-Key": key if key is not None else API_KEY,
+        "Content-Type": "application/json",
+    }
 
 
 @pytest.fixture(scope="module")
@@ -105,16 +112,16 @@ def seeded_campaign_id():
     module runs. Yields the UUID."""
     svc = _service_client()
     if svc is None:
-        pytest.skip(
-            "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY required to seed/cleanup"
-        )
+        pytest.skip("SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY required to seed/cleanup")
     cid = str(uuid.uuid4())
-    svc.table("campaigns").insert({
-        "id": cid,
-        "name": f"idor-sweep-{cid[:8]}",
-        "segment": "all",
-        "status": "draft",
-    }).execute()
+    svc.table("campaigns").insert(
+        {
+            "id": cid,
+            "name": f"idor-sweep-{cid[:8]}",
+            "segment": "all",
+            "status": "draft",
+        }
+    ).execute()
     try:
         yield cid
     finally:
@@ -124,6 +131,7 @@ def seeded_campaign_id():
 # ---------------------------------------------------------------------------
 # 1) Wrong / mutated API key → 401/403 on read AND on state-change.
 # ---------------------------------------------------------------------------
+
 
 # Parametrize ids are deliberately opaque labels — pytest collection prints
 # IDs to stdout/CI logs, so derived values (real key with one char swapped,
@@ -135,12 +143,18 @@ def seeded_campaign_id():
         "",
         ("first-char-mutated", lambda: "x" + API_KEY[1:] if API_KEY else "x"),
         ("last-char-mutated", lambda: API_KEY[:-1] + "Z" if API_KEY else "Z"),
-        ("with-suffix",       lambda: API_KEY + "extra" if API_KEY else "extra"),
+        ("with-suffix", lambda: API_KEY + "extra" if API_KEY else "extra"),
         "0" * 64,
-        ("bearer-prefix",     lambda: "Bearer " + API_KEY if API_KEY else "Bearer x"),
+        ("bearer-prefix", lambda: "Bearer " + API_KEY if API_KEY else "Bearer x"),
     ],
-    ids=["empty", "first-char-mutated", "last-char-mutated",
-         "with-suffix", "all-zeros", "bearer-prefix"],
+    ids=[
+        "empty",
+        "first-char-mutated",
+        "last-char-mutated",
+        "with-suffix",
+        "all-zeros",
+        "bearer-prefix",
+    ],
 )
 def test_wrong_api_key_blocks_read(seeded_campaign_id, bad_key):
     if isinstance(bad_key, tuple):
@@ -182,9 +196,14 @@ def test_wrong_api_key_blocks_state_change(seeded_campaign_id, bad_key):
         f"Wrong API key reached state change: {r.status_code}"
     )
     if svc is not None:
-        row = svc.table("campaigns").select("status").eq(
-            "id", seeded_campaign_id
-        ).maybe_single().execute().data
+        row = (
+            svc.table("campaigns")
+            .select("status")
+            .eq("id", seeded_campaign_id)
+            .maybe_single()
+            .execute()
+            .data
+        )
         assert row is not None
         assert row["status"] == "draft", (
             f"State changed despite auth rejection: {row['status']!r}"
@@ -194,6 +213,7 @@ def test_wrong_api_key_blocks_state_change(seeded_campaign_id, bad_key):
 # ---------------------------------------------------------------------------
 # 2) UUID enumeration timing — no info leak beyond the 200/404 status code.
 # ---------------------------------------------------------------------------
+
 
 def test_uuid_enumeration_timing_uniform(seeded_campaign_id):
     """For 20 random non-existent UUIDs + 5 hits on the existing one,
@@ -211,7 +231,8 @@ def test_uuid_enumeration_timing_uniform(seeded_campaign_id):
         t0 = time.perf_counter()
         r = requests.get(
             f"{BACKEND_URL}/campaigns/{seeded_campaign_id}",
-            headers=_h(), timeout=TIMEOUT,
+            headers=_h(),
+            timeout=TIMEOUT,
         )
         samples_existing.append(time.perf_counter() - t0)
         assert r.status_code == 200, f"sanity probe: {r.status_code}"
@@ -221,7 +242,8 @@ def test_uuid_enumeration_timing_uniform(seeded_campaign_id):
         t0 = time.perf_counter()
         r = requests.get(
             f"{BACKEND_URL}/campaigns/{ghost}",
-            headers=_h(), timeout=TIMEOUT,
+            headers=_h(),
+            timeout=TIMEOUT,
         )
         samples_missing.append(time.perf_counter() - t0)
         assert r.status_code == 404, (
@@ -260,7 +282,7 @@ PATH_TRAVERSAL_IDS = [
     "%00",
     "abc%00.json",
     "/etc/passwd",
-    "x" * 4096,                               # oversized
+    "x" * 4096,  # oversized
 ]
 
 
@@ -271,11 +293,11 @@ def test_path_traversal_in_id_does_not_500(bad_id):
     safe = quote(bad_id, safe="%")
     r = requests.get(
         f"{BACKEND_URL}/campaigns/{safe}",
-        headers=_h(), timeout=TIMEOUT,
+        headers=_h(),
+        timeout=TIMEOUT,
     )
     assert r.status_code != 500, (
-        f"Malformed id {bad_id!r} crashed the route → 500. Body: "
-        f"{r.text[:200]}"
+        f"Malformed id {bad_id!r} crashed the route → 500. Body: {r.text[:200]}"
     )
     # 404 (row not found) or 422 (FastAPI route param rejected) are the
     # two safe outcomes. 400 acceptable if a future hardening adds explicit
@@ -308,11 +330,13 @@ def test_extra_query_params_do_not_change_response(seeded_campaign_id, query):
     no-extra-params baseline."""
     baseline = requests.get(
         f"{BACKEND_URL}/campaigns/{seeded_campaign_id}",
-        headers=_h(), timeout=TIMEOUT,
+        headers=_h(),
+        timeout=TIMEOUT,
     )
     variant = requests.get(
         f"{BACKEND_URL}/campaigns/{seeded_campaign_id}{query}",
-        headers=_h(), timeout=TIMEOUT,
+        headers=_h(),
+        timeout=TIMEOUT,
     )
     assert variant.status_code == baseline.status_code, (
         f"Extra-param variant {query!r} flipped status: "
@@ -324,12 +348,8 @@ def test_extra_query_params_do_not_change_response(seeded_campaign_id, query):
         base_j = baseline.json()
         var_j = variant.json()
     except ValueError:
-        pytest.fail(
-            f"Non-JSON response for variant {query!r}: {variant.text[:200]}"
-        )
-    assert base_j == var_j, (
-        f"Extra-param variant {query!r} changed response payload."
-    )
+        pytest.fail(f"Non-JSON response for variant {query!r}: {variant.text[:200]}")
+    assert base_j == var_j, f"Extra-param variant {query!r} changed response payload."
 
 
 # ---------------------------------------------------------------------------
@@ -337,10 +357,12 @@ def test_extra_query_params_do_not_change_response(seeded_campaign_id, query):
 # auth test could be passing trivially because the backend is down.
 # ---------------------------------------------------------------------------
 
+
 def test_legit_key_reads_own_campaign(seeded_campaign_id):
     r = requests.get(
         f"{BACKEND_URL}/campaigns/{seeded_campaign_id}",
-        headers=_h(), timeout=TIMEOUT,
+        headers=_h(),
+        timeout=TIMEOUT,
     )
     assert r.status_code == 200, (
         f"Legit key + real id failed: {r.status_code} {r.text[:200]}"

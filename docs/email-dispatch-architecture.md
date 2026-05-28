@@ -1,7 +1,7 @@
 # Email dispatch — current state, target state, wiring plan
 
 **Status:** plan-only. **Do NOT wire** until `docs/email-deliverability.md`
-checklist 100% complete (DNS propagated, Resend account live,
+checklist 100% complete (DNS propagated, sender account live,
 mail-tester 10/10).
 
 This doc maps:
@@ -9,6 +9,90 @@ This doc maps:
 2. What the dispatch loop should look like once DNS + provider go live.
 3. Decision points that need operator input before wiring (scheduler
    host, SMTP-vs-API path, webhook authentication).
+
+---
+
+## 0 — 2026-05-25 multi-dispatcher pivot (overrides §2.1 + §5)
+
+Original plan (PRs #281 / #286) is **Resend-warm-path-only**. This
+section pins the broader 3-dispatcher target so subsequent PRs build
+on the right model.
+
+### 0.1 Channel map
+
+| Channel | Provider | Audience | Reputation tier |
+|---|---|---|---|
+| Cold email outreach | **Instantly** | Unverified prospects, first-touch | Cold-sender pool, rotating IP/identity |
+| Warm email outreach | **Resend** | Replied / engaged / opted-in prospects | Owned domain `mail.leaddatascraper.com` reputation |
+| LinkedIn outreach | **HeyReach** | Pure LinkedIn surface, no email | Per-LinkedIn-account, not domain-bound |
+
+Rationale: burning the owned-domain warm reputation on cold sends is
+the costliest mistake. Instantly's pool absorbs cold-sender risk;
+Resend keeps the warm domain pristine. HeyReach is a separate medium
+(LinkedIn) — no email-domain reputation overlap.
+
+### 0.2 Schema impact (Phase 14.1, additive, post-#286)
+
+`email_send_ledger` + `email_suppression` from PR #286 are
+**dispatcher-agnostic on the critical path** (`provider_message_id`
+is opaque TEXT — Resend / Instantly / HeyReach IDs all fit). Three
+forward-additive columns close the multi-dispatcher gap; none break
+#286 callers:
+
+```sql
+ALTER TABLE email_send_ledger
+  ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'resend';
+ALTER TABLE email_send_ledger
+  ADD CONSTRAINT email_send_ledger_provider_allowed
+  CHECK (provider IN ('resend', 'instantly', 'smtp'));
+
+ALTER TABLE email_suppression
+  ADD COLUMN IF NOT EXISTS source TEXT;  -- nullable, forensic: which
+                                          -- provider reported the bounce
+```
+
+Suppression stays **global** (a bounce on Resend MUST suppress
+Instantly too — same recipient, same deliverability ground truth).
+`source` is forensic only.
+
+LinkedIn surface: HeyReach actions are NOT email. Either (a)
+introduce `linkedin_send_ledger` + `linkedin_suppression` parallel
+tables, or (b) rename `email_*` → `outreach_*` with a `channel`
+discriminator. Decision deferred to Phase 17.2 (see below); the
+rename path is breaking and needs a coordinated migration.
+
+### 0.3 Phased PR map (uses `docs/roadmap.md` Phase numbering)
+
+Maps onto the canonical Phase numbers in
+[`docs/roadmap.md`](roadmap.md), not the internal §4 1-5 numbering
+which is now historical context only. Phase 13.5 (DKIM/SPF/DMARC)
+already existed in roadmap.md; Phase 14 + Phase 17 are NEW phases
+added by this pivot doc.
+
+| Phase | Scope | PRs |
+|---|---|---|
+| 13.5a (DNS + deliverability) | DKIM/SPF/DMARC ramp, mail-tester 10/10 | **operator action**, not a code PR |
+| 13.5b (Resend warm path code) | `ResendEmailSender` + dispatcher schema | **#281, #286** (in flight) |
+| 13.5c | Resend webhook handler (`POST /webhooks/resend`) | new |
+| 13.5d | Resend dispatcher (Render Cron, warm queue only) | new |
+| 13.5e | Operator-facing Send + suppression UI | new |
+| 14.0 (Instantly cold path) | `EmailDispatcher` Protocol refactor + `provider` column on ledger | new (follow-up to #286) |
+| 14.1 | `InstantlyEmailSender` + Instantly webhook handler | new |
+| 14.2 | Cold/warm queue routing in dispatcher | new |
+| 17.0 (HeyReach LinkedIn) | LinkedIn surface decision (parallel tables vs rename) + DDL | new |
+| 17.1 | `HeyReachLinkedInSender` + HeyReach webhook handler | new |
+| 17.2 | LinkedIn dispatcher + UI surface | new |
+
+`docs/roadmap.md` is updated alongside this doc to add Phase 14 +
+Phase 17 stubs and to clarify Phase 13.5's reduced (warm-only)
+scope.
+
+### 0.4 Out-of-scope clarification
+
+§5 below historically excluded LinkedIn entirely. **Reverse that** —
+HeyReach IS in scope, but as Phase 3.0+, AFTER Phase 1.x (Resend
+warm path) reaches dogfood-ready status. The §5 LinkedIn paragraph
+is preserved below as historical context but no longer normative.
 
 ---
 
@@ -74,10 +158,18 @@ is flagged by `src/scripts/check_orphans_and_zombies.py`.
 
 ## 2 — Target state
 
-### 2.1 Recommended path: Resend HTTP API (not SMTP)
+### 2.1 Recommended warm path: Resend HTTP API (not SMTP)
 
-Per [`docs/email-deliverability.md`](email-deliverability.md), provider
-choice is **Resend**. Two integration paths:
+> **Pivot note (2026-05-25):** This section covers the **warm path
+> only** — see §0 above for the broader 3-dispatcher model. Cold
+> outreach goes through Instantly (Phase 2.0), LinkedIn through
+> HeyReach (Phase 3.0). The §0 pivot does NOT change the
+> warm-path recommendation: Resend HTTP API beats SMTP for the
+> same reasons listed below.
+
+Per [`docs/email-deliverability.md`](email-deliverability.md), the
+**warm-path** provider is **Resend** (owned domain
+`mail.leaddatascraper.com`). Two integration paths:
 
 | | SMTP path | HTTP API path |
 |---|---|---|
@@ -200,17 +292,101 @@ CREATE TABLE email_send_ledger (
 CREATE INDEX idx_email_send_ledger_domain_sent
   ON email_send_ledger(recipient_domain, sent_at DESC);
 
-CREATE TABLE email_suppression (
-  email TEXT PRIMARY KEY,
-  reason TEXT NOT NULL,  -- 'bounce' / 'complaint' / 'manual'
-  added_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- Phase 14.2: renamed from email_suppression to a generic multi-channel
+-- table. identifier_type ∈ {email, domain, linkedin_url, phone}, channel ∈
+-- {email, linkedin, sms, all}. Dispatcher predicate filters on
+-- (identifier_type='email', channel ∈ {email, all}).
+CREATE TABLE suppressions (
+  id BIGSERIAL PRIMARY KEY,
+  identifier_type TEXT NOT NULL DEFAULT 'email',
+  identifier_value TEXT NOT NULL,
+  reason TEXT NOT NULL,  -- 'bounce' / 'bounce_hard' / 'bounce_soft_3x' /
+                         -- 'complaint' / 'manual' / 'unsubscribe' /
+                         -- 'gdpr_request' / 'spam_trap'
+  channel TEXT NOT NULL DEFAULT 'email',
+  source_provider TEXT,         -- 'resend' / 'instantly' / 'smtp' / 'heyreach' / 'manual'
+  source_campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by TEXT,
+  notes TEXT,
+  UNIQUE (identifier_type, identifier_value, channel)
 );
+CREATE INDEX idx_suppressions_lookup
+  ON suppressions (identifier_value, channel)
+  WHERE channel IN ('email', 'all');
 
 ALTER TABLE email_send_ledger ENABLE ROW LEVEL SECURITY;
-ALTER TABLE email_suppression ENABLE ROW LEVEL SECURITY;
+ALTER TABLE suppressions ENABLE ROW LEVEL SECURITY;
 -- + deny-all policies matching the 5-table pattern, + GRANT REVOKE
 -- on anon/authenticated, + schema_drift_check.py TABLES tuple update.
 ```
+
+**Repository layer (Phase 14.2):** `src/repositories/suppression_repo.py`
+provides `is_suppressed()`, `filter_suppressed()` (single batch query),
+`add()` (duplicate-tolerant via DB UNIQUE constraint), and
+`bulk_import()` (operator paste-500-emails workflow via PostgREST
+`upsert(ignore_duplicates=True)`). Dispatcher precheck is unchanged
+behaviour — just rewired to the new table + columns.
+
+### Phase 14.2 PR β — thread/idempotency columns + RFC 8058 + daily-cap env
+
+Three additive columns on `campaign_messages` (each backed by a partial
+index on its only lookup shape):
+
+- `thread_id TEXT` — provider-side conversation key. Webhook handler
+  (PR γ) attributes `email_replied` events back to the originating
+  thread via this column.
+- `in_reply_to_message_id TEXT` — points at a previously-sent message
+  in the same thread; NULL on the initial touch.
+- `tracking_id UUID DEFAULT gen_random_uuid()` — LDS-side opaque
+  identifier used by the RFC 8058 List-Unsubscribe-Post token. UNIQUE.
+
+**RFC 8058 unsubscribe endpoint** (`backend/main.py`):
+
+- `GET /unsubscribe/{token}` — minimal HTML confirmation page with a
+  POST form. Public, no API key, 10/min/IP throttle.
+- `POST /unsubscribe/{token}` — verify HMAC + timestamp window,
+  dereference `tracking_id → campaign_messages → leads.email`, insert
+  suppression(`identifier_type='email'`, `channel='all'`,
+  `reason='unsubscribe'`, `source_campaign_id`). Always 200 on
+  success / 410 on any failure (generic body — never leaks which
+  verification stage rejected).
+
+Token format (`src/utils/unsubscribe_tokens.py`):
+- 2-byte version `v1` + 32-byte payload (`tracking_id u128 BE` +
+  `issued_at u32 BE` + 12 reserved bytes) + 32-byte HMAC-SHA256
+- Total raw 66 bytes → 88-char URL-safe base64 (no padding)
+- 90-day TTL (Mailgun/Mailmodo recommendation)
+- ±5-min clock-skew tolerance
+- `hmac.compare_digest` everywhere — timing-safe
+
+**Daily cap + send window** (`src/utils/dispatch_policy.py`):
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `EMAIL_DAILY_CAP_PER_MAILBOX` | `30` | Per-mailbox cap once warmed |
+| `EMAIL_WARMUP_PER_MAILBOX` | `10` | Per-mailbox cap during 21-day warm-up |
+| `SEND_WINDOW_START` | `09:00` | HH:MM, inclusive |
+| `SEND_WINDOW_END` | `17:00` | HH:MM, exclusive |
+| `SEND_DAYS` | `mon,tue,wed,thu,fri` | Comma-separated tokens |
+| `SEND_TIMEZONE_MODE` | `lead` | `lead` / `campaign` / `UTC` |
+| `UNSUBSCRIBE_TOKEN_SECRET` | _(required)_ | HMAC signing key for token mint/verify |
+| `UNSUBSCRIBE_BASE_URL` | _(operator-set)_ | Base URL embedded in the List-Unsubscribe header |
+
+`DispatchPolicy` is loaded **once at process boot** from `os.environ`;
+test code can rebuild via `_reload_for_testing()`. Multi-worker uvicorn
+races mid-request env mutation, so the snapshot is the only legitimate
+read-path.
+
+**Instantly payload integration** (`src/integrations/instantly_models.py`):
+`from_lds_lead()` now accepts `list_unsubscribe=...` and threads it through
+two new custom variables (`list_unsubscribe`, `list_unsubscribe_post`).
+Instantly's custom-vars-to-header bridge writes them as the SMTP
+`List-Unsubscribe` and `List-Unsubscribe-Post` headers.
+
+Full wiring (dispatcher mints the token at push time using the freshly
+inserted `campaign_messages.tracking_id`) lands in PR γ alongside the
+webhook handler.
 
 ---
 
@@ -296,7 +472,9 @@ is 100% complete:
 
 → PR 2: Schema additions
     - provider_message_id + bounce_reason on campaign_messages
-    - email_send_ledger + email_suppression tables (+RLS, +grants)
+    - email_send_ledger + suppressions tables (+RLS, +grants)
+    - (Phase 14.2) suppressions renamed from email_suppression, extended
+      to multi-channel identifier_type + channel
     - schema_drift_check.py + check_grants_matrix.py allowlist updates
 
 → PR 3: Webhook handler
@@ -325,10 +503,11 @@ PR 5 surfaces sending to operator.
 
 ## 5 — Out of scope for dogfood
 
-- LinkedIn outreach via channel `'linkedin'` — no UI to authorize a
-  LinkedIn API token, and LinkedIn's automated-outreach detection is
-  aggressive. Leave the schema column intact, surface the draft for
-  operator to copy/paste manually.
+- ~~LinkedIn outreach via channel `'linkedin'`~~ — **Superseded by
+  §0.3 Phase 3.0 (HeyReach LinkedIn)**. Original concern (no API
+  token, aggressive detection) is addressed by HeyReach acting as the
+  managed-account intermediary. Keep the `channel='linkedin'` column;
+  surface stays operator-curated until Phase 3.x lands.
 - Open/click tracking pixels — privacy-hostile and signal value at
   dogfood scale is zero. Resend tracks at-provider; the operator can
   read it there.

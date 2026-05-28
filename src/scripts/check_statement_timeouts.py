@@ -33,6 +33,7 @@ Exit codes:
         or cancellation didn't fire)
     2 = misconfigured run (missing DATABASE_URL, can't reach DB, etc.)
 """
+
 from __future__ import annotations
 
 import os
@@ -43,9 +44,9 @@ from psycopg import errors as pg_errors
 
 
 EXPECTED_TIMEOUTS: dict[str, str] = {
-    "anon": "3s",            # Supabase default — kept tight
-    "authenticated": "8s",   # Supabase default — kept tight
-    "service_role": "30s",   # set via migration add_check_constraints' sibling
+    "anon": "3s",  # Supabase default — kept tight
+    "authenticated": "8s",  # Supabase default — kept tight
+    "service_role": "30s",  # set via migration add_check_constraints' sibling
 }
 
 # Mechanism test: set timeout to 2s, sleep for 5s, expect cancellation.
@@ -132,8 +133,7 @@ def _check_per_role_enforcement() -> list[str]:
             expected_secs = int(expected_str.rstrip("s"))
         except ValueError:
             errs.append(
-                f"role {role!r}: cannot parse expected {expected_str!r} "
-                f"as 'Ns' format"
+                f"role {role!r}: cannot parse expected {expected_str!r} as 'Ns' format"
             )
             continue
         sleep_for = expected_secs + 2
@@ -151,8 +151,7 @@ def _check_per_role_enforcement() -> list[str]:
                 )
         except psycopg.Error as e:
             errs.append(
-                f"role {role!r}: cannot connect as that role to verify "
-                f"enforcement: {e}"
+                f"role {role!r}: cannot connect as that role to verify enforcement: {e}"
             )
     return errs
 

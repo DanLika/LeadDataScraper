@@ -29,6 +29,7 @@ Exit codes:
         query shape (e.g. functional-mismatch like ``lower(email)``)
     2 = misconfigured run (missing DATABASE_URL, can't reach DB, etc.)
 """
+
 from __future__ import annotations
 
 import json
@@ -64,17 +65,13 @@ HOT_PATH_QUERIES: tuple[HotPathQuery, ...] = (
     HotPathQuery(
         label="leads by audit_status",
         explain_sql=(
-            "EXPLAIN (FORMAT JSON) "
-            "SELECT * FROM leads WHERE audit_status = %s"
+            "EXPLAIN (FORMAT JSON) SELECT * FROM leads WHERE audit_status = %s"
         ),
         params=("pending",),
     ),
     HotPathQuery(
         label="leads by unique_key (PK lookup)",
-        explain_sql=(
-            "EXPLAIN (FORMAT JSON) "
-            "SELECT * FROM leads WHERE unique_key = %s"
-        ),
+        explain_sql=("EXPLAIN (FORMAT JSON) SELECT * FROM leads WHERE unique_key = %s"),
         params=("X",),
     ),
     HotPathQuery(
@@ -144,8 +141,7 @@ def main() -> int:
                     f"Plan nodes: {node_types}. EXPLAIN: {query.explain_sql!r}"
                 )
     except psycopg.Error as e:
-        print(f"ERROR: unexpected DB error during plan probe: {e}",
-              file=sys.stderr)
+        print(f"ERROR: unexpected DB error during plan probe: {e}", file=sys.stderr)
         return 2
     finally:
         try:
@@ -159,8 +155,9 @@ def main() -> int:
             print(f"  - {line}", file=sys.stderr)
         return 1
 
-    print("Query plan check PASSED "
-          f"({len(HOT_PATH_QUERIES)} hot-path queries verified)")
+    print(
+        f"Query plan check PASSED ({len(HOT_PATH_QUERIES)} hot-path queries verified)"
+    )
     return 0
 
 
