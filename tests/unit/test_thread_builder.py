@@ -8,6 +8,7 @@ Covers:
 - Missing variable in render → MissingVariableError propagates
 - Lead with sparse fields (no first_name etc.) renders empty strings
 """
+
 from __future__ import annotations
 
 import unittest
@@ -90,10 +91,17 @@ class TestHappyPath(unittest.TestCase):
             unsubscribe_url="https://lds/u/track-1",
         )
         d = payload.as_lead_dict()
-        self.assertEqual(set(d.keys()), {
-            "unique_key", "email", "subject", "body",
-            "in_reply_to_message_id", "list_unsubscribe_url",
-        })
+        self.assertEqual(
+            set(d.keys()),
+            {
+                "unique_key",
+                "email",
+                "subject",
+                "body",
+                "in_reply_to_message_id",
+                "list_unsubscribe_url",
+            },
+        )
 
 
 class TestThreadContinuation(unittest.TestCase):
@@ -183,7 +191,9 @@ class TestRenderErrors(unittest.TestCase):
         # render won't raise; verify that.
         payload = build_send_payload(
             lds_message_id="msg-1",
-            lead=lead, step=step, variant=variant,
+            lead=lead,
+            step=step,
+            variant=variant,
             unsubscribe_url="https://lds/u/track-1",
         )
         self.assertEqual(payload.subject, "")  # empty city renders blank
@@ -195,7 +205,10 @@ class TestMissingIdentifiers(unittest.TestCase):
         variant = _Variant(body_template="x {{ unsubscribe_url }}")
         with self.assertRaises(ThreadBuildError):
             build_send_payload(
-                lds_message_id="", lead=SAMPLE_LEAD, step=step, variant=variant,
+                lds_message_id="",
+                lead=SAMPLE_LEAD,
+                step=step,
+                variant=variant,
                 unsubscribe_url="x",
             )
 
@@ -204,7 +217,10 @@ class TestMissingIdentifiers(unittest.TestCase):
         variant = _Variant(body_template="x {{ unsubscribe_url }}")
         with self.assertRaises(ThreadBuildError):
             build_send_payload(
-                lds_message_id="msg-1", lead={}, step=step, variant=variant,
+                lds_message_id="msg-1",
+                lead={},
+                step=step,
+                variant=variant,
                 unsubscribe_url="x",
             )
 

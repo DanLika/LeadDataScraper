@@ -25,6 +25,7 @@ async def _install_ssrf_route_guard(context) -> None:
     / reserved / multicast / metadata-host IPs. Without this, a pre-check on
     the seed URL only could be bypassed by a 30x redirect to an internal host
     or by DNS rebinding after the initial resolve."""
+
     async def _handler(route):
         url = route.request.url
         try:
@@ -41,11 +42,13 @@ async def _install_ssrf_route_guard(context) -> None:
 
     await context.route("**/*", _handler)
 
+
 class EnrichmentEngine:
     """
     Responsible for deep data enrichment of leads by scraping their websites.
     Uses Gemini AI to extract structured business details from raw page content.
     """
+
     def __init__(self):
         """
         Initializes the EnrichmentEngine with API keys and Gemini model configuration.
@@ -131,7 +134,7 @@ class EnrichmentEngine:
         try:
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                viewport={'width': 1280, 'height': 800}
+                viewport={"width": 1280, "height": 800},
             )
             await _install_ssrf_route_guard(context)
             page = await context.new_page()
@@ -140,7 +143,7 @@ class EnrichmentEngine:
                 # Navigation timeout and wait_until refinement
                 await asyncio.wait_for(
                     page.goto(url, wait_until="domcontentloaded", timeout=45000),
-                    timeout=50.0
+                    timeout=50.0,
                 )
                 text = await page.evaluate("() => document.body.innerText")
                 return text[:10000]  # Cap text for AI context limits
@@ -160,7 +163,9 @@ class EnrichmentEngine:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Context close raised: %s", exc)
 
-    async def deep_ai_parse(self, content_blocks: List[str], lead_name: str) -> Dict[str, Any]:
+    async def deep_ai_parse(
+        self, content_blocks: List[str], lead_name: str
+    ) -> Dict[str, Any]:
         """
         Uses the Gemini AI model to perform deep structured parsing of multiple content blocks.
         """
@@ -181,17 +186,17 @@ class EnrichmentEngine:
             "no markdown, no special characters. Each value should read as a natural sentence or phrase.\n\n"
             "Fields to extract:\n"
             "1. company_name: The official business name exactly as written on their website.\n"
-            "2. company_size: Describe the scale naturally (e.g. \"Small local business with approximately 10-20 employees\" "
-            "or \"Mid-size company with multiple locations\").\n"
+            '2. company_size: Describe the scale naturally (e.g. "Small local business with approximately 10-20 employees" '
+            'or "Mid-size company with multiple locations").\n'
             "3. leadership_team: Full names and titles of founders, CEO, or key executives if mentioned. "
-            "Write as a natural list (e.g. \"John Smith, CEO; Jane Doe, Co-Founder\").\n"
+            'Write as a natural list (e.g. "John Smith, CEO; Jane Doe, Co-Founder").\n'
             "4. key_offerings: Their main products or services in one clear sentence "
-            "(e.g. \"They specialize in residential plumbing, emergency repairs, and bathroom renovations\").\n"
+            '(e.g. "They specialize in residential plumbing, emergency repairs, and bathroom renovations").\n'
             "5. contact_details: Email, phone, and address if found. Write naturally "
-            "(e.g. \"info@company.com, (305) 555-1234, 123 Main St, Miami FL\").\n"
+            '(e.g. "info@company.com, (305) 555-1234, 123 Main St, Miami FL").\n'
             "6. business_details: A one-sentence summary of what the business does and its mission.\n"
             "7. target_clients: Who their ideal customers are, written naturally "
-            "(e.g. \"Homeowners and small businesses in the Miami area looking for affordable plumbing services\").\n"
+            '(e.g. "Homeowners and small businesses in the Miami area looking for affordable plumbing services").\n'
             "8. pain_points: Based on their website, identify 2-3 specific business or marketing challenges "
             "this company likely faces. Write as complete sentences ready for use in outreach emails.\n\n"
             "IMPORTANT: Every value must be grammatically correct, written in complete sentences or natural "
@@ -209,7 +214,7 @@ class EnrichmentEngine:
         try:
             response = await guarded_generate_content_async(
                 self.client,
-                model='gemini-flash-latest',
+                model="gemini-flash-latest",
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=(
@@ -258,13 +263,13 @@ class EnrichmentEngine:
                 try:
                     context = await browser.new_context(
                         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-                        viewport={'width': 1280, 'height': 800}
+                        viewport={"width": 1280, "height": 800},
                     )
                     await _install_ssrf_route_guard(context)
 
                     # Fetch up to 3 pages concurrently using the SAME browser context
                     async def fetch_page(url):
-                        if not url or not str(url).startswith('http'):
+                        if not url or not str(url).startswith("http"):
                             return None
                         try:
                             await assert_safe_url(url)
@@ -274,7 +279,9 @@ class EnrichmentEngine:
                         page = await context.new_page()
                         try:
                             # Shorter navigation timeout per page to avoid whole job hang
-                            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                            await page.goto(
+                                url, wait_until="domcontentloaded", timeout=20000
+                            )
                             text = await page.evaluate("() => document.body.innerText")
                             if text and len(text.strip()) > 100:
                                 return text[:5000]
@@ -300,9 +307,15 @@ class EnrichmentEngine:
                             logger.warning("Context close raised: %s", exc)
 
         if content_blocks:
-            enrichment_data = await self.deep_ai_parse(content_blocks, lead.get("name", "Unknown"))
+            enrichment_data = await self.deep_ai_parse(
+                content_blocks, lead.get("name", "Unknown")
+            )
             # Clean up enrichment data to avoid "Unknown" strings
-            clean_data = {k: v for k, v in enrichment_data.items() if v not in [None, "Unknown", "N/A", "null"]}
+            clean_data = {
+                k: v
+                for k, v in enrichment_data.items()
+                if v not in [None, "Unknown", "N/A", "null"]
+            }
             lead.update(clean_data)
             lead["enrichment_status"] = "COMPLETED"
         else:
@@ -310,17 +323,19 @@ class EnrichmentEngine:
 
         return lead
 
+
 async def test_enrichment():
     engine = EnrichmentEngine()
     test_lead = {
         "name": "Example Dental",
-        "website": "https://www.google.com" # Just a placeholder
+        "website": "https://www.google.com",  # Just a placeholder
     }
     try:
         result = await engine.enrich_lead(test_lead)
         logger.info("Test result: %s", result)
     finally:
         await engine.aclose()
+
 
 if __name__ == "__main__":
     asyncio.run(test_enrichment())

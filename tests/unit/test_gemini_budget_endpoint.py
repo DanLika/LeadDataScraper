@@ -37,6 +37,7 @@ def _isolated_env(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
     from main import limiter
+
     try:
         limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except (AttributeError, TypeError):
@@ -75,6 +76,7 @@ def _prime_lazy_globals():
 @pytest.fixture
 def client():
     from main import app
+
     return TestClient(app)
 
 

@@ -11,6 +11,7 @@ variant" without re-deriving from logs. Both are operator-set strings;
 no FK to a model registry (would over-couple the repo to the AI
 infrastructure).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -123,16 +124,18 @@ class SequenceVariantRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .insert({
-                        "step_id": step_id,
-                        "variant_label": variant_label,
-                        "subject_template": subject_template,
-                        "body_template": body_template,
-                        "content_type": content_type,
-                        "weight": weight,
-                        "ai_model_used": ai_model_used,
-                        "ai_prompt_version": ai_prompt_version,
-                    })
+                    .insert(
+                        {
+                            "step_id": step_id,
+                            "variant_label": variant_label,
+                            "subject_template": subject_template,
+                            "body_template": body_template,
+                            "content_type": content_type,
+                            "weight": weight,
+                            "ai_model_used": ai_model_used,
+                            "ai_prompt_version": ai_prompt_version,
+                        }
+                    )
                     .execute()
                 )
             )
@@ -140,7 +143,8 @@ class SequenceVariantRepository:
             if _is_unique_violation(exc):
                 logger.info(
                     "SequenceVariantRepository.create UNIQUE collision (%s, %s)",
-                    step_id, variant_label,
+                    step_id,
+                    variant_label,
                 )
                 return None
             logger.exception("SequenceVariantRepository.create failed")
@@ -183,7 +187,7 @@ class SequenceVariantRepository:
             )
             return {}
         by_step: dict[str, list[SequenceVariant]] = {sid: [] for sid in unique_inputs}
-        for r in (getattr(rows, "data", None) or []):
+        for r in getattr(rows, "data", None) or []:
             step_id = r.get("step_id")
             if not step_id:
                 continue

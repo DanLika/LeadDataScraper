@@ -26,6 +26,7 @@ Exit codes:
     1 = drift detected
     2 = misconfigured run
 """
+
 from __future__ import annotations
 
 import os
@@ -34,48 +35,86 @@ import sys
 import psycopg
 
 TABLES: tuple[str, ...] = (
-    "leads", "campaigns", "campaign_messages", "orchestration_jobs",
+    "leads",
+    "campaigns",
+    "campaign_messages",
+    "orchestration_jobs",
     "account_deletions",
-    "email_send_ledger", "suppressions", "webhook_events",
-    "sequences", "sequence_steps", "sequence_variants",
+    "email_send_ledger",
+    "suppressions",
+    "webhook_events",
+    "sequences",
+    "sequence_steps",
+    "sequence_variants",
 )
 TABLE_LIST = list(TABLES)
 
 # Full DML+DDL privilege set Postgres exposes via information_schema.
-FULL_PRIVILEGES: frozenset[str] = frozenset({
-    "SELECT", "INSERT", "UPDATE", "DELETE",
-    "REFERENCES", "TRIGGER", "TRUNCATE",
-})
+FULL_PRIVILEGES: frozenset[str] = frozenset(
+    {
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "REFERENCES",
+        "TRIGGER",
+        "TRUNCATE",
+    }
+)
 
 # Roles that MUST have the full privilege set on every core table.
 FULL_PRIVILEGE_ROLES: frozenset[str] = frozenset({"postgres", "service_role"})
 
 # Roles that MUST have ZERO grants on the core tables.
-ZERO_PRIVILEGE_ROLES: frozenset[str] = frozenset({
-    "anon", "authenticated", "PUBLIC",
-})
+ZERO_PRIVILEGE_ROLES: frozenset[str] = frozenset(
+    {
+        "anon",
+        "authenticated",
+        "PUBLIC",
+    }
+)
 
 # Every other role appearing in the matrix is unexpected.
 ALLOWED_GRANTEES: frozenset[str] = FULL_PRIVILEGE_ROLES | ZERO_PRIVILEGE_ROLES
 
 # Roles expected to exist in pg_roles. Anything outside this set is a
 # Studio-created role, an extension-installed role, or worse — flag it.
-EXPECTED_ROLES: frozenset[str] = frozenset({
-    # Supabase application roles
-    "anon", "authenticated", "service_role", "authenticator",
-    "dashboard_user", "pgbouncer", "postgres",
-    "supabase_admin", "supabase_auth_admin", "supabase_etl_admin",
-    "supabase_privileged_role", "supabase_read_only_user",
-    "supabase_realtime_admin", "supabase_replication_admin",
-    "supabase_storage_admin",
-    # Postgres built-in pg_* roles
-    "pg_checkpoint", "pg_create_subscription", "pg_database_owner",
-    "pg_execute_server_program", "pg_maintain", "pg_monitor",
-    "pg_read_all_data", "pg_read_all_settings", "pg_read_all_stats",
-    "pg_read_server_files", "pg_signal_backend", "pg_stat_scan_tables",
-    "pg_use_reserved_connections", "pg_write_all_data",
-    "pg_write_server_files",
-})
+EXPECTED_ROLES: frozenset[str] = frozenset(
+    {
+        # Supabase application roles
+        "anon",
+        "authenticated",
+        "service_role",
+        "authenticator",
+        "dashboard_user",
+        "pgbouncer",
+        "postgres",
+        "supabase_admin",
+        "supabase_auth_admin",
+        "supabase_etl_admin",
+        "supabase_privileged_role",
+        "supabase_read_only_user",
+        "supabase_realtime_admin",
+        "supabase_replication_admin",
+        "supabase_storage_admin",
+        # Postgres built-in pg_* roles
+        "pg_checkpoint",
+        "pg_create_subscription",
+        "pg_database_owner",
+        "pg_execute_server_program",
+        "pg_maintain",
+        "pg_monitor",
+        "pg_read_all_data",
+        "pg_read_all_settings",
+        "pg_read_all_stats",
+        "pg_read_server_files",
+        "pg_signal_backend",
+        "pg_stat_scan_tables",
+        "pg_use_reserved_connections",
+        "pg_write_all_data",
+        "pg_write_server_files",
+    }
+)
 
 
 def _fetch_grants(conn: psycopg.Connection) -> dict[tuple[str, str], set[str]]:
@@ -119,9 +158,7 @@ def _check_matrix(matrix: dict[tuple[str, str], set[str]]) -> list[str]:
 
     # Unexpected grantees
     for grantee in sorted(seen_grantees - ALLOWED_GRANTEES):
-        affected = sorted(
-            t for (t, g) in matrix.keys() if g == grantee
-        )
+        affected = sorted(t for (t, g) in matrix.keys() if g == grantee)
         errs.append(
             f"unexpected grantee {grantee!r} appears in public-table "
             f"grants matrix (tables: {affected})"

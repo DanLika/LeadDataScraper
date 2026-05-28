@@ -22,6 +22,7 @@ This means a seed value smuggled into production via a request /
 config bug doesn't disable A/B testing — the warning surfaces in
 Sentry on first hit and the random selection continues.
 """
+
 from __future__ import annotations
 
 import hashlib

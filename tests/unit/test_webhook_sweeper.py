@@ -19,6 +19,7 @@ pin:
 The supabase chain mock mirrors ``tests/test_instantly_webhook.py``
 shape but only models the read paths the sweeper actually uses.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -162,15 +163,17 @@ async def test_grace_window_applied():
     from src.workers.webhook_sweeper import sweep_once
 
     rows = [
-        _row("recent", age_seconds=10),    # inside grace; must be skipped
-        _row("aged-1", age_seconds=120),   # past grace
+        _row("recent", age_seconds=10),  # inside grace; must be skipped
+        _row("aged-1", age_seconds=120),  # past grace
         _row("aged-2", age_seconds=300),
     ]
     db = _Db(rows=rows)
     recorder, fn = _async_recorder()
 
     result = await sweep_once(
-        db=db, process_instantly_event=fn, grace_seconds=60,
+        db=db,
+        process_instantly_event=fn,
+        grace_seconds=60,
     )
 
     seen = {eid for eid, _ in recorder}
@@ -188,7 +191,9 @@ async def test_batch_size_caps_claim():
     recorder, fn = _async_recorder()
 
     result = await sweep_once(
-        db=db, process_instantly_event=fn, batch_size=4,
+        db=db,
+        process_instantly_event=fn,
+        batch_size=4,
     )
 
     assert db.chain.captured.get("limit") == 4
@@ -210,7 +215,9 @@ async def test_handler_exception_continues_batch():
     assert result.scanned == 3
     assert result.processed == 0
     assert result.failed == 3
-    assert state["calls"] == 3, "every row attempted; one poison doesn't block the batch"
+    assert state["calls"] == 3, (
+        "every row attempted; one poison doesn't block the batch"
+    )
     assert all("RuntimeError" in err for err in result.errors)
 
 
@@ -262,7 +269,9 @@ async def test_runtime_cap_stops_mid_batch():
         await asyncio.sleep(0.06)
 
     result = await sweep_once(
-        db=db, process_instantly_event=slow_fn, max_runtime_sec=0,
+        db=db,
+        process_instantly_event=slow_fn,
+        max_runtime_sec=0,
     )
 
     assert "runtime_cap" in result.errors

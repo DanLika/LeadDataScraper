@@ -71,6 +71,7 @@ def _reset_rate_limiter():
     sequence trips the bucket, so reset the slowapi in-memory store
     before each test."""
     from main import limiter
+
     # slowapi's MovingWindowStorage exposes `storage`; clear all keys.
     try:
         limiter._storage.storage.clear()  # type: ignore[attr-defined]
@@ -97,6 +98,7 @@ def auth():
 # Helpers.
 # ---------------------------------------------------------------------------
 
+
 def _files(name: str, body: bytes, content_type: str = "text/csv"):
     return {"file": (name, BytesIO(body), content_type)}
 
@@ -111,12 +113,15 @@ def _is_clean_status(status: int) -> bool:
 # 1) Boundary size.
 # ---------------------------------------------------------------------------
 
+
 def test_exactly_max_upload_bytes_is_accepted(client, auth):
     body = b"a\n" + b"x" * (MAX_UPLOAD_BYTES - 2)
     assert len(body) == MAX_UPLOAD_BYTES
     r = client.post("/upload", files=_files("ok.csv", body), headers=auth)
     # Backend stops at `total > max_bytes` — so exactly max is accepted.
-    assert r.status_code == 200, f"boundary upload rejected: {r.status_code} {r.text[:200]}"
+    assert r.status_code == 200, (
+        f"boundary upload rejected: {r.status_code} {r.text[:200]}"
+    )
 
 
 def test_one_byte_over_max_upload_bytes_returns_413(client, auth):
@@ -129,6 +134,7 @@ def test_one_byte_over_max_upload_bytes_returns_413(client, auth):
 # ---------------------------------------------------------------------------
 # 2) Content-Type mismatch.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "ct",
@@ -148,22 +154,25 @@ def test_disallowed_content_types_rejected(client, auth, ct):
         files={"file": ("file.csv", BytesIO(b"a,b\n1,2"), ct)},
         headers=auth,
     )
-    assert r.status_code == 400, f"content-type {ct} reached the handler: {r.status_code}"
+    assert r.status_code == 400, (
+        f"content-type {ct} reached the handler: {r.status_code}"
+    )
 
 
 # ---------------------------------------------------------------------------
 # 3) Filename extension.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "name",
     [
         "leads.exe",
-        "leads.exe.csv.bak",          # actual ext is .bak
-        "leads.csv.exe",              # actual ext is .exe
-        "leads",                       # no extension at all
+        "leads.exe.csv.bak",  # actual ext is .bak
+        "leads.csv.exe",  # actual ext is .exe
+        "leads",  # no extension at all
         "leads.CSV.JPG",
-        "leads.csv\n",                 # trailing newline
+        "leads.csv\n",  # trailing newline
     ],
 )
 def test_non_csv_filename_extension_rejected(client, auth, name):
@@ -189,6 +198,7 @@ def test_uppercase_csv_extension_accepted(client, auth):
 # ---------------------------------------------------------------------------
 # 4) Filename traversal — server names the temp file itself.
 # ---------------------------------------------------------------------------
+
 
 def test_traversal_filename_does_not_write_to_traversed_path(client, auth):
     tmpdir = tempfile.gettempdir()
@@ -224,6 +234,7 @@ def test_traversal_filename_does_not_write_to_traversed_path(client, auth):
 # 5) Null-byte filename.
 # ---------------------------------------------------------------------------
 
+
 def test_nul_byte_in_filename_does_not_500(client, auth):
     # Some HTTP stacks reject NUL in the filename; others pass it through.
     # Either way, the server must NOT 500. Acceptable: 400 (rejected by
@@ -247,9 +258,10 @@ def test_nul_byte_in_filename_does_not_500(client, auth):
 # 6) Polyglot CSV — valid CSV that's also valid HTML/JS.
 # ---------------------------------------------------------------------------
 
+
 def test_polyglot_csv_html_js_accepted_as_csv(client, auth):
     body = (
-        b'header_a,header_b\n'
+        b"header_a,header_b\n"
         b'"<script>alert(1)</script>","<img src=x onerror=alert(1)>"\n'
         b'"=HYPERLINK(\\"http://evil\\")","@SUM(1+1)"\n'
     )
@@ -296,6 +308,7 @@ def test_bom_payloads_do_not_crash_gate(client, auth, label, body):
 # ---------------------------------------------------------------------------
 # 8) MIME confusion: HTML body declared as text/csv with .csv name.
 # ---------------------------------------------------------------------------
+
 
 def test_html_body_with_csv_metadata_passes_gate(client, auth):
     """The gate is filename-extension + content-type header — it can't
@@ -344,7 +357,8 @@ def test_zip_bomb_rejected_before_disk_write(client, auth):
     assert len(payload) < 50_000
     tmpdir = tempfile.gettempdir()
     before_files = {
-        f for f in os.listdir(tmpdir)
+        f
+        for f in os.listdir(tmpdir)
         if f.startswith("leadscraper_") and f.endswith(".csv")
     }
 
@@ -353,10 +367,13 @@ def test_zip_bomb_rejected_before_disk_write(client, auth):
         files=_files("bomb.csv", payload),
         headers=auth,
     )
-    assert r.status_code == 400, f"gzip bomb should reject with 400, got {r.status_code}"
+    assert r.status_code == 400, (
+        f"gzip bomb should reject with 400, got {r.status_code}"
+    )
 
     after_files = {
-        f for f in os.listdir(tmpdir)
+        f
+        for f in os.listdir(tmpdir)
         if f.startswith("leadscraper_") and f.endswith(".csv")
     }
     assert after_files == before_files, (
@@ -368,6 +385,7 @@ def test_zip_bomb_rejected_before_disk_write(client, auth):
 # 10) Content-Encoding mismatch.
 # ---------------------------------------------------------------------------
 
+
 def test_content_encoding_gzip_with_non_gzip_body_does_not_500(client, auth):
     """If the request says `Content-Encoding: gzip` but the body isn't
     actually gzip, Starlette / FastAPI may try to decompress and raise
@@ -375,8 +393,7 @@ def test_content_encoding_gzip_with_non_gzip_body_does_not_500(client, auth):
     manually via the headers dict; whether the server honors it depends
     on the stack."""
     body = b"name,age\nrudy,42\n"
-    headers = {**{API_KEY_HEADER: "test-upload-key"},
-               "Content-Encoding": "gzip"}
+    headers = {**{API_KEY_HEADER: "test-upload-key"}, "Content-Encoding": "gzip"}
     r = client.post(
         "/upload",
         files=_files("plain.csv", body),
@@ -404,6 +421,7 @@ def test_real_gzip_body_without_decompress_handling_does_not_500(client, auth):
 # ---------------------------------------------------------------------------
 # 11) Lying Content-Length is hard to forge from TestClient — out of scope.
 # ---------------------------------------------------------------------------
+
 
 def test_lying_content_length_not_directly_testable_via_testclient():
     """TestClient (httpx-backed) sets Content-Length from the actual

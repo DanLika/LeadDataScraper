@@ -77,7 +77,9 @@ def _discover_supabase_clients() -> Iterator:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--hold", type=float, default=30.0,
+        "--hold",
+        type=float,
+        default=30.0,
         help="Seconds to keep the pool 'broken' (default 30)",
     )
     args = parser.parse_args()
@@ -88,11 +90,14 @@ def main() -> int:
     # hasn't been resolved yet by an in-flight request. After this, the
     # discovery walk finds it.
     import backend.main  # noqa: F401
-    _ = backend.main.db   # force resolution
+
+    _ = backend.main.db  # force resolution
 
     clients = list(_discover_supabase_clients())
     if not clients:
-        print("No live SupabaseHelper instance found — is the backend running in this process?")
+        print(
+            "No live SupabaseHelper instance found — is the backend running in this process?"
+        )
         return 2
 
     print(f"Patching {len(clients)} supabase client(s) for {args.hold:.0f}s …")

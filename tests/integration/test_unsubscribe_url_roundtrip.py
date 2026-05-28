@@ -16,6 +16,7 @@ test goes red. If the handler path renames, update
 ``UNSUBSCRIBE_URL_PATH_SEGMENT`` (single source of truth) and the
 backend route in lockstep — this test asserts both match.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -43,7 +44,9 @@ def _set_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_dispatch_url_verifies_roundtrip() -> None:
     """Build a URL, tear off the token, verify — tracking_id round-trips."""
     tracking_id = str(uuid.uuid4())
-    url = build_unsubscribe_url("https://lead-scraper-backend.onrender.com", tracking_id)
+    url = build_unsubscribe_url(
+        "https://lead-scraper-backend.onrender.com", tracking_id
+    )
 
     parts = urlsplit(url)
     # Path must be /<segment>/<token>, no extras.

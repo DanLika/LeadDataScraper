@@ -32,6 +32,7 @@ Run via security.yml or locally:
 
 Exit codes: 0 OK / 1 stale / 2 misconfig.
 """
+
 from __future__ import annotations
 
 import os
@@ -41,7 +42,10 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 
 TABLES: tuple[str, ...] = (
-    "leads", "campaigns", "campaign_messages", "orchestration_jobs",
+    "leads",
+    "campaigns",
+    "campaign_messages",
+    "orchestration_jobs",
 )
 TABLE_LIST = list(TABLES)
 ROW_THRESHOLD = 10_000

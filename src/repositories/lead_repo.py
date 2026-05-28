@@ -13,6 +13,7 @@ renderer + AUP-injection layer actually use. Adding a field requires
 extending ``ALLOWED_VARS`` in :mod:`src.services.template_renderer`
 in the same PR.
 """
+
 from __future__ import annotations
 
 import asyncio

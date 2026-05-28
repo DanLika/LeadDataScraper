@@ -22,6 +22,7 @@ PostgREST chain API only (no raw SQL — CLAUDE.md "no psycopg in
 backend" gate). Idempotent updates: ``update_status`` no-ops when the
 row is already in the target state (predicate-driven).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -122,11 +123,13 @@ class SequenceRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .insert({
-                        "campaign_id": campaign_id,
-                        "name": name,
-                        "status": status,
-                    })
+                    .insert(
+                        {
+                            "campaign_id": campaign_id,
+                            "name": name,
+                            "status": status,
+                        }
+                    )
                     .execute()
                 )
             )
@@ -149,10 +152,12 @@ class SequenceRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .update({
-                        "status": new_status,
-                        "updated_at": _now_iso(),
-                    })
+                    .update(
+                        {
+                            "status": new_status,
+                            "updated_at": _now_iso(),
+                        }
+                    )
                     .eq("id", sequence_id)
                     .neq("status", new_status)
                     .execute()
@@ -160,7 +165,8 @@ class SequenceRepository:
             )
         except Exception:
             logger.exception(
-                "SequenceRepository.update_status failed for %s", sequence_id,
+                "SequenceRepository.update_status failed for %s",
+                sequence_id,
             )
             return False
         return bool(getattr(res, "data", None))
@@ -168,6 +174,7 @@ class SequenceRepository:
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 

@@ -51,6 +51,7 @@ Exit codes:
         was healed even if action was taken)
     2 = misconfigured run (missing DATABASE_URL, can't reach DB, etc.)
 """
+
 from __future__ import annotations
 
 import os

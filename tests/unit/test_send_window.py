@@ -12,6 +12,7 @@ Covers:
 - TZ resolution: explicit > env > UTC
 - HH:MM:SS shape (PostgREST TIME column)
 """
+
 from __future__ import annotations
 
 import os
@@ -129,7 +130,9 @@ class TestTimezoneResolution(unittest.TestCase):
         # next window = Sarajevo 09:00 = UTC 07:00.
         now = datetime(2026, 5, 26, 6, 30, tzinfo=timezone.utc)
         result = is_within_window(
-            timezone_name="Europe/Sarajevo", now_utc=now, **DEFAULT_KW,
+            timezone_name="Europe/Sarajevo",
+            now_utc=now,
+            **DEFAULT_KW,
         )
         self.assertFalse(result.in_window)
         nxt = result.next_window_start_utc
@@ -139,7 +142,9 @@ class TestTimezoneResolution(unittest.TestCase):
         with patch.dict(os.environ, {"SEND_WINDOW_DEFAULT_TZ": "UTC"}):
             now = datetime(2026, 5, 26, 12, 0, tzinfo=timezone.utc)
             result = is_within_window(
-                timezone_name="Mars/Olympus_Mons", now_utc=now, **DEFAULT_KW,
+                timezone_name="Mars/Olympus_Mons",
+                now_utc=now,
+                **DEFAULT_KW,
             )
             self.assertTrue(result.in_window)  # UTC fallback puts us in window
 

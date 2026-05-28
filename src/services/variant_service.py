@@ -17,6 +17,7 @@ seed script) gets the same enforcement:
 Decoupled from FastAPI so Phase 18's AI generator (which won't go
 through an HTTP handler) lands the same enforcement path.
 """
+
 from __future__ import annotations
 
 import logging
@@ -108,8 +109,7 @@ class VariantService:
                     ok=False,
                     error_code=ErrorCodes.DISALLOWED_VARS,
                     error_message=(
-                        f"{label} uses disallowed variables: "
-                        f"{', '.join(disallowed)}"
+                        f"{label} uses disallowed variables: {', '.join(disallowed)}"
                     ),
                     disallowed_vars=tuple(disallowed),
                 )

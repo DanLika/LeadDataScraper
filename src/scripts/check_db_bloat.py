@@ -27,6 +27,7 @@ Exit codes:
     1 = at least one table over the dead-tuple threshold
     2 = misconfigured run
 """
+
 from __future__ import annotations
 
 import os
@@ -35,7 +36,10 @@ import sys
 import psycopg
 
 TABLES: tuple[str, ...] = (
-    "leads", "campaigns", "campaign_messages", "orchestration_jobs",
+    "leads",
+    "campaigns",
+    "campaign_messages",
+    "orchestration_jobs",
 )
 TABLE_LIST = list(TABLES)
 DEAD_TUPLE_RATIO_THRESHOLD = 0.20
@@ -60,9 +64,7 @@ def _human_bytes(n: int) -> str:
 
 
 def _pgstattuple_available(conn: psycopg.Connection) -> bool:
-    cur = conn.execute(
-        "SELECT 1 FROM pg_extension WHERE extname = 'pgstattuple'"
-    )
+    cur = conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'pgstattuple'")
     return cur.fetchone() is not None
 
 
@@ -91,12 +93,13 @@ def main() -> int:
             (TABLE_LIST,),
         )
         rows = cur.fetchall()
-        report.append(f"  pgstattuple extension: "
-                      f"{'available' if _pgstattuple_available(conn) else 'NOT installed (CREATE EXTENSION pgstattuple to enable)'}")
+        report.append(
+            f"  pgstattuple extension: "
+            f"{'available' if _pgstattuple_available(conn) else 'NOT installed (CREATE EXTENSION pgstattuple to enable)'}"
+        )
         report.append("")
         report.append(
-            f"  {'table':<22} {'rows':>10} {'dead':>10} "
-            f"{'dead_ratio':>11} {'size':>12}"
+            f"  {'table':<22} {'rows':>10} {'dead':>10} {'dead_ratio':>11} {'size':>12}"
         )
         report.append("  " + "-" * 70)
         for relname, n_live, n_dead, total_bytes in rows:
@@ -135,7 +138,9 @@ def main() -> int:
             print(f"  - {line}", file=sys.stderr)
         return 1
 
-    print(f"\nBloat check PASSED (threshold: dead_ratio > {DEAD_TUPLE_RATIO_THRESHOLD:.0%})")
+    print(
+        f"\nBloat check PASSED (threshold: dead_ratio > {DEAD_TUPLE_RATIO_THRESHOLD:.0%})"
+    )
     return 0
 
 

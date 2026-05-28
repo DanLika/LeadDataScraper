@@ -30,6 +30,7 @@ Run locally:
 See [`docs/dogfood-plan-2026-05.md`](../../docs/dogfood-plan-2026-05.md)
 §4 for the operator routine that consumes this output.
 """
+
 from __future__ import annotations
 
 import json
@@ -62,9 +63,12 @@ def _leads_section() -> str:
             by_status = conn.execute(
                 "SELECT audit_status, count(*) FROM leads GROUP BY audit_status"
             ).fetchall()
-            new_24h = conn.execute(
-                "SELECT count(*) FROM leads WHERE created_at > now() - interval '24 hours'"
-            ).fetchone()[0] or 0
+            new_24h = (
+                conn.execute(
+                    "SELECT count(*) FROM leads WHERE created_at > now() - interval '24 hours'"
+                ).fetchone()[0]
+                or 0
+            )
     except Exception as e:  # noqa: BLE001
         return _section("📋 Leads", f"_Could not read — {e}_")
 
@@ -83,9 +87,12 @@ def _leads_section() -> str:
 def _storage_section() -> str:
     try:
         with _connect() as conn:
-            mb = (conn.execute(
-                "SELECT pg_database_size(current_database())"
-            ).fetchone()[0] or 0) / (1024 ** 2)
+            mb = (
+                conn.execute("SELECT pg_database_size(current_database())").fetchone()[
+                    0
+                ]
+                or 0
+            ) / (1024**2)
     except Exception as e:  # noqa: BLE001
         return _section("💾 Storage", f"_Could not read — {e}_")
 
@@ -114,7 +121,9 @@ def _gemini_budget_section() -> str:
         r.raise_for_status()
         state = r.json()
     except requests.HTTPError as e:
-        return _section("🤖 Gemini budget", f"_HTTP {e.response.status_code} — {e.response.reason}_")
+        return _section(
+            "🤖 Gemini budget", f"_HTTP {e.response.status_code} — {e.response.reason}_"
+        )
     except Exception as e:  # noqa: BLE001
         return _section("🤖 Gemini budget", f"_Could not read — {e}_")
 
@@ -164,20 +173,29 @@ def _orphans_section() -> str:
     full sweep workflow."""
     try:
         with _connect() as conn:
-            soft_orphans = conn.execute(
-                "SELECT count(*) FROM campaign_messages cm "
-                "WHERE NOT EXISTS (SELECT 1 FROM leads l "
-                "WHERE l.unique_key = cm.lead_unique_key)"
-            ).fetchone()[0] or 0
-            zombies = conn.execute(
-                "SELECT count(*) FROM orchestration_jobs "
-                "WHERE status = 'running' AND updated_at < now() - interval '4 hours'"
-            ).fetchone()[0] or 0
-            stuck_leads = conn.execute(
-                "SELECT count(*) FROM leads "
-                "WHERE audit_status IN ('Pending', 'Processing') "
-                "AND updated_at < now() - interval '24 hours'"
-            ).fetchone()[0] or 0
+            soft_orphans = (
+                conn.execute(
+                    "SELECT count(*) FROM campaign_messages cm "
+                    "WHERE NOT EXISTS (SELECT 1 FROM leads l "
+                    "WHERE l.unique_key = cm.lead_unique_key)"
+                ).fetchone()[0]
+                or 0
+            )
+            zombies = (
+                conn.execute(
+                    "SELECT count(*) FROM orchestration_jobs "
+                    "WHERE status = 'running' AND updated_at < now() - interval '4 hours'"
+                ).fetchone()[0]
+                or 0
+            )
+            stuck_leads = (
+                conn.execute(
+                    "SELECT count(*) FROM leads "
+                    "WHERE audit_status IN ('Pending', 'Processing') "
+                    "AND updated_at < now() - interval '24 hours'"
+                ).fetchone()[0]
+                or 0
+            )
     except Exception as e:  # noqa: BLE001
         return _section("🧹 Orphans / zombies", f"_Could not read — {e}_")
 
@@ -194,7 +212,8 @@ def main() -> int:
     now = datetime.now(timezone.utc)
 
     sections = [
-        fn() for fn in (
+        fn()
+        for fn in (
             _leads_section,
             _storage_section,
             _gemini_budget_section,

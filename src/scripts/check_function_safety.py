@@ -18,6 +18,7 @@ Run via security.yml or locally:
 
 Exit codes: 0 OK / 1 drift / 2 misconfig.
 """
+
 from __future__ import annotations
 
 import os
@@ -29,11 +30,13 @@ import psycopg
 # with supabase_schema.sql (add_lead_column) and any Supabase-managed
 # helpers (rls_auto_enable, update_updated_at_column are platform
 # triggers Supabase ships when RLS auto-enable is configured).
-EXPECTED_FUNCTIONS: frozenset[str] = frozenset({
-    "add_lead_column",
-    "rls_auto_enable",
-    "update_updated_at_column",
-})
+EXPECTED_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "add_lead_column",
+        "rls_auto_enable",
+        "update_updated_at_column",
+    }
+)
 
 # EXECUTE-grant exceptions: functions allowed to be callable by
 # untrusted roles. Empty by default — every public function should be
@@ -41,9 +44,13 @@ EXPECTED_FUNCTIONS: frozenset[str] = frozenset({
 # anon/authenticated.
 EXEC_GRANT_ALLOWLIST: dict[str, frozenset[str]] = {}
 
-UNTRUSTED_GRANTEES: frozenset[str] = frozenset({
-    "anon", "authenticated", "PUBLIC",
-})
+UNTRUSTED_GRANTEES: frozenset[str] = frozenset(
+    {
+        "anon",
+        "authenticated",
+        "PUBLIC",
+    }
+)
 
 
 def _check_function_set(conn: psycopg.Connection) -> list[str]:
@@ -62,9 +69,7 @@ def _check_function_set(conn: psycopg.Connection) -> list[str]:
         )
     missing = sorted(EXPECTED_FUNCTIONS - found)
     if missing:
-        errs.append(
-            f"declared function(s) missing from DB: {missing}"
-        )
+        errs.append(f"declared function(s) missing from DB: {missing}")
     return errs
 
 
@@ -84,9 +89,7 @@ def _check_secdef_safety(conn: psycopg.Connection) -> list[str]:
                 f"(expected 'postgres' — anyone with that role can ALTER "
                 f"FUNCTION and elevate)"
             )
-        if not any(
-            (s or "").lower().startswith("search_path=") for s in (cfg or [])
-        ):
+        if not any((s or "").lower().startswith("search_path=") for s in (cfg or [])):
             errs.append(
                 f"public.{proname} is SECURITY DEFINER but has no "
                 f"search_path set — built-in identifier resolution is "

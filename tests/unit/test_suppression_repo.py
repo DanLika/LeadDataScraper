@@ -6,6 +6,7 @@ No live DB — every supabase-py call is mocked. Covers:
 - add: returns row id; duplicate (23505) returns None instead of raising
 - bulk_import: upsert(...ignore_duplicates=True) shape; inserted vs skipped count
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,9 @@ from src.repositories.suppression_repo import (
 )
 
 
-def _build_fake_client(rows_to_return: list[dict[str, Any]] | None = None) -> tuple[Any, MagicMock]:
+def _build_fake_client(
+    rows_to_return: list[dict[str, Any]] | None = None,
+) -> tuple[Any, MagicMock]:
     """Build a chainable supabase-py mock that records the call sequence.
 
     Returns (client, table_mock). The terminal ``.execute()`` returns an
@@ -88,21 +91,33 @@ class TestIsSuppressed(unittest.TestCase):
 class TestFilterSuppressed(unittest.TestCase):
     def test_10_in_3_suppressed_one_round_trip(self) -> None:
         inputs = [f"u{i}@example.com" for i in range(10)]
-        suppressed = [{"identifier_value": "u2@example.com"},
-                      {"identifier_value": "u5@example.com"},
-                      {"identifier_value": "u9@example.com"}]
+        suppressed = [
+            {"identifier_value": "u2@example.com"},
+            {"identifier_value": "u5@example.com"},
+            {"identifier_value": "u9@example.com"},
+        ]
         client, table = _build_fake_client(suppressed)
         repo = SuppressionRepository(client)
 
         allowed, blocked = asyncio.run(repo.filter_suppressed(inputs, "email"))
 
         self.assertEqual(len(allowed), 7)
-        self.assertEqual(blocked, ["u2@example.com", "u5@example.com", "u9@example.com"])
+        self.assertEqual(
+            blocked, ["u2@example.com", "u5@example.com", "u9@example.com"]
+        )
         # Order preserved in allowed.
-        self.assertEqual(allowed,
-                         ["u0@example.com", "u1@example.com", "u3@example.com",
-                          "u4@example.com", "u6@example.com", "u7@example.com",
-                          "u8@example.com"])
+        self.assertEqual(
+            allowed,
+            [
+                "u0@example.com",
+                "u1@example.com",
+                "u3@example.com",
+                "u4@example.com",
+                "u6@example.com",
+                "u7@example.com",
+                "u8@example.com",
+            ],
+        )
         # Exactly one .execute() = one round trip regardless of batch size.
         self.assertEqual(table.execute.call_count, 1)
 
@@ -111,7 +126,9 @@ class TestFilterSuppressed(unittest.TestCase):
         repo = SuppressionRepository(client)
         asyncio.run(repo.filter_suppressed(["a@x.com", "a@x.com", "b@x.com"], "email"))
         # IN clause built from deduped list.
-        in_calls = [c for c in table.in_.call_args_list if c.args[0] == "identifier_value"]
+        in_calls = [
+            c for c in table.in_.call_args_list if c.args[0] == "identifier_value"
+        ]
         self.assertEqual(in_calls[0].args[1], ["a@x.com", "b@x.com"])
 
     def test_empty_input_returns_empty_tuples(self) -> None:
@@ -126,9 +143,7 @@ class TestAdd(unittest.TestCase):
     def test_returns_row_id_on_insert(self) -> None:
         client, table = _build_fake_client([{"id": 42}])
         repo = SuppressionRepository(client)
-        result = asyncio.run(
-            repo.add("email", "new@x.com", "manual", channel="email")
-        )
+        result = asyncio.run(repo.add("email", "new@x.com", "manual", channel="email"))
         self.assertEqual(result, 42)
         # Verify insert payload.
         sent = table.insert.call_args.args[0]
@@ -162,12 +177,12 @@ class TestAdd(unittest.TestCase):
 class TestBulkImport(unittest.TestCase):
     def test_upsert_with_ignore_duplicates(self) -> None:
         # 5 inserted (full data echoed), 2 had collisions (not echoed).
-        client, table = _build_fake_client([
-            {"id": i} for i in range(5)
-        ])
+        client, table = _build_fake_client([{"id": i} for i in range(5)])
         repo = SuppressionRepository(client)
         items = [
-            SuppressionAdd("email", f"u{i}@x.com", "bounce_hard", source_provider="instantly")
+            SuppressionAdd(
+                "email", f"u{i}@x.com", "bounce_hard", source_provider="instantly"
+            )
             for i in range(7)
         ]
         result = asyncio.run(repo.bulk_import(items))
@@ -180,8 +195,9 @@ class TestBulkImport(unittest.TestCase):
         # Upsert called with ignore_duplicates + correct conflict columns.
         kwargs = table.upsert.call_args.kwargs
         self.assertTrue(kwargs.get("ignore_duplicates"))
-        self.assertEqual(kwargs.get("on_conflict"),
-                         "identifier_type,identifier_value,channel")
+        self.assertEqual(
+            kwargs.get("on_conflict"), "identifier_type,identifier_value,channel"
+        )
 
     def test_empty_iterable_short_circuits(self) -> None:
         client, _ = _build_fake_client([])
@@ -200,10 +216,13 @@ class TestUniqueViolationDetector(unittest.TestCase):
     def test_code_attr(self) -> None:
         class _E(Exception):
             code = "23505"
+
         self.assertTrue(_is_unique_violation(_E("x")))
 
     def test_message_substring(self) -> None:
-        self.assertTrue(_is_unique_violation(Exception("postgrest 23505 duplicate key value")))
+        self.assertTrue(
+            _is_unique_violation(Exception("postgrest 23505 duplicate key value"))
+        )
 
     def test_unrelated_error(self) -> None:
         self.assertFalse(_is_unique_violation(Exception("connection refused")))
