@@ -78,6 +78,8 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     "campaign_messages": {
         "campaign_messages_channel_allowed",
         "campaign_messages_status_allowed",
+        # Phase 14+15 hardening (PR #356) — bounce_reason length cap ≤ 200.
+        "campaign_messages_bounce_reason_size",
     },
     "suppressions": {
         "suppressions_identifier_type_allowed",
@@ -90,6 +92,8 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     },
     "webhook_events": {
         "webhook_events_provider_allowed",
+        # Phase 14+15 hardening (PR #356) — event_id length ∈ [1, 256].
+        "webhook_events_event_id_size",
     },
     "sequences": {
         "sequences_status_allowed",
@@ -98,10 +102,20 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
         "sequence_steps_channel_allowed",
         "sequence_steps_branch_allowed",
         "sequence_steps_delay_nonneg",
+        # Phase 14+15 hardening (PR #356) — window ordering + send_days
+        # regex allowlist. The regex CHECK is the one re-applied with
+        # E''-prefix in PR #366 after the apostrophe-double-escape bug.
+        "sequence_steps_window_ordered",
+        "sequence_steps_send_days_format",
     },
     "sequence_variants": {
         "sequence_variants_weight_positive",
         "sequence_variants_label_format",
+        # Phase 14+15 hardening (PR #356) — body/subject size cap +
+        # content_type ∈ ('text','html') allowlist (latter re-applied
+        # as a clean IN-list in PR #366).
+        "sequence_variants_body_size",
+        "sequence_variants_content_type_allowed",
     },
 }
 
