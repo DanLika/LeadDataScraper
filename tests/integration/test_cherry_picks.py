@@ -370,8 +370,20 @@ class TestFix8_NPlus1QueryElimination(unittest.TestCase):
         draft_func_end = content.find('async def _generate_linkedin_draft')
         draft_section = content[draft_func_start:draft_func_end]
 
-        self.assertIn('.table("leads").select("*").eq("unique_key"', draft_section,
-            "Fallback DB query removed — breaks standalone outreach draft calls!")
+        # Format-tolerant regex — ruff-format may split the .table().select().eq()
+        # chain across lines (one method per line), so a flat substring assertIn
+        # is brittle. Match the chain shape with optional whitespace/newlines
+        # between method calls and accept either quote style.
+        fallback_query_pattern = re.compile(
+            r'\.table\(\s*["\']leads["\']\s*\)\s*'
+            r'\.select\(\s*["\']\*["\']\s*\)\s*'
+            r'\.eq\(\s*["\']unique_key["\']'
+        )
+        self.assertRegex(
+            draft_section,
+            fallback_query_pattern,
+            "Fallback DB query removed — breaks standalone outreach draft calls!",
+        )
 
 
 # ============================================================
