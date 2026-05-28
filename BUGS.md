@@ -2,6 +2,66 @@
 
 Date: 2026-05-12. Pytest: 99→101 passed. Next build: clean (was 2 warnings).
 
+## Round 5 — Security audit sweep (2026-05-26) — 1 MERGED, 3 OPEN
+
+Three consecutive security-audit invocations against a clean tree
+(`/vibe-security` → `/security-audit:run` ×2 → `/security-audit:fix-review`).
+Full session log: `docs/sessions/2026-05-26-security-audit-sweep.md`.
+
+A. **Proxy `ADMIN_TOKEN_PATHS` parity drift + stale CLAUDE.md path
+   — FIXED in [#348](https://github.com/DanLika/LeadDataScraper/pull/348) (merged)**
+   - Backend declares `verify_admin_token` on 4 endpoints (`/leads/clear`,
+     `/leads/demo`, `/operator/account`, `/admin/gemini-budget`); proxy
+     `ADMIN_TOKEN_PATHS` only listed the first two. The other two would
+     silently 403 through the proxy.
+   - Severity: Low (defensive parity — zero UI call-sites today;
+     backend already fails-closed correctly).
+   - Fix: added `operator/account` + `admin/gemini-budget` to the proxy
+     allowlist. Also corrected CLAUDE.md drift (`/leads/clear-demo` →
+     `/leads/demo`).
+
+B. **`/upload` magic-byte content check — [#349](https://github.com/DanLika/LeadDataScraper/pull/349) (open)**
+   - `validate_csv_metadata` trusted the client-supplied Content-Type;
+     binary blobs reached pandas + tempfile write. Pandas tolerates
+     malformed input so this is not a parser-RCE fix — it stops obvious
+     binary blobs from reaching the background-task queue + temp dir.
+   - Severity: Low (defense-in-depth).
+   - Fix: new `validate_csv_content` rejects bodies with a null byte in
+     the first 1 KB OR a known binary magic prefix
+     (`PK\x03\x04` / `%PDF` / `\x89PNG` / `GIF8` / `\x7fELF`). Test 9
+     in `tests/test_upload_attacks.py` flipped to assert 400 + new
+     pdf/elf/null-padded cases.
+
+C. **Phase 15.2 list_unsubscribe wiring drift — [#350](https://github.com/DanLika/LeadDataScraper/pull/350) (open)**
+   - `build_send_payload` rendered `payload.list_unsubscribe_url` via
+     `build_unsubscribe_url(unsubscribe_base, tracking_id)` but
+     `push_leads` / `from_lds_lead` never read it. Per-lead RFC 8058 /
+     Gmail-Yahoo 2024 one-click compliance was not threaded; compliance
+     fell back to whatever Instantly's campaign-level config sets.
+   - Severity: Medium (compliance-adjacent functional drift; not
+     exploit-class).
+   - Fix: `push_leads` gains `list_unsubscribe_urls: dict[unique_key →
+     bare_URL]` kwarg; dispatcher wraps each as `<URL>` per Instantly's
+     custom-vars-to-header bridge convention (Phase 14.2 PR β);
+     `dispatch_tick` builds the dict during the per-message loop.
+     4 new tests; 27/27 existing instantly + dispatch_tick tests green.
+   - **Out of scope (deferred follow-up)**: rendered `subject` + `body`
+     + `in_reply_to_message_id` are also dead-code-data on this path
+     (campaign owns templates per `docs/integrations/instantly.md:114`).
+     ~600-LOC Phase 15.1 deletion blocks on this PR merging first.
+
+D. **Cookie `Secure` flag NODE_ENV dependency — [#351](https://github.com/DanLika/LeadDataScraper/pull/351) (open)**
+   - `hardenCookieOptions(options, isProd)` callers derived `isProd`
+     from `process.env.NODE_ENV === 'production'`. Misconfig in
+     CI/deploy → session cookies could ship without `Secure`. Mitigated
+     in practice by HSTS 2y+preload + Render TLS edge + Next.js
+     `next start` auto-NODE_ENV — but defense-in-depth gap remained.
+   - Severity: Low (defense-in-depth, narrow real-world exploit window).
+   - Fix: `hardenCookieOptions(options)` — `secure: true` unconditional.
+     Localhost is a "trustworthy origin" per WHATWG so dev still works
+     (Chrome accepts `Secure` cookies on `http://localhost` since
+     ~2018). Test count: 1165 pass / 0 fail (was 1157 prior).
+
 ## Round 4 — CSV import E2E (2026-05-21) — BOTH FIXED 2026-05-21
 
 Browser-driven CSV upload through `/upload` → `process_csv_background` →

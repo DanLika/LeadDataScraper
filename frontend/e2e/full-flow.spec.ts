@@ -61,7 +61,7 @@ async function pollUntil<T>(
   label: string,
 ): Promise<T> {
   const start = Date.now()
-  // eslint-disable-next-line no-constant-condition
+
   while (true) {
     const v = await fn()
     if (v !== null && v !== undefined) return v

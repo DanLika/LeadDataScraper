@@ -36,6 +36,7 @@ Exit codes:
     1 = at least one MUST_NOT_BE_NULL column has a NULL row
     2 = misconfigured run (missing DATABASE_URL, can't reach DB, etc.)
 """
+
 from __future__ import annotations
 
 import os
@@ -76,9 +77,7 @@ APP_REQUIRED_NULLABLE: dict[str, tuple[str, ...]] = {
 MOSTLY_NULL_THRESHOLD = 0.90
 
 
-def _fetch_columns(
-    conn: psycopg.Connection, table: str
-) -> list[tuple[str, str, str]]:
+def _fetch_columns(conn: psycopg.Connection, table: str) -> list[tuple[str, str, str]]:
     cur = conn.execute(
         "SELECT column_name, is_nullable, data_type "
         "FROM information_schema.columns "
@@ -123,16 +122,16 @@ def _fetch_null_counts(
     return dict(zip(headers, row))
 
 
-def _audit_table(
-    conn: psycopg.Connection, table: str
-) -> tuple[list[str], list[str]]:
+def _audit_table(conn: psycopg.Connection, table: str) -> tuple[list[str], list[str]]:
     """Return (report_lines, failure_lines) for one table."""
     report: list[str] = []
     failures: list[str] = []
 
     columns = _fetch_columns(conn, table)
     if not columns:
-        report.append(f"## {table}\n  TABLE MISSING — drift detector should also catch this")
+        report.append(
+            f"## {table}\n  TABLE MISSING — drift detector should also catch this"
+        )
         return report, failures
 
     col_names = [c[0] for c in columns]
@@ -206,8 +205,7 @@ def main() -> int:
             all_report.extend(["", *report])
             all_failures.extend(failures)
     except psycopg.Error as e:
-        print(f"ERROR: unexpected DB error during NULL probe: {e}",
-              file=sys.stderr)
+        print(f"ERROR: unexpected DB error during NULL probe: {e}", file=sys.stderr)
         return 2
     finally:
         conn.close()

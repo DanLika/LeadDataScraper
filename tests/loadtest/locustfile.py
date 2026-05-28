@@ -96,6 +96,7 @@ from locust import HttpUser, between, constant_throughput, events, tag, task
 API_KEY_ENV = "LOAD_API_KEY"
 API_KEY_HEADER = "X-API-Key"
 
+
 # Each virtual user gets a synthetic IPv4 so slowapi's per-IP buckets don't
 # collapse the target throughput. 10.x is RFC1918 and never collides with
 # the platform-injected XFF in production.
@@ -131,9 +132,7 @@ class ReadUser(BaseAPIUser):
     @tag("read")
     @task
     def list_leads(self) -> None:
-        with self.client.get(
-            "/leads", name="GET /leads", catch_response=True
-        ) as resp:
+        with self.client.get("/leads", name="GET /leads", catch_response=True) as resp:
             if resp.status_code == 429:
                 resp.failure("429 rate-limited (per-IP bucket saturated)")
             elif resp.status_code >= 500:
@@ -174,7 +173,9 @@ class OrchestratorUser(BaseAPIUser):
                 if resp.status_code != 200:
                     return None
                 payload = resp.json()
-                rows = payload if isinstance(payload, list) else payload.get("leads", [])
+                rows = (
+                    payload if isinstance(payload, list) else payload.get("leads", [])
+                )
                 ids = [
                     r["unique_key"]
                     for r in rows
@@ -216,9 +217,7 @@ class StatsUser(BaseAPIUser):
     @tag("stats")
     @task
     def stats(self) -> None:
-        with self.client.get(
-            "/stats", name="GET /stats", catch_response=True
-        ) as resp:
+        with self.client.get("/stats", name="GET /stats", catch_response=True) as resp:
             if resp.status_code == 429:
                 resp.failure("429 rate-limited (no server-side cache)")
             elif resp.status_code >= 500:
@@ -234,7 +233,9 @@ class StatsUser(BaseAPIUser):
 def _print_targets(environment, **kwargs):  # noqa: ANN001
     stats = environment.stats.total
     p95 = stats.get_response_time_percentile(0.95)
-    fail_pct = (stats.num_failures / stats.num_requests * 100) if stats.num_requests else 0
+    fail_pct = (
+        (stats.num_failures / stats.num_requests * 100) if stats.num_requests else 0
+    )
     print("\n=== Load test summary ===")
     print(f"requests : {stats.num_requests}")
     print(f"failures : {stats.num_failures} ({fail_pct:.2f}%)")
