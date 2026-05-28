@@ -18,7 +18,7 @@
 #   make lock-python   # regenerates requirements.txt with hashes
 
 pandas==2.3.3
-numpy==2.2.3
+numpy==2.4.6
 requests==2.34.2
 beautifulsoup4==4.13.3
 lxml==6.1.1
