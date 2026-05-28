@@ -137,6 +137,7 @@ class QueryProfiler(AbstractContextManager):
     # ------------------------------------------------------------------
     def _discover_clients(self):
         import sys
+
         # SupabaseHelper class — used as the identity check.
         from src.utils.supabase_helper import SupabaseHelper
 
@@ -156,7 +157,9 @@ class QueryProfiler(AbstractContextManager):
                     seen.add(id(cli))
                     yield cli
 
-    def _make_wrapped_table(self, original_table: Callable[..., Any]) -> Callable[..., Any]:
+    def _make_wrapped_table(
+        self, original_table: Callable[..., Any]
+    ) -> Callable[..., Any]:
         prof = self
 
         def wrapped(table_name: str, *args: Any, **kwargs: Any):
@@ -200,12 +203,18 @@ class QueryProfiler(AbstractContextManager):
         )
 
         lines: List[str] = []
-        lines.append(f"QueryProfiler: {len(self.events)} total events across {len(agg)} unique callers")
+        lines.append(
+            f"QueryProfiler: {len(self.events)} total events across {len(agg)} unique callers"
+        )
         lines.append("")
         lines.append(f"{'count':>6}  {'tot ms':>7}  {'verb':<8}  {'table':<22}  caller")
         lines.append("-" * 90)
         for (path, line, func), data in rows[:top_n]:
-            short = os.path.relpath(path, _REPO_PREFIX) if path.startswith(_REPO_PREFIX) else path
+            short = (
+                os.path.relpath(path, _REPO_PREFIX)
+                if path.startswith(_REPO_PREFIX)
+                else path
+            )
             top_verb = max(data.verbs.items(), key=lambda kv: kv[1])[0]
             top_table = max(data.tables.items(), key=lambda kv: kv[1])[0]
             lines.append(
@@ -286,6 +295,7 @@ class _ProfiledQueryBuilder:
             new_proxy = _ProfiledQueryBuilder(new_inner, self._table, self._profiler)
             object.__setattr__(new_proxy, "_verb", verb)
             return new_proxy
+
         return call
 
     def _wrap_chain(self, method: Callable[..., Any]) -> Callable[..., Any]:
@@ -299,6 +309,7 @@ class _ProfiledQueryBuilder:
                 object.__setattr__(proxy, "_verb", self._verb)
                 return proxy
             return result
+
         return call
 
     def _wrap_execute(self, method: Callable[..., Any]) -> Callable[..., Any]:
@@ -319,6 +330,7 @@ class _ProfiledQueryBuilder:
                         duration_ms=duration_ms,
                     )
                 )
+
         return call
 
 
@@ -351,11 +363,21 @@ def _cli() -> int:
     import argparse
     import asyncio
 
-    p = argparse.ArgumentParser(description="Profile Supabase queries during a sample pipeline run")
-    p.add_argument("--leads", type=int, default=5, help="N to use for assert_o1 (default 5)")
-    p.add_argument("--top", type=int, default=20, help="how many hot callers to print (default 20)")
-    p.add_argument("--scenario", choices=["recover", "list_leads"], default="list_leads",
-                   help="which read scenario to drive")
+    p = argparse.ArgumentParser(
+        description="Profile Supabase queries during a sample pipeline run"
+    )
+    p.add_argument(
+        "--leads", type=int, default=5, help="N to use for assert_o1 (default 5)"
+    )
+    p.add_argument(
+        "--top", type=int, default=20, help="how many hot callers to print (default 20)"
+    )
+    p.add_argument(
+        "--scenario",
+        choices=["recover", "list_leads"],
+        default="list_leads",
+        help="which read scenario to drive",
+    )
     args = p.parse_args()
 
     os.environ.setdefault(_DEFAULT_ENV_GATE, "1")
@@ -363,15 +385,18 @@ def _cli() -> int:
     # Importing backend.main wires up the lazy `db` singleton so the
     # profiler's _discover_clients sees something to patch.
     import backend.main  # noqa: F401 — required for lazy singleton population
-    _ = backend.main.db   # force the lazy resolution
+
+    _ = backend.main.db  # force the lazy resolution
 
     async def run() -> int:
         with QueryProfiler() as prof:
             if args.scenario == "recover":
                 from backend.main import orchestrator
+
                 await orchestrator.recover_interrupted_jobs()
             else:
                 from backend.main import db as _db
+
                 await _db.list_leads_recent(limit=args.leads)
         prof.report(top_n=args.top)
         try:

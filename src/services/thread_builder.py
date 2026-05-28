@@ -16,6 +16,7 @@ the dispatcher receives. Two concerns intertwine:
    :class:`PriorMessageNotReadyError` signals this; the worker
    catches + reschedules.
 """
+
 from __future__ import annotations
 
 import logging
@@ -47,7 +48,9 @@ class PriorMessageNotReadyError(ThreadBuildError):
     legitimately in flight; we just need to wait.
     """
 
-    def __init__(self, lds_message_id: str, prior_message_id: Optional[str] = None) -> None:
+    def __init__(
+        self, lds_message_id: str, prior_message_id: Optional[str] = None
+    ) -> None:
         super().__init__(
             f"prior message {prior_message_id or '<unknown>'} not ready "
             f"for thread continuation on {lds_message_id}"
@@ -97,7 +100,7 @@ def build_send_payload(
     lds_message_id: str,
     lead: dict[str, Any],
     step: Any,  # SequenceStep (15.1 dataclass) — typed Any to keep
-                # this module decoupled from the repo layer.
+    # this module decoupled from the repo layer.
     variant: Any,  # SequenceVariant (15.1 dataclass)
     prior_message: Optional[dict[str, Any]] = None,
     operator_name: str = "",

@@ -17,6 +17,7 @@ Exits:
 Stdout is a single JSON line so Render's log aggregator / grep
 pipelines can compute per-tick tallies without parsing prose.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,15 +37,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="LDS webhook event sweeper (Path A — Phase 14.X recovery)",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=None,
+        "--batch-size",
+        type=int,
+        default=None,
         help="Rows to claim per tick (default: env WEBHOOK_SWEEP_BATCH_SIZE or 50)",
     )
     parser.add_argument(
-        "--grace-seconds", type=int, default=None,
+        "--grace-seconds",
+        type=int,
+        default=None,
         help="Skip rows newer than now - grace (default: env WEBHOOK_SWEEP_GRACE_SEC or 60)",
     )
     parser.add_argument(
-        "--max-runtime-sec", type=int, default=None,
+        "--max-runtime-sec",
+        type=int,
+        default=None,
         help="Wall-clock cap (default: env WEBHOOK_SWEEP_MAX_RUNTIME_SEC or 50)",
     )
     return parser.parse_args(argv)

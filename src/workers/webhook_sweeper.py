@@ -46,6 +46,7 @@ Phase 14.X Path A — designed in response to N=200 burst test where
 ~15% of events under 10-parallel load surfaced
 ``httpcore.RemoteProtocolError`` post-commit, leaving rows orphaned.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -120,9 +121,11 @@ async def sweep_once(
         # own client + connection pool; cheap relative to the
         # PostgREST work the tick does anyway.
         from src.utils.supabase_helper import SupabaseHelper
+
         db = SupabaseHelper()
     if process_instantly_event is None:
         from backend.main import _process_instantly_event
+
         process_instantly_event = _process_instantly_event
 
     result = SweepResult()
@@ -137,13 +140,15 @@ async def sweep_once(
 
     try:
         rows_resp = await asyncio.to_thread(
-            lambda: db.client.table("webhook_events")
-            .select("id, provider, event_id, event_type, payload, received_at")
-            .is_("processed_at", "null")
-            .lt("received_at", cutoff)
-            .order("received_at", desc=False)
-            .limit(batch)
-            .execute()
+            lambda: (
+                db.client.table("webhook_events")
+                .select("id, provider, event_id, event_type, payload, received_at")
+                .is_("processed_at", "null")
+                .lt("received_at", cutoff)
+                .order("received_at", desc=False)
+                .limit(batch)
+                .execute()
+            )
         )
         rows = getattr(rows_resp, "data", None) or []
     except Exception as exc:

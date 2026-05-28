@@ -12,6 +12,7 @@ Race coverage:
 - Bounce before email_sent (provider_message_id is NULL, matches 0 rows)
 - Duplicate email_sent (replay) → first-hit-wins
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -57,9 +58,13 @@ class TestMarkSent(unittest.TestCase):
     def test_first_hit_writes_provider_message_id(self) -> None:
         client, table = _build_db([{"id": "msg-uuid"}])
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.mark_sent(
-            "msg-uuid", "instantly-msg-001", sent_at_iso="2026-05-25T10:00:00Z",
-        ))
+        result = asyncio.run(
+            repo.mark_sent(
+                "msg-uuid",
+                "instantly-msg-001",
+                sent_at_iso="2026-05-25T10:00:00Z",
+            )
+        )
         self.assertTrue(result.matched)
         # Verify the UPDATE payload + predicate chain.
         update_call = table.update.call_args.args[0]
@@ -74,9 +79,13 @@ class TestMarkSent(unittest.TestCase):
         """Predicate `provider_message_id IS NULL` matches 0 rows on replay."""
         client, _ = _build_db([])  # empty data = no rows matched
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.mark_sent(
-            "msg-uuid", "instantly-msg-001", sent_at_iso="2026-05-25T10:00:00Z",
-        ))
+        result = asyncio.run(
+            repo.mark_sent(
+                "msg-uuid",
+                "instantly-msg-001",
+                sent_at_iso="2026-05-25T10:00:00Z",
+            )
+        )
         self.assertFalse(result.matched)
         self.assertIsNone(result.error)
 
@@ -84,20 +93,28 @@ class TestMarkSent(unittest.TestCase):
         client, table = _build_db([{"id": "msg-uuid"}])
         repo = CampaignMessageRepository(client)
         # Empty lds_message_id
-        result = asyncio.run(repo.mark_sent("", "x", sent_at_iso="2026-05-25T10:00:00Z"))
+        result = asyncio.run(
+            repo.mark_sent("", "x", sent_at_iso="2026-05-25T10:00:00Z")
+        )
         self.assertFalse(result.matched)
         client.table.assert_not_called()
         # Empty provider_message_id
-        result = asyncio.run(repo.mark_sent("msg", "", sent_at_iso="2026-05-25T10:00:00Z"))
+        result = asyncio.run(
+            repo.mark_sent("msg", "", sent_at_iso="2026-05-25T10:00:00Z")
+        )
         self.assertFalse(result.matched)
 
     def test_db_exception_returns_error(self) -> None:
         client, table = _build_db([])
         table.execute.side_effect = RuntimeError("connection refused")
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.mark_sent(
-            "msg-uuid", "instantly-msg-001", sent_at_iso="2026-05-25T10:00:00Z",
-        ))
+        result = asyncio.run(
+            repo.mark_sent(
+                "msg-uuid",
+                "instantly-msg-001",
+                sent_at_iso="2026-05-25T10:00:00Z",
+            )
+        )
         self.assertFalse(result.matched)
         self.assertEqual(result.error, "RuntimeError")
 
@@ -111,9 +128,12 @@ class TestMarkBounced(unittest.TestCase):
     def test_writes_bounced_status_and_reason(self) -> None:
         client, table = _build_db([{"id": "msg-uuid"}])
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.mark_bounced(
-            "instantly-msg-bounce-1", bounce_reason="550 mailbox not found",
-        ))
+        result = asyncio.run(
+            repo.mark_bounced(
+                "instantly-msg-bounce-1",
+                bounce_reason="550 mailbox not found",
+            )
+        )
         self.assertTrue(result.matched)
         update_call = table.update.call_args.args[0]
         self.assertEqual(update_call["status"], "bounced")
@@ -185,9 +205,12 @@ class TestMarkSendFailed(unittest.TestCase):
     def test_dispatching_only_transition(self) -> None:
         client, table = _build_db([{"id": "msg-uuid"}])
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.mark_send_failed(
-            "msg-uuid", error="rate_limit",
-        ))
+        result = asyncio.run(
+            repo.mark_send_failed(
+                "msg-uuid",
+                error="rate_limit",
+            )
+        )
         self.assertTrue(result.matched)
         # State machine: only flip dispatching → bounced (post-claim).
         table.eq.assert_any_call("status", "dispatching")

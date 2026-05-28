@@ -13,6 +13,7 @@ section). The repo intentionally exposes the raw reason string instead
 of a typed enum — adding a new reason to the DB and the repo signature
 in lockstep is the desired friction.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -199,16 +200,20 @@ class SuppressionRepository:
         whole batch and re-raise — bulk imports should be atomic.
         """
         rows = [
-            {k: v for k, v in {
-                "identifier_type": it.identifier_type,
-                "identifier_value": it.identifier_value,
-                "reason": it.reason,
-                "channel": it.channel,
-                "source_provider": it.source_provider,
-                "source_campaign_id": it.source_campaign_id,
-                "created_by": it.created_by,
-                "notes": it.notes,
-            }.items() if v is not None}
+            {
+                k: v
+                for k, v in {
+                    "identifier_type": it.identifier_type,
+                    "identifier_value": it.identifier_value,
+                    "reason": it.reason,
+                    "channel": it.channel,
+                    "source_provider": it.source_provider,
+                    "source_campaign_id": it.source_campaign_id,
+                    "created_by": it.created_by,
+                    "notes": it.notes,
+                }.items()
+                if v is not None
+            }
             for it in items
         ]
         if not rows:

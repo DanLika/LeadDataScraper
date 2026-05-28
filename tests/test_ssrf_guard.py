@@ -12,6 +12,7 @@ Network: the only DNS-resolving case uses `localhost`, which resolves
 locally without a network round-trip. Every other case uses IP
 literals or the hostname denylist — no DNS.
 """
+
 import ipaddress
 import socket
 import unittest
@@ -26,9 +27,8 @@ from src.utils.ssrf_guard import (
 
 
 class TestAssertSafeScheme(unittest.TestCase):
-
     def test_https_and_http_allowed(self):
-        assert_safe_scheme("https://example.com/")   # no raise
+        assert_safe_scheme("https://example.com/")  # no raise
         assert_safe_scheme("http://example.com/")
 
     def test_dangerous_schemes_rejected(self):
@@ -70,8 +70,13 @@ class TestAssertSafeScheme(unittest.TestCase):
 
     def test_private_ip_literals_rejected(self):
         for host in [
-            "127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.0.1",
-            "169.254.169.254", "0.0.0.0", "[::1]",
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "172.16.0.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "[::1]",
         ]:
             with self.assertRaises(SSRFError, msg=host):
                 assert_safe_scheme(f"http://{host}/")
@@ -84,18 +89,24 @@ class TestAssertSafeScheme(unittest.TestCase):
                 assert_safe_scheme(f"http://{host}/")
 
     def test_public_hostname_passes(self):
-        assert_safe_scheme("https://example.com/")   # no raise
+        assert_safe_scheme("https://example.com/")  # no raise
         assert_safe_scheme("https://api.github.com/repos")
 
     def test_public_ip_literal_passes(self):
-        assert_safe_scheme("https://8.8.8.8/")       # Google DNS — global
+        assert_safe_scheme("https://8.8.8.8/")  # Google DNS — global
 
 
 class TestAssertPublicIp(unittest.TestCase):
-
     def test_private_loopback_linklocal_rejected(self):
-        for ip in ["127.0.0.1", "10.0.0.1", "192.168.0.1", "172.16.0.1",
-                   "169.254.0.1", "::1", "fc00::1"]:
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.0.1",
+            "172.16.0.1",
+            "169.254.0.1",
+            "::1",
+            "fc00::1",
+        ]:
             with self.assertRaises(SSRFError, msg=ip):
                 _assert_public_ip(ipaddress.ip_address(ip), ip)
 
@@ -106,11 +117,10 @@ class TestAssertPublicIp(unittest.TestCase):
 
     def test_global_ip_passes(self):
         for ip in ["8.8.8.8", "1.1.1.1", "93.184.216.34"]:
-            _assert_public_ip(ipaddress.ip_address(ip), ip)   # no raise
+            _assert_public_ip(ipaddress.ip_address(ip), ip)  # no raise
 
 
 class TestAssertSafeUrl(unittest.IsolatedAsyncioTestCase):
-
     async def test_private_ip_literal_rejected_without_dns(self):
         for host in ["127.0.0.1", "10.0.0.1", "169.254.169.254"]:
             with self.assertRaises(SSRFError, msg=host):
@@ -131,7 +141,7 @@ class TestAssertSafeUrl(unittest.IsolatedAsyncioTestCase):
             await assert_safe_url("http://localhost/")
 
     async def test_public_ip_literal_passes(self):
-        await assert_safe_url("https://8.8.8.8/")    # no raise — global IP
+        await assert_safe_url("https://8.8.8.8/")  # no raise — global IP
 
     async def test_dns_resolution_failure_raises_ssrf_error(self):
         # A `.invalid` TLD (RFC 2606) is guaranteed NXDOMAIN — the

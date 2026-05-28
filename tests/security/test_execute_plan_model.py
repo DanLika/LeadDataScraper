@@ -29,20 +29,22 @@ from backend.main import ExecutePlanParams, ExecutePlanRequest
 
 # Mirror of the Literal in backend/main.py — duplicated on purpose so a
 # silent rename of the live tuple trips this test.
-EXPECTED_TASKS = frozenset({
-    "DATABASE_QUERY",
-    "STATUS_CHECK",
-    "SEO_AUDIT",
-    "OUTREACH_DRAFT",
-    "GET_INSIGHTS",
-    "DATA_MERGE",
-    "DEEP_HUNT",
-    "RUN_MASSIVE_PIPELINE",
-    "LINKEDIN_DRAFT",
-    "DISCOVERY_SEARCH",
-    "DEEP_ENRICHMENT",
-    "CAMPAIGN_STRATEGY",
-})
+EXPECTED_TASKS = frozenset(
+    {
+        "DATABASE_QUERY",
+        "STATUS_CHECK",
+        "SEO_AUDIT",
+        "OUTREACH_DRAFT",
+        "GET_INSIGHTS",
+        "DATA_MERGE",
+        "DEEP_HUNT",
+        "RUN_MASSIVE_PIPELINE",
+        "LINKEDIN_DRAFT",
+        "DISCOVERY_SEARCH",
+        "DEEP_ENRICHMENT",
+        "CAMPAIGN_STRATEGY",
+    }
+)
 
 
 class TestExecutableTaskAllowlist(unittest.TestCase):

@@ -8,6 +8,7 @@ The test instruments the supabase-py mock to count ``execute()`` calls
 that pertain to SELECT (vs UPDATE / INSERT). If a future refactor
 reintroduces an N+1 path, this trips loudly.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -57,18 +58,30 @@ class _InstrumentedDb:
             # _row_to_* dataclass constructors don't KeyError.
             if name == "sequence_steps":
                 row = {
-                    "id": "step-x", "sequence_id": "seq-x", "step_index": 0,
-                    "channel": "email", "delay_days": 0, "delay_hours": 0,
-                    "thread_with_prior": False, "branch_condition": "always",
-                    "send_window_start": "09:00:00", "send_window_end": "17:00:00",
-                    "send_days": "mon,tue,wed,thu,fri", "created_at": "",
+                    "id": "step-x",
+                    "sequence_id": "seq-x",
+                    "step_index": 0,
+                    "channel": "email",
+                    "delay_days": 0,
+                    "delay_hours": 0,
+                    "thread_with_prior": False,
+                    "branch_condition": "always",
+                    "send_window_start": "09:00:00",
+                    "send_window_end": "17:00:00",
+                    "send_days": "mon,tue,wed,thu,fri",
+                    "created_at": "",
                 }
             elif name == "sequence_variants":
                 row = {
-                    "id": "var-x", "step_id": "step-x", "variant_label": "A",
-                    "subject_template": None, "body_template": "hi",
-                    "weight": 50, "ai_model_used": None,
-                    "ai_prompt_version": None, "created_at": "",
+                    "id": "var-x",
+                    "step_id": "step-x",
+                    "variant_label": "A",
+                    "subject_template": None,
+                    "body_template": "hi",
+                    "weight": 50,
+                    "ai_model_used": None,
+                    "ai_prompt_version": None,
+                    "created_at": "",
                 }
             else:
                 row = {"id": "x", "unique_key": "x", "step_id": "x"}

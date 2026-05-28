@@ -8,6 +8,7 @@ per lead because the predicate also tripped on ``enrichment_status='PENDING'``.
 Pure-function tests — no DB required, runs in the default offline pytest
 sweep.
 """
+
 from __future__ import annotations
 
 import sys
@@ -108,8 +109,13 @@ class TestFetchChunkThreadsTasks:
 
     def test_audit_only_passes_narrow_predicate(self):
         orch, builder = self._make_orchestrator_with_mock_client()
-        orch._fetch_chunk(lead_ids=None, processed_count=0, chunk_size=50,
-                          total_leads=0, tasks=["audit"])
+        orch._fetch_chunk(
+            lead_ids=None,
+            processed_count=0,
+            chunk_size=50,
+            total_leads=0,
+            tasks=["audit"],
+        )
         builder.or_.assert_called_once()
         predicate = builder.or_.call_args[0][0]
         assert predicate == "audit_status.not.in.(Completed,Failed)"
@@ -119,8 +125,9 @@ class TestFetchChunkThreadsTasks:
 
     def test_default_tasks_pass_both_status_predicates(self):
         orch, builder = self._make_orchestrator_with_mock_client()
-        orch._fetch_chunk(lead_ids=None, processed_count=0, chunk_size=50,
-                          total_leads=0, tasks=None)
+        orch._fetch_chunk(
+            lead_ids=None, processed_count=0, chunk_size=50, total_leads=0, tasks=None
+        )
         predicate = builder.or_.call_args[0][0]
         assert "audit_status" in predicate
         assert "enrichment_status" in predicate
@@ -132,8 +139,13 @@ class TestFetchChunkThreadsTasks:
         # predicate on the lead_ids branch too.
         orch, builder = self._make_orchestrator_with_mock_client()
         builder.in_.return_value = builder
-        orch._fetch_chunk(lead_ids=["x1", "x2"], processed_count=0,
-                          chunk_size=50, total_leads=2, tasks=["audit"])
+        orch._fetch_chunk(
+            lead_ids=["x1", "x2"],
+            processed_count=0,
+            chunk_size=50,
+            total_leads=2,
+            tasks=["audit"],
+        )
         builder.or_.assert_not_called()
 
 

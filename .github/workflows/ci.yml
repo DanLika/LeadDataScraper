@@ -663,17 +663,25 @@ jobs:
         # feed missed. `--only-fixed` matches Trivy's `ignore-unfixed`;
         # `--fail-on high` exits non-zero on any high+ severity.
         #
-        # `continue-on-error: true` is the Day 2 mitigation for
-        # issue #363 bucket #9: after the v0.71.0 -> v0.112.0 bump
-        # (db-stale block lifted), grype now reaches the scan and
-        # surfaces real fixable-HIGH CVEs in the Playwright base image.
-        # Trivy ALREADY gates merge on CRITICAL+fixable-HIGH; grype
-        # is the "second opinion" tool. Demoting it to informational
-        # keeps the Trivy gate strict while we triage the base image
-        # bump in a separate PR.
-        continue-on-error: true
+        # `--config .grype.yaml` loads our accepted-risk allowlist
+        # for the bundled-but-unreachable parts of the Playwright
+        # base image (Chromium binary + a handful of apt-installed
+        # media/TLS libs that the backend code never reaches). Each
+        # entry in .grype.yaml carries a reachability-analysis note;
+        # see that file for the rationale + the conditions under
+        # which the allowlist must be revisited.
+        #
+        # Trivy stays the primary container gate — it does NOT use
+        # the grype allowlist, so any CRITICAL or fixable-HIGH in
+        # ANY package still blocks merge via the Trivy step above.
+        # `continue-on-error` REMOVED in this PR (issue #363 bucket
+        # #9 cleanup) — grype is again a hard gate. If a future
+        # finding lands in a package outside the allowlist, the
+        # grype red must be triaged before merge (either fix the
+        # package OR add to the allowlist with a reachability note).
         run: |
           grype "lds-backend:pr-${{ github.sha }}" \
+            --config .grype.yaml \
             --only-fixed \
             --fail-on high \
             --output table

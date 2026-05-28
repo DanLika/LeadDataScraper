@@ -7,6 +7,7 @@ No live DB — supabase-py is mocked. Covers:
 - insert_event other exception: propagates unchanged
 - _is_unique_violation: code attr, body substring, irrelevant exceptions
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -40,21 +41,25 @@ class TestInsertEvent(unittest.TestCase):
     def test_happy_path_row_shape(self) -> None:
         client, table = _build_fake_client()
         repo = WebhookEventRepository(client)
-        result = asyncio.run(repo.insert_event(
-            provider="instantly",
-            event_id="evt_123",
-            event_type="email_sent",
-            payload={"any": "json"},
-        ))
+        result = asyncio.run(
+            repo.insert_event(
+                provider="instantly",
+                event_id="evt_123",
+                event_type="email_sent",
+                payload={"any": "json"},
+            )
+        )
         self.assertTrue(result.inserted)
         self.assertFalse(result.duplicate)
         client.table.assert_called_once_with("webhook_events")
-        table.insert.assert_called_once_with({
-            "provider": "instantly",
-            "event_id": "evt_123",
-            "event_type": "email_sent",
-            "payload": {"any": "json"},
-        })
+        table.insert.assert_called_once_with(
+            {
+                "provider": "instantly",
+                "event_id": "evt_123",
+                "event_type": "email_sent",
+                "payload": {"any": "json"},
+            }
+        )
 
     def test_duplicate_via_code_attribute(self) -> None:
         client, table = _build_fake_client()
@@ -64,12 +69,14 @@ class TestInsertEvent(unittest.TestCase):
 
         table.execute.side_effect = APIErrorWithCode("duplicate key")
         repo = WebhookEventRepository(client)
-        result = asyncio.run(repo.insert_event(
-            provider="instantly",
-            event_id="evt_123",
-            event_type="email_sent",
-            payload={"k": "v"},
-        ))
+        result = asyncio.run(
+            repo.insert_event(
+                provider="instantly",
+                event_id="evt_123",
+                event_type="email_sent",
+                payload={"k": "v"},
+            )
+        )
         self.assertFalse(result.inserted)
         self.assertTrue(result.duplicate)
 
@@ -79,12 +86,14 @@ class TestInsertEvent(unittest.TestCase):
             'PostgREST 409: {"code":"23505","message":"duplicate key value violates"}'
         )
         repo = WebhookEventRepository(client)
-        result = asyncio.run(repo.insert_event(
-            provider="instantly",
-            event_id="evt_123",
-            event_type="email_sent",
-            payload={},
-        ))
+        result = asyncio.run(
+            repo.insert_event(
+                provider="instantly",
+                event_id="evt_123",
+                event_type="email_sent",
+                payload={},
+            )
+        )
         self.assertFalse(result.inserted)
         self.assertTrue(result.duplicate)
 
@@ -93,12 +102,14 @@ class TestInsertEvent(unittest.TestCase):
         table.execute.side_effect = RuntimeError("connection reset")
         repo = WebhookEventRepository(client)
         with self.assertRaises(RuntimeError) as cm:
-            asyncio.run(repo.insert_event(
-                provider="instantly",
-                event_id="evt_123",
-                event_type="email_sent",
-                payload={},
-            ))
+            asyncio.run(
+                repo.insert_event(
+                    provider="instantly",
+                    event_id="evt_123",
+                    event_type="email_sent",
+                    payload={},
+                )
+            )
         self.assertIn("connection reset", str(cm.exception))
 
 
@@ -106,20 +117,24 @@ class TestIsUniqueViolation(unittest.TestCase):
     def test_code_attribute(self) -> None:
         class APIError(Exception):
             code = "23505"
+
         self.assertTrue(_is_unique_violation(APIError("anything")))
 
     def test_code_attribute_other(self) -> None:
         class APIError(Exception):
             code = "42P01"  # undefined_table
+
         self.assertFalse(_is_unique_violation(APIError("anything")))
 
     def test_body_substring_23505(self) -> None:
         self.assertTrue(_is_unique_violation(RuntimeError('"code":"23505"')))
 
     def test_body_substring_duplicate_key(self) -> None:
-        self.assertTrue(_is_unique_violation(
-            RuntimeError("duplicate key value violates unique constraint")
-        ))
+        self.assertTrue(
+            _is_unique_violation(
+                RuntimeError("duplicate key value violates unique constraint")
+            )
+        )
 
     def test_irrelevant_exception(self) -> None:
         self.assertFalse(_is_unique_violation(RuntimeError("connection reset")))

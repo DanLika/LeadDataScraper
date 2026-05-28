@@ -30,7 +30,11 @@ LedgerProvider = Literal["heyreach", "instantly", "resend", "smtp"]
 
 # Mirrors suppressions_provider_allowed CHECK in supabase_schema.sql.
 SuppressionProvider = Literal[
-    "heyreach", "instantly", "manual", "resend", "smtp",
+    "heyreach",
+    "instantly",
+    "manual",
+    "resend",
+    "smtp",
 ]
 
 __all__ = ["WebhookProvider", "LedgerProvider", "SuppressionProvider"]

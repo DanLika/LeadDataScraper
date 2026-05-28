@@ -39,6 +39,7 @@ Race notes captured in :mod:`docs/sequencing-architecture.md`
 § Known races; same surface caveats apply (dispatching-row inflight
 escape, 1-tick recovery lag, etc.).
 """
+
 from __future__ import annotations
 
 import logging
@@ -67,8 +68,8 @@ class AdvanceResult:
 async def advance_to_next_step(
     *,
     current_message: dict[str, Any],
-    step_repo: Any,        # SequenceStepRepository
-    message_repo: Any,     # CampaignMessageRepository
+    step_repo: Any,  # SequenceStepRepository
+    message_repo: Any,  # CampaignMessageRepository
     event_type: EventType,
     sent_at: Optional[datetime] = None,
 ) -> AdvanceResult:
@@ -100,9 +101,14 @@ async def advance_to_next_step(
         )
 
     # Load current step to find its index, then look up step_index+1.
-    cur_step = await step_repo.get_by_id(cur_step_id) if hasattr(
-        step_repo, "get_by_id",
-    ) else None
+    cur_step = (
+        await step_repo.get_by_id(cur_step_id)
+        if hasattr(
+            step_repo,
+            "get_by_id",
+        )
+        else None
+    )
     if cur_step is None:
         # Fall back: fetch via fetch_many for compatibility.
         fetched = await step_repo.fetch_many([cur_step_id])

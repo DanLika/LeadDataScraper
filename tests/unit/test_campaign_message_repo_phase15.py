@@ -6,6 +6,7 @@
 
 Phase 14.3 surface tested separately in tests/unit/test_campaign_message_repo.py.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -40,9 +41,13 @@ def _build_db(rows: list[dict[str, Any]] | None = None) -> tuple[Any, MagicMock]
 class TestFetchDueForDispatch(unittest.TestCase):
     def test_returns_due_rows(self) -> None:
         rows = [
-            {"id": f"msg-{i}", "status": "pending",
-             "scheduled_at": "2026-05-25T09:00:00Z",
-             "campaign_id": "c-1", "lead_unique_key": f"lead-{i}"}
+            {
+                "id": f"msg-{i}",
+                "status": "pending",
+                "scheduled_at": "2026-05-25T09:00:00Z",
+                "campaign_id": "c-1",
+                "lead_unique_key": f"lead-{i}",
+            }
             for i in range(3)
         ]
         client, table = _build_db(rows)
@@ -89,12 +94,14 @@ class TestScheduleStep(unittest.TestCase):
     def test_writes_step_variant_scheduled_at(self) -> None:
         client, table = _build_db([{"id": "msg-1"}])
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.schedule_step(
-            "msg-1",
-            step_id="step-1",
-            variant_id="variant-A",
-            scheduled_at_iso="2026-05-26T09:00:00Z",
-        ))
+        result = asyncio.run(
+            repo.schedule_step(
+                "msg-1",
+                step_id="step-1",
+                variant_id="variant-A",
+                scheduled_at_iso="2026-05-26T09:00:00Z",
+            )
+        )
         self.assertTrue(result.matched)
         update_call = table.update.call_args.args[0]
         self.assertEqual(update_call["step_id"], "step-1")
@@ -112,10 +119,14 @@ class TestScheduleStep(unittest.TestCase):
             ("msg", "", "variant"),
             ("msg", "step", ""),
         ):
-            result = asyncio.run(repo.schedule_step(
-                bad[0], step_id=bad[1], variant_id=bad[2],
-                scheduled_at_iso="2026-05-26T09:00:00Z",
-            ))
+            result = asyncio.run(
+                repo.schedule_step(
+                    bad[0],
+                    step_id=bad[1],
+                    variant_id=bad[2],
+                    scheduled_at_iso="2026-05-26T09:00:00Z",
+                )
+            )
             self.assertFalse(result.matched)
             self.assertEqual(result.error, "missing identifiers")
         client.table.assert_not_called()
@@ -126,12 +137,14 @@ class TestScheduleStep(unittest.TestCase):
         repo translates to MarkResult(matched=False)."""
         client, _ = _build_db([])
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.schedule_step(
-            "msg-already-sent",
-            step_id="step-1",
-            variant_id="variant-A",
-            scheduled_at_iso="2026-05-26T09:00:00Z",
-        ))
+        result = asyncio.run(
+            repo.schedule_step(
+                "msg-already-sent",
+                step_id="step-1",
+                variant_id="variant-A",
+                scheduled_at_iso="2026-05-26T09:00:00Z",
+            )
+        )
         self.assertFalse(result.matched)
         self.assertIsNone(result.error)  # not an error — just a no-op
 

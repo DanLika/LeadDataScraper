@@ -9,6 +9,7 @@ POST /unsubscribe/{token} — verifies HMAC, dereferences tracking_id →
 Tests mock the lazy-singleton `db`, `router`, etc. via the canonical
 ``main.<name> = MagicMock(...)`` pattern (see test_gdpr_export.py).
 """
+
 from __future__ import annotations
 
 import os
@@ -39,7 +40,9 @@ SAMPLE_SECRET = "test-unsubscribe-signing-secret"
 # ---------------------------------------------------------------------------
 
 
-def _build_mock_db(*, tracking_id_found: bool = True, lead_email: str | None = "victim@example.com") -> MagicMock:
+def _build_mock_db(
+    *, tracking_id_found: bool = True, lead_email: str | None = "victim@example.com"
+) -> MagicMock:
     db = MagicMock()
 
     def table_side_effect(table_name: str) -> MagicMock:
@@ -51,10 +54,14 @@ def _build_mock_db(*, tracking_id_found: bool = True, lead_email: str | None = "
         chain.insert.return_value = chain
         chain.upsert.return_value = chain
         if table_name == "campaign_messages" and tracking_id_found:
-            chain.execute.return_value = MagicMock(data=[{
-                "campaign_id": "camp-1",
-                "lead_unique_key": "lead-1",
-            }])
+            chain.execute.return_value = MagicMock(
+                data=[
+                    {
+                        "campaign_id": "camp-1",
+                        "lead_unique_key": "lead-1",
+                    }
+                ]
+            )
         elif table_name == "leads" and lead_email is not None:
             chain.execute.return_value = MagicMock(data=[{"email": lead_email}])
         elif table_name == "suppressions":
@@ -76,6 +83,7 @@ def _env(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_lazy_globals():
     import main
+
     try:
         main.limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
@@ -103,6 +111,7 @@ def client():
 class TestGetEndpoint:
     def test_renders_confirm_form_for_any_token_string(self, client):
         from src.utils.unsubscribe_tokens import mint
+
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET)
         resp = client.get(f"/unsubscribe/{token}")
         assert resp.status_code == 200
@@ -125,6 +134,7 @@ class TestGetEndpoint:
 class TestPostEndpoint:
     def test_valid_token_succeeds(self, client):
         from src.utils.unsubscribe_tokens import mint
+
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET)
         resp = client.post(f"/unsubscribe/{token}")
         assert resp.status_code == 200
@@ -132,6 +142,7 @@ class TestPostEndpoint:
 
     def test_tampered_token_returns_410(self, client):
         from src.utils.unsubscribe_tokens import mint
+
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET)
         # Tamper one char near the start of the payload region.
         tampered = token[:30] + ("X" if token[30] != "X" else "Y") + token[31:]
@@ -145,6 +156,7 @@ class TestPostEndpoint:
             DEFAULT_TTL_DAYS,
             mint,
         )
+
         old = int(time.time()) - DEFAULT_TTL_DAYS * 86_400 - 60
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET, issued_at=old)
         resp = client.post(f"/unsubscribe/{token}")
@@ -158,8 +170,10 @@ class TestPostEndpoint:
         operator-side problem (campaign was wiped, etc.).
         """
         import main
+
         main.db = _build_mock_db(tracking_id_found=False)
         from src.utils.unsubscribe_tokens import mint
+
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET)
         resp = client.post(f"/unsubscribe/{token}")
         assert resp.status_code == 200
@@ -173,8 +187,10 @@ class TestPostEndpoint:
         clicked, no further bookkeeping recoverable.
         """
         import main
+
         main.db = _build_mock_db(lead_email=None)
         from src.utils.unsubscribe_tokens import mint
+
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET)
         resp = client.post(f"/unsubscribe/{token}")
         assert resp.status_code == 200
@@ -191,6 +207,7 @@ class TestPostEndpoint:
     def test_no_api_key_required(self, client):
         """Public endpoint — recipient is not an authenticated LDS user."""
         from src.utils.unsubscribe_tokens import mint
+
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET)
         # No X-API-Key header.
         resp = client.post(f"/unsubscribe/{token}")
@@ -201,6 +218,7 @@ class TestPostEndpoint:
         identifier_value=victim@example.com, channel='all',
         reason='unsubscribe') into suppressions."""
         import main
+
         # Track every insert against suppressions.
         inserted: list[dict] = []
         db = MagicMock()
@@ -219,10 +237,14 @@ class TestPostEndpoint:
             chain.insert.side_effect = insert
             chain.upsert.return_value = chain
             if name == "campaign_messages":
-                chain.execute.return_value = MagicMock(data=[{
-                    "campaign_id": "camp-X",
-                    "lead_unique_key": "lead-X",
-                }])
+                chain.execute.return_value = MagicMock(
+                    data=[
+                        {
+                            "campaign_id": "camp-X",
+                            "lead_unique_key": "lead-X",
+                        }
+                    ]
+                )
             elif name == "leads":
                 chain.execute.return_value = MagicMock(data=[{"email": "v@x.com"}])
             elif name == "suppressions":
@@ -234,6 +256,7 @@ class TestPostEndpoint:
         db.client.table.side_effect = table_side_effect
         main.db = db
         from src.utils.unsubscribe_tokens import mint
+
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET)
         resp = client.post(f"/unsubscribe/{token}")
         assert resp.status_code == 200

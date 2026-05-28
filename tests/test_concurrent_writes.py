@@ -17,6 +17,7 @@ contention between separate database sessions — each holds its own
 transaction. ROLLBACK in one session doesn't undo another. Unique-key
 + teardown cleanup is the only honest pattern here.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -104,18 +105,14 @@ def _read_audit_status(key: str) -> str | None:
 
 def _read_seo_score(key: str) -> int | None:
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
-        cur = conn.execute(
-            "SELECT seo_score FROM leads WHERE unique_key = %s", (key,)
-        )
+        cur = conn.execute("SELECT seo_score FROM leads WHERE unique_key = %s", (key,))
         row = cur.fetchone()
         return row[0] if row else None
 
 
 def _row_exists(key: str) -> bool:
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
-        cur = conn.execute(
-            "SELECT 1 FROM leads WHERE unique_key = %s", (key,)
-        )
+        cur = conn.execute("SELECT 1 FROM leads WHERE unique_key = %s", (key,))
         return cur.fetchone() is not None
 
 
@@ -152,8 +149,7 @@ def test_concurrent_updates_converge_to_last_write_wins(test_lead_key: str) -> N
     assert len(results) == 20, "not every worker returned"
     final = _read_audit_status(test_lead_key)
     assert final in VALID_AUDIT_STATUSES, (
-        f"final audit_status={final!r} not in valid set "
-        f"— row may be in a torn state"
+        f"final audit_status={final!r} not in valid set — row may be in a torn state"
     )
 
 
@@ -164,6 +160,7 @@ def test_concurrent_inserts_same_unique_key(test_lead_key: str) -> None:
     ``leads_pkey``) serializes inserts. The first to commit holds the
     key; the other 19 raise ``UniqueViolation`` at commit time.
     """
+
     def worker(_: int) -> str:
         try:
             with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
@@ -206,16 +203,13 @@ def test_concurrent_update_and_delete_converges_to_no_row(
     def updater() -> None:
         with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
             conn.execute(
-                "UPDATE leads SET audit_status = 'Completed' "
-                "WHERE unique_key = %s",
+                "UPDATE leads SET audit_status = 'Completed' WHERE unique_key = %s",
                 (test_lead_key,),
             )
 
     def deleter() -> None:
         with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
-            conn.execute(
-                "DELETE FROM leads WHERE unique_key = %s", (test_lead_key,)
-            )
+            conn.execute("DELETE FROM leads WHERE unique_key = %s", (test_lead_key,))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
         f1 = ex.submit(updater)

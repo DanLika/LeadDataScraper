@@ -41,6 +41,7 @@ Race conditions documented in the method docstrings:
 - ``mark_unsubscribed`` / ``mark_replied``: same out-of-order risk.
   Same mitigation (suppression INSERT via email on unsubscribe).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -108,11 +109,13 @@ class CampaignMessageRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .update({
-                        "provider_message_id": provider_message_id,
-                        "status": "sent",
-                        "sent_at": sent_at_iso,
-                    })
+                    .update(
+                        {
+                            "provider_message_id": provider_message_id,
+                            "status": "sent",
+                            "sent_at": sent_at_iso,
+                        }
+                    )
                     .eq("id", lds_message_id)
                     .is_("provider_message_id", "null")
                     .execute()
@@ -120,7 +123,8 @@ class CampaignMessageRepository:
             )
         except Exception as exc:  # noqa: BLE001 — boundary catch
             logger.exception(
-                "mark_sent failed for lds_message_id=%s", lds_message_id,
+                "mark_sent failed for lds_message_id=%s",
+                lds_message_id,
             )
             return MarkResult(matched=False, error=type(exc).__name__)
         matched = bool(getattr(res, "data", None))
@@ -149,10 +153,12 @@ class CampaignMessageRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .update({
-                        "status": "bounced",
-                        "bounce_reason": (bounce_reason or "")[:200] or None,
-                    })
+                    .update(
+                        {
+                            "status": "bounced",
+                            "bounce_reason": (bounce_reason or "")[:200] or None,
+                        }
+                    )
                     .eq("provider_message_id", provider_message_id)
                     .in_("status", ["pending", "sent"])
                     .execute()
@@ -256,10 +262,12 @@ class CampaignMessageRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .update({
-                        "status": "bounced",
-                        "bounce_reason": f"send_failed: {error}"[:200],
-                    })
+                    .update(
+                        {
+                            "status": "bounced",
+                            "bounce_reason": f"send_failed: {error}"[:200],
+                        }
+                    )
                     .eq("id", lds_message_id)
                     .eq("status", "dispatching")
                     .execute()
@@ -267,7 +275,8 @@ class CampaignMessageRepository:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
-                "mark_send_failed failed for lds_message_id=%s", lds_message_id,
+                "mark_send_failed failed for lds_message_id=%s",
+                lds_message_id,
             )
             return MarkResult(matched=False, error=type(exc).__name__)
         return MarkResult(matched=bool(getattr(res, "data", None)))
@@ -318,7 +327,8 @@ class CampaignMessageRepository:
         except Exception:
             logger.exception(
                 "fetch_due_for_dispatch failed (limit=%d, when=%s)",
-                limit, when,
+                limit,
+                when,
             )
             return []
         return list(getattr(rows, "data", None) or [])
@@ -349,11 +359,13 @@ class CampaignMessageRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .update({
-                        "step_id": step_id,
-                        "variant_id": variant_id,
-                        "scheduled_at": scheduled_at_iso,
-                    })
+                    .update(
+                        {
+                            "step_id": step_id,
+                            "variant_id": variant_id,
+                            "scheduled_at": scheduled_at_iso,
+                        }
+                    )
                     .eq("id", message_id)
                     .eq("status", "pending")
                     .execute()
@@ -361,7 +373,8 @@ class CampaignMessageRepository:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
-                "schedule_step failed for message_id=%s", message_id,
+                "schedule_step failed for message_id=%s",
+                message_id,
             )
             return MarkResult(matched=False, error=type(exc).__name__)
         return MarkResult(matched=bool(getattr(res, "data", None)))
@@ -424,10 +437,12 @@ class CampaignMessageRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .update({
-                        "status": "dispatching",
-                        "dispatched_at": when,
-                    })
+                    .update(
+                        {
+                            "status": "dispatching",
+                            "dispatched_at": when,
+                        }
+                    )
                     .in_("id", due_ids)
                     .eq("status", "pending")
                     .execute()
@@ -436,7 +451,8 @@ class CampaignMessageRepository:
         except Exception:
             logger.exception(
                 "claim_due_batch UPDATE failed (limit=%d, when=%s)",
-                limit, when,
+                limit,
+                when,
             )
             return []
         return list(getattr(res, "data", None) or [])
@@ -466,19 +482,23 @@ class CampaignMessageRepository:
         if not self._db or timeout_minutes <= 0:
             return 0
         from datetime import datetime, timedelta, timezone
+
         now = (
             datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
-            if now_iso else datetime.now(timezone.utc)
+            if now_iso
+            else datetime.now(timezone.utc)
         )
         cutoff = (now - timedelta(minutes=timeout_minutes)).isoformat()
         try:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .update({
-                        "status": "pending",
-                        "dispatched_at": None,
-                    })
+                    .update(
+                        {
+                            "status": "pending",
+                            "dispatched_at": None,
+                        }
+                    )
                     .eq("status", "dispatching")
                     .lt("dispatched_at", cutoff)
                     .execute()
@@ -531,10 +551,12 @@ class CampaignMessageRepository:
         try:
             chain = (
                 self._db.table(self.TABLE_NAME)
-                .update({
-                    "status": "cancelled",
-                    "bounce_reason": f"cancelled:{reason}"[:200],
-                })
+                .update(
+                    {
+                        "status": "cancelled",
+                        "bounce_reason": f"cancelled:{reason}"[:200],
+                    }
+                )
                 .eq("lead_unique_key", lead_unique_key)
                 .eq("status", "pending")
             )
@@ -544,7 +566,8 @@ class CampaignMessageRepository:
         except Exception:
             logger.exception(
                 "cancel_pending_steps_for_lead failed (lead=%s seq=%s)",
-                lead_unique_key, sequence_id,
+                lead_unique_key,
+                sequence_id,
             )
             return 0
         cancelled = len(getattr(res, "data", None) or [])
@@ -598,23 +621,22 @@ class CampaignMessageRepository:
         payload = {k: v for k, v in payload.items() if v is not None}
         try:
             res = await asyncio.to_thread(
-                lambda: (
-                    self._db.table(self.TABLE_NAME)
-                    .insert(payload)
-                    .execute()
-                )
+                lambda: self._db.table(self.TABLE_NAME).insert(payload).execute()
             )
         except Exception as exc:  # noqa: BLE001 — narrow inline
             if _is_unique_violation_exc(exc):
                 logger.info(
                     "insert_next_step_row UNIQUE collision (idempotent _sent "
                     "replay; lead=%s seq=%s step=%s)",
-                    lead_unique_key, sequence_id, step_id,
+                    lead_unique_key,
+                    sequence_id,
+                    step_id,
                 )
                 return None
             logger.exception(
                 "insert_next_step_row failed (lead=%s step=%s)",
-                lead_unique_key, step_id,
+                lead_unique_key,
+                step_id,
             )
             return None
         data = getattr(res, "data", None) or []
@@ -653,11 +675,7 @@ class CampaignMessageRepository:
                 len(unique_inputs),
             )
             return {}
-        return {
-            r["id"]: r
-            for r in (getattr(rows, "data", None) or [])
-            if r.get("id")
-        }
+        return {r["id"]: r for r in (getattr(rows, "data", None) or []) if r.get("id")}
 
 
 def _is_unique_violation_exc(exc: Exception) -> bool:
@@ -677,6 +695,7 @@ def _now_iso() -> str:
     calls so tests can patch a single import site if a future scenario
     needs frozen-clock semantics."""
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 

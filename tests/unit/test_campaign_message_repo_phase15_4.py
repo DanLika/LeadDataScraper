@@ -9,6 +9,7 @@
   * UNIQUE collision (23505) returns None — idempotent _sent replay
 - _is_unique_violation_exc: code attr + message substring
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,9 +23,11 @@ from src.repositories.campaign_message_repo import (
 )
 
 
-def _build_db(update_returns: list[dict] | None = None,
-              insert_returns: list[dict] | None = None,
-              insert_raises: Exception | None = None) -> tuple[Any, MagicMock, dict]:
+def _build_db(
+    update_returns: list[dict] | None = None,
+    insert_returns: list[dict] | None = None,
+    insert_raises: Exception | None = None,
+) -> tuple[Any, MagicMock, dict]:
     table = MagicMock(name="table")
     captures: dict[str, Any] = {"updates": [], "inserts": []}
     table._set: dict[str, Any] = {}
@@ -37,9 +40,7 @@ def _build_db(update_returns: list[dict] | None = None,
     table.insert.side_effect = lambda values, t=table: (
         captures["inserts"].append(dict(values)) or t
     )
-    table.eq.side_effect = lambda col, val, t=table: (
-        t._where.__setitem__(col, val) or t
-    )
+    table.eq.side_effect = lambda col, val, t=table: t._where.__setitem__(col, val) or t
     table.in_.return_value = table
     table.lt.return_value = table
     table.lte.return_value = table
@@ -69,9 +70,13 @@ class TestCancelPendingSteps(unittest.TestCase):
         cancelled = [{"id": "m1"}, {"id": "m2"}]
         client, _, captures = _build_db(update_returns=cancelled)
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.cancel_pending_steps_for_lead(
-            "lead-1", sequence_id="seq-A", reason="bounce",
-        ))
+        result = asyncio.run(
+            repo.cancel_pending_steps_for_lead(
+                "lead-1",
+                sequence_id="seq-A",
+                reason="bounce",
+            )
+        )
         self.assertEqual(result, 2)
         set_clause, where = captures["updates"][0]
         self.assertEqual(set_clause["status"], "cancelled")
@@ -85,9 +90,13 @@ class TestCancelPendingSteps(unittest.TestCase):
         cancelled = [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]
         client, _, captures = _build_db(update_returns=cancelled)
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.cancel_pending_steps_for_lead(
-            "lead-1", sequence_id=None, reason="unsubscribed_cross_channel",
-        ))
+        result = asyncio.run(
+            repo.cancel_pending_steps_for_lead(
+                "lead-1",
+                sequence_id=None,
+                reason="unsubscribed_cross_channel",
+            )
+        )
         self.assertEqual(result, 3)
         _, where = captures["updates"][0]
         # CROSS-SEQUENCE: lead + status only, no sequence_id filter.
@@ -120,15 +129,17 @@ class TestInsertNextStepRow(unittest.TestCase):
         new_row = {"id": "msg-new"}
         client, _, captures = _build_db(insert_returns=[new_row])
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.insert_next_step_row(
-            lead_unique_key="lead-1",
-            campaign_id="camp-1",
-            sequence_id="seq-1",
-            step_id="step-1",
-            channel="email",
-            scheduled_at_iso="2026-05-29T09:00:00+00:00",
-            in_reply_to_message_id="instantly-prior-001",
-        ))
+        result = asyncio.run(
+            repo.insert_next_step_row(
+                lead_unique_key="lead-1",
+                campaign_id="camp-1",
+                sequence_id="seq-1",
+                step_id="step-1",
+                channel="email",
+                scheduled_at_iso="2026-05-29T09:00:00+00:00",
+                in_reply_to_message_id="instantly-prior-001",
+            )
+        )
         self.assertEqual(result, {"id": "msg-new"})
         payload = captures["inserts"][0]
         self.assertEqual(payload["lead_unique_key"], "lead-1")
@@ -141,16 +152,19 @@ class TestInsertNextStepRow(unittest.TestCase):
     def test_unique_collision_returns_none(self) -> None:
         class _Dup(Exception):
             code = "23505"
+
         client, _, _ = _build_db(insert_raises=_Dup("duplicate key value"))
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.insert_next_step_row(
-            lead_unique_key="lead-1",
-            campaign_id="camp-1",
-            sequence_id="seq-1",
-            step_id="step-1",
-            channel="email",
-            scheduled_at_iso="2026-05-29T09:00:00+00:00",
-        ))
+        result = asyncio.run(
+            repo.insert_next_step_row(
+                lead_unique_key="lead-1",
+                campaign_id="camp-1",
+                sequence_id="seq-1",
+                step_id="step-1",
+                channel="email",
+                scheduled_at_iso="2026-05-29T09:00:00+00:00",
+            )
+        )
         self.assertIsNone(result)
 
     def test_missing_identifier_short_circuits(self) -> None:
@@ -162,26 +176,33 @@ class TestInsertNextStepRow(unittest.TestCase):
             ("lead-1", "camp-1", "", "step-1"),
             ("lead-1", "camp-1", "seq-1", ""),
         ):
-            result = asyncio.run(repo.insert_next_step_row(
-                lead_unique_key=bad[0],
-                campaign_id=bad[1],
-                sequence_id=bad[2],
-                step_id=bad[3],
-                channel="email",
-                scheduled_at_iso="2026-05-29T09:00:00+00:00",
-            ))
+            result = asyncio.run(
+                repo.insert_next_step_row(
+                    lead_unique_key=bad[0],
+                    campaign_id=bad[1],
+                    sequence_id=bad[2],
+                    step_id=bad[3],
+                    channel="email",
+                    scheduled_at_iso="2026-05-29T09:00:00+00:00",
+                )
+            )
             self.assertIsNone(result)
         self.assertEqual(len(captures["inserts"]), 0)
 
     def test_none_in_reply_to_stripped_from_payload(self) -> None:
         client, _, captures = _build_db(insert_returns=[{"id": "msg-new"}])
         repo = CampaignMessageRepository(client)
-        asyncio.run(repo.insert_next_step_row(
-            lead_unique_key="lead-1", campaign_id="camp-1",
-            sequence_id="seq-1", step_id="step-1", channel="email",
-            scheduled_at_iso="2026-05-29T09:00:00+00:00",
-            in_reply_to_message_id=None,
-        ))
+        asyncio.run(
+            repo.insert_next_step_row(
+                lead_unique_key="lead-1",
+                campaign_id="camp-1",
+                sequence_id="seq-1",
+                step_id="step-1",
+                channel="email",
+                scheduled_at_iso="2026-05-29T09:00:00+00:00",
+                in_reply_to_message_id=None,
+            )
+        )
         payload = captures["inserts"][0]
         # None stripped so DB default applies (DB default is NULL for
         # this col, but stripping keeps the payload size down + makes
@@ -193,17 +214,22 @@ class TestUniqueViolationDetector(unittest.TestCase):
     def test_code_attr(self) -> None:
         class _E(Exception):
             code = "23505"
+
         self.assertTrue(_is_unique_violation_exc(_E("x")))
 
     def test_message_substring(self) -> None:
-        self.assertTrue(_is_unique_violation_exc(
-            Exception("postgrest 23505 duplicate key value"),
-        ))
+        self.assertTrue(
+            _is_unique_violation_exc(
+                Exception("postgrest 23505 duplicate key value"),
+            )
+        )
 
     def test_unrelated_error(self) -> None:
-        self.assertFalse(_is_unique_violation_exc(
-            Exception("connection refused"),
-        ))
+        self.assertFalse(
+            _is_unique_violation_exc(
+                Exception("connection refused"),
+            )
+        )
 
 
 if __name__ == "__main__":

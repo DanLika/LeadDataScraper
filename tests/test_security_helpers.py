@@ -10,6 +10,7 @@ file locks the behaviour so a refactor can't silently regress it.
 - `TaskOrchestrator._is_valid_uuid` — turns a non-UUID `job_id` into a
   clean `not_found` instead of a 500 (PENTEST_CRAWLER.md Round 2).
 """
+
 import os
 import sys
 import pandas as pd
@@ -25,28 +26,35 @@ from src.core.task_orchestrator import TaskOrchestrator
 
 # ───────────────────────── sanitize_csv_cell ─────────────────────────
 
-@pytest.mark.parametrize("payload", [
-    "=HYPERLINK(\"http://evil\",\"x\")",
-    "=cmd|'/c calc'!A1",
-    "@SUM(1+9)",
-    "+1+1",
-    "-2+3",
-    "\tTabLed",
-    "\rCarriageReturn",
-])
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '=HYPERLINK("http://evil","x")',
+        "=cmd|'/c calc'!A1",
+        "@SUM(1+9)",
+        "+1+1",
+        "-2+3",
+        "\tTabLed",
+        "\rCarriageReturn",
+    ],
+)
 def test_sanitize_csv_cell_prefixes_formula_payloads(payload):
     out = sanitize_csv_cell(payload)
     assert out == "'" + payload, "formula-leading cell must be apostrophe-prefixed"
     assert out[0] == "'"
 
 
-@pytest.mark.parametrize("safe", [
-    "Acme Bakery",
-    "https://example.com",
-    "owner@example.com",      # '@' mid-string is fine; only leading char matters
-    "123 Main St",
-    "",                        # empty string — untouched
-])
+@pytest.mark.parametrize(
+    "safe",
+    [
+        "Acme Bakery",
+        "https://example.com",
+        "owner@example.com",  # '@' mid-string is fine; only leading char matters
+        "123 Main St",
+        "",  # empty string — untouched
+    ],
+)
 def test_sanitize_csv_cell_leaves_safe_values(safe):
     assert sanitize_csv_cell(safe) == safe
 
@@ -58,17 +66,19 @@ def test_sanitize_csv_cell_passes_through_non_strings(nonstr):
 
 
 def test_sanitize_dataframe_for_csv_neutralises_string_columns():
-    df = pd.DataFrame({
-        "name": ["=HYPERLINK(\"x\",\"y\")", "Safe Co", "@SUM(1)"],
-        "score": [10, 20, 30],                # numeric col — untouched
-        "note": ["-danger", "fine", "+also"],
-    })
+    df = pd.DataFrame(
+        {
+            "name": ['=HYPERLINK("x","y")', "Safe Co", "@SUM(1)"],
+            "score": [10, 20, 30],  # numeric col — untouched
+            "note": ["-danger", "fine", "+also"],
+        }
+    )
     out = sanitize_dataframe_for_csv(df)
-    assert out["name"].tolist() == ["'=HYPERLINK(\"x\",\"y\")", "Safe Co", "'@SUM(1)"]
+    assert out["name"].tolist() == ['\'=HYPERLINK("x","y")', "Safe Co", "'@SUM(1)"]
     assert out["note"].tolist() == ["'-danger", "fine", "'+also"]
-    assert out["score"].tolist() == [10, 20, 30]      # numbers unchanged
+    assert out["score"].tolist() == [10, 20, 30]  # numbers unchanged
     # original frame must not be mutated
-    assert df["name"].iloc[0] == "=HYPERLINK(\"x\",\"y\")"
+    assert df["name"].iloc[0] == '=HYPERLINK("x","y")'
 
 
 def test_sanitize_dataframe_for_csv_empty_frame():
@@ -78,9 +88,11 @@ def test_sanitize_dataframe_for_csv_empty_frame():
 
 # ──────────────────── _coalesce_duplicate_columns ────────────────────
 
+
 def _coalesce():
     # Imported lazily — `backend.main` initialises the FastAPI app.
     from main import _coalesce_duplicate_columns
+
     return _coalesce_duplicate_columns
 
 
@@ -94,21 +106,27 @@ def test_coalesce_no_duplicates_is_passthrough():
 def test_coalesce_merges_duplicate_columns_preferring_non_null():
     # Simulate the post-AI-mapping frame: an empty placeholder `email`
     # column collides with a populated renamed `email` column.
-    df = pd.DataFrame([
-        [None, "a@x.com"],
-        [None, "b@x.com"],
-    ], columns=["email", "email"])
+    df = pd.DataFrame(
+        [
+            [None, "a@x.com"],
+            [None, "b@x.com"],
+        ],
+        columns=["email", "email"],
+    )
     out = _coalesce()(df)
-    assert list(out.columns) == ["email"]               # de-duplicated
+    assert list(out.columns) == ["email"]  # de-duplicated
     assert out["email"].tolist() == ["a@x.com", "b@x.com"]  # populated wins
 
 
 def test_coalesce_first_non_null_left_to_right():
-    df = pd.DataFrame([
-        ["L", None],
-        [None, "R"],
-        [None, None],
-    ], columns=["v", "v"])
+    df = pd.DataFrame(
+        [
+            ["L", None],
+            [None, "R"],
+            [None, None],
+        ],
+        columns=["v", "v"],
+    )
     out = _coalesce()(df)
     assert list(out.columns) == ["v"]
     assert out["v"].tolist()[:2] == ["L", "R"]
@@ -116,10 +134,13 @@ def test_coalesce_first_non_null_left_to_right():
 
 
 def test_coalesce_preserves_unique_columns_alongside_dupes():
-    df = pd.DataFrame([
-        [1, None, "x", "kept"],
-        [2, "y", None, "kept2"],
-    ], columns=["id", "dup", "dup", "name"])
+    df = pd.DataFrame(
+        [
+            [1, None, "x", "kept"],
+            [2, "y", None, "kept2"],
+        ],
+        columns=["id", "dup", "dup", "name"],
+    )
     out = _coalesce()(df)
     assert sorted(out.columns) == ["dup", "id", "name"]
     assert out["dup"].tolist() == ["x", "y"]
@@ -128,24 +149,31 @@ def test_coalesce_preserves_unique_columns_alongside_dupes():
 
 # ───────────────────── TaskOrchestrator._is_valid_uuid ─────────────────
 
-@pytest.mark.parametrize("good", [
-    "00000000-0000-0000-0000-000000000000",
-    "9a9cf962-358a-493e-b2ab-6367403e9871",
-    "9A9CF962-358A-493E-B2AB-6367403E9871",   # upper-case
-])
+
+@pytest.mark.parametrize(
+    "good",
+    [
+        "00000000-0000-0000-0000-000000000000",
+        "9a9cf962-358a-493e-b2ab-6367403e9871",
+        "9A9CF962-358A-493E-B2AB-6367403E9871",  # upper-case
+    ],
+)
 def test_is_valid_uuid_accepts_real_uuids(good):
     assert TaskOrchestrator._is_valid_uuid(good) is True
 
 
-@pytest.mark.parametrize("bad", [
-    "notauuid-attacker",
-    "DROP TABLE leads",
-    "../../etc/passwd",
-    "' OR '1'='1",
-    "",
-    "12345",
-    None,
-    12345,
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "notauuid-attacker",
+        "DROP TABLE leads",
+        "../../etc/passwd",
+        "' OR '1'='1",
+        "",
+        "12345",
+        None,
+        12345,
+    ],
+)
 def test_is_valid_uuid_rejects_garbage(bad):
     assert TaskOrchestrator._is_valid_uuid(bad) is False

@@ -13,6 +13,7 @@
 
 Mocks the lazy `db` global via the canonical pattern (test_gdpr_export.py).
 """
+
 from __future__ import annotations
 
 import hmac
@@ -96,8 +97,10 @@ class _RecordingDb:
                 for r in rows_list:
                     eid = r.get("event_id")
                     if eid in recorder._seen_event_ids:
+
                         class _Dup(Exception):
                             code = "23505"
+
                         raise _Dup("duplicate key value violates unique constraint")
                     recorder._seen_event_ids.add(eid)
             recorder.inserts.setdefault(name, []).extend(rows_list)
@@ -123,6 +126,7 @@ class _RecordingDb:
 @pytest.fixture(autouse=True)
 def _patch_db_and_limiter():
     import main
+
     try:
         main.limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
@@ -217,7 +221,9 @@ class TestAuthGates:
 
 
 class TestIdempotency:
-    def test_duplicate_event_id_returns_200_with_flag(self, client, _patch_db_and_limiter):
+    def test_duplicate_event_id_returns_200_with_flag(
+        self, client, _patch_db_and_limiter
+    ):
         body = _body("evt-dup", "email_sent")
         headers = {"X-Signature": _sign(body), "X-Timestamp": _now_ts()}
         resp1 = client.post("/webhooks/instantly", content=body, headers=headers)
@@ -229,7 +235,9 @@ class TestIdempotency:
         assert resp2.json() == {"ok": True, "duplicate": True}
 
     def test_duplicate_path_schedules_background_task(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         """Path B (2026-05-27): the duplicate path must also fire the
         background task. Otherwise an earlier delivery that returned
@@ -241,7 +249,8 @@ class TestIdempotency:
         ``provider_message_id IS NULL``), so re-firing is safe.
         """
         body = _body(
-            "evt-dup-bg", "email_sent",
+            "evt-dup-bg",
+            "email_sent",
             provider_message_id="instantly-msg-dup",
             recipient_email="r@x.com",
             sent_at="2026-05-27T12:00:00Z",
@@ -250,7 +259,8 @@ class TestIdempotency:
         headers = {"X-Signature": _sign(body), "X-Timestamp": _now_ts()}
         client.post("/webhooks/instantly", content=body, headers=headers)
         sent_after_first = sum(
-            1 for u in _patch_db_and_limiter.updates
+            1
+            for u in _patch_db_and_limiter.updates
             if u[0] == "campaign_messages" and u[1].get("status") == "sent"
         )
         assert sent_after_first == 1
@@ -258,7 +268,8 @@ class TestIdempotency:
         assert resp2.status_code == 200
         assert resp2.json() == {"ok": True, "duplicate": True}
         sent_after_dup = sum(
-            1 for u in _patch_db_and_limiter.updates
+            1
+            for u in _patch_db_and_limiter.updates
             if u[0] == "campaign_messages" and u[1].get("status") == "sent"
         )
         assert sent_after_dup == 2, (
@@ -278,12 +289,16 @@ class TestTransportRecovery:
     ~8-23% with the row already committed."""
 
     def test_transport_error_post_commit_re_read_finds_row_returns_200(
-        self, client, _patch_db_and_limiter, monkeypatch,
+        self,
+        client,
+        _patch_db_and_limiter,
+        monkeypatch,
     ):
         import httpx
         import main as backend_main
         from src.repositories.webhook_event_repo import (
-            InsertResult, WebhookEventRepository,
+            InsertResult,
+            WebhookEventRepository,
         )
 
         async def fake_insert(self, **kwargs):
@@ -293,10 +308,16 @@ class TestTransportRecovery:
             return True
 
         monkeypatch.setattr(
-            WebhookEventRepository, "insert_event", fake_insert, raising=True,
+            WebhookEventRepository,
+            "insert_event",
+            fake_insert,
+            raising=True,
         )
         monkeypatch.setattr(
-            backend_main, "_webhook_event_exists", fake_exists, raising=True,
+            backend_main,
+            "_webhook_event_exists",
+            fake_exists,
+            raising=True,
         )
 
         body = _body("evt-transport-1", "email_sent")
@@ -309,7 +330,10 @@ class TestTransportRecovery:
         assert resp.json() == {"ok": True, "recovered": True}
 
     def test_transport_error_pre_commit_no_row_returns_500(
-        self, client, _patch_db_and_limiter, monkeypatch,
+        self,
+        client,
+        _patch_db_and_limiter,
+        monkeypatch,
     ):
         import httpx
         import main as backend_main
@@ -322,10 +346,16 @@ class TestTransportRecovery:
             return False
 
         monkeypatch.setattr(
-            WebhookEventRepository, "insert_event", fake_insert, raising=True,
+            WebhookEventRepository,
+            "insert_event",
+            fake_insert,
+            raising=True,
         )
         monkeypatch.setattr(
-            backend_main, "_webhook_event_exists", fake_exists, raising=True,
+            backend_main,
+            "_webhook_event_exists",
+            fake_exists,
+            raising=True,
         )
 
         body = _body("evt-transport-2", "email_sent")
@@ -338,7 +368,10 @@ class TestTransportRecovery:
         assert resp.json() == {"detail": "internal error"}
 
     def test_non_transport_error_unchanged_returns_500(
-        self, client, _patch_db_and_limiter, monkeypatch,
+        self,
+        client,
+        _patch_db_and_limiter,
+        monkeypatch,
     ):
         """Non-transport errors (e.g., a real PostgREST APIError that
         is NOT a 23505) must still surface as 500. The re-read path
@@ -356,10 +389,16 @@ class TestTransportRecovery:
             return True  # would mask the bug if branch fires; assert it doesn't
 
         monkeypatch.setattr(
-            WebhookEventRepository, "insert_event", fake_insert, raising=True,
+            WebhookEventRepository,
+            "insert_event",
+            fake_insert,
+            raising=True,
         )
         monkeypatch.setattr(
-            backend_main, "_webhook_event_exists", fake_exists, raising=True,
+            backend_main,
+            "_webhook_event_exists",
+            fake_exists,
+            raising=True,
         )
 
         body = _body("evt-non-transport", "email_sent")
@@ -369,7 +408,9 @@ class TestTransportRecovery:
             headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
         )
         assert resp.status_code == 500
-        assert called["exists"] == 0, "re-read should only run for transport-class errors"
+        assert called["exists"] == 0, (
+            "re-read should only run for transport-class errors"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -379,13 +420,16 @@ class TestTransportRecovery:
 
 class TestEventTransitions:
     def test_email_sent_with_lds_message_id_stamps_provider_message_id(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         """Phase 14.3: email_sent does a first-hit-wins UPDATE targeting
         ``id = lds_message_id`` with ``provider_message_id IS NULL``
         predicate. Replays match zero rows and no-op."""
         body = _body(
-            "evt-sent-1", "email_sent",
+            "evt-sent-1",
+            "email_sent",
             provider_message_id="instantly-msg-001",
             recipient_email="r@x.com",
             sent_at="2026-05-25T10:00:00Z",
@@ -397,7 +441,9 @@ class TestEventTransitions:
             headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
         )
         assert resp.status_code == 200
-        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        cms_updates = [
+            u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"
+        ]
         sent_updates = [u for u in cms_updates if u[1].get("status") == "sent"]
         assert len(sent_updates) == 1, f"expected 1 sent UPDATE; got {sent_updates}"
         _, set_clause, where = sent_updates[0]
@@ -410,13 +456,16 @@ class TestEventTransitions:
         assert where.get("provider_message_id__is") == "null"
 
     def test_email_sent_without_lds_message_id_is_legacy_no_op(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         """Legacy / pre-14.3 events without custom_variables.lds_message_id
         cannot identify the row — handler logs + skips the UPDATE rather
         than fall back to the pre-14.3 bulk-stamp footgun."""
         body = _body(
-            "evt-sent-legacy", "email_sent",
+            "evt-sent-legacy",
+            "email_sent",
             provider_message_id="instantly-msg-legacy",
             recipient_email="r@x.com",
         )
@@ -427,16 +476,21 @@ class TestEventTransitions:
         )
         assert resp.status_code == 200
         # Event captured for replay; no campaign_messages.status='sent' UPDATE.
-        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        cms_updates = [
+            u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"
+        ]
         assert not any(u[1].get("status") == "sent" for u in cms_updates), (
             f"legacy email_sent without lds_message_id must be a no-op; got {cms_updates}"
         )
 
     def test_email_bounced_updates_status_and_inserts_suppression(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         body = _body(
-            "evt-bounce-1", "email_bounced",
+            "evt-bounce-1",
+            "email_bounced",
             provider_message_id="instantly-msg-002",
             recipient_email="bouncer@x.com",
             bounce_reason="550 mailbox not found",
@@ -449,10 +503,16 @@ class TestEventTransitions:
         assert resp.status_code == 200
         # campaign_messages.status='bounced' AND scoped by provider_message_id
         # (NOT by status='pending' — that would cascade-match every row).
-        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        cms_updates = [
+            u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"
+        ]
         bounced_updates = [u for u in cms_updates if u[1].get("status") == "bounced"]
-        assert len(bounced_updates) == 1, f"expected 1 bounced UPDATE; got {bounced_updates}"
-        assert bounced_updates[0][2].get("provider_message_id") == "instantly-msg-002", (
+        assert len(bounced_updates) == 1, (
+            f"expected 1 bounced UPDATE; got {bounced_updates}"
+        )
+        assert (
+            bounced_updates[0][2].get("provider_message_id") == "instantly-msg-002"
+        ), (
             "bounce UPDATE must scope by provider_message_id — predicate-less "
             "UPDATE would cascade-match every sent row"
         )
@@ -467,10 +527,13 @@ class TestEventTransitions:
         ), f"expected bounce_hard suppression; got {sup_rows}"
 
     def test_email_unsubscribed_inserts_channel_all_suppression(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         body = _body(
-            "evt-unsub-1", "email_unsubscribed",
+            "evt-unsub-1",
+            "email_unsubscribed",
             provider_message_id="instantly-msg-003",
             recipient_email="quitter@x.com",
         )
@@ -489,10 +552,13 @@ class TestEventTransitions:
         ), f"expected unsubscribe (channel=all); got {sup_rows}"
 
     def test_email_replied_stamps_status_replied(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         body = _body(
-            "evt-reply-1", "email_replied",
+            "evt-reply-1",
+            "email_replied",
             provider_message_id="instantly-msg-004",
         )
         resp = client.post(
@@ -501,14 +567,18 @@ class TestEventTransitions:
             headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
         )
         assert resp.status_code == 200
-        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        cms_updates = [
+            u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"
+        ]
         replied_updates = [u for u in cms_updates if u[1].get("status") == "replied"]
         assert len(replied_updates) == 1
         # Phase 14.3: reply UPDATE enforces state-machine `sent → replied`.
         assert replied_updates[0][2].get("status__in") == ["sent"]
 
     def test_race_bounce_before_sent_still_inserts_suppression(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         """Documented race: Instantly's background workers don't guarantee
         ordering between email_sent and email_bounced. If bounce arrives
@@ -517,7 +587,8 @@ class TestEventTransitions:
         still fires via recipient_email — that's the load-bearing
         defense for the next-send cycle."""
         body = _body(
-            "evt-bounce-orphan", "email_bounced",
+            "evt-bounce-orphan",
+            "email_bounced",
             provider_message_id="instantly-msg-orphan",
             recipient_email="orphan-bounce@x.com",
             bounce_reason="550 unreachable",
@@ -540,19 +611,23 @@ class TestEventTransitions:
         ), "suppression must INSERT via recipient_email even on race"
 
     def test_email_sent_replay_uses_first_hit_wins_predicate(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         """Replay coverage: same lds_message_id seen twice. Both webhook
         deliveries reach the handler (idempotency on event_id collapses
         only at webhook_events; the side-effects path runs each time)."""
         common_msg_id = "22222222-3333-4444-5555-666666666666"
         body1 = _body(
-            "evt-sent-replay-1", "email_sent",
+            "evt-sent-replay-1",
+            "email_sent",
             provider_message_id="msg-A",
             custom_variables={"lds_message_id": common_msg_id},
         )
         body2 = _body(
-            "evt-sent-replay-2", "email_sent",
+            "evt-sent-replay-2",
+            "email_sent",
             provider_message_id="msg-A",
             custom_variables={"lds_message_id": common_msg_id},
         )
@@ -563,7 +638,9 @@ class TestEventTransitions:
                 headers={"X-Signature": _sign(b), "X-Timestamp": _now_ts()},
             )
             assert resp.status_code == 200
-        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        cms_updates = [
+            u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"
+        ]
         sent_updates = [u for u in cms_updates if u[1].get("status") == "sent"]
         # Each call generates one UPDATE (mock can't enforce predicate-
         # based zero-row no-op without simulating row state). The KEY
@@ -576,7 +653,9 @@ class TestEventTransitions:
             )
 
     def test_unknown_event_type_still_stored_no_transition(
-        self, client, _patch_db_and_limiter,
+        self,
+        client,
+        _patch_db_and_limiter,
     ):
         body = _body("evt-novel-1", "email_lasered")  # not in allowlist
         resp = client.post(
@@ -589,7 +668,9 @@ class TestEventTransitions:
         events = _patch_db_and_limiter.inserts.get("webhook_events", [])
         assert any(r.get("event_id") == "evt-novel-1" for r in events)
         # No campaign_messages.status transition.
-        cms_updates = [u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"]
+        cms_updates = [
+            u for u in _patch_db_and_limiter.updates if u[0] == "campaign_messages"
+        ]
         assert not any(u[1].get("status") for u in cms_updates)
 
 
@@ -619,7 +700,10 @@ class TestTransportErrorMidProcessing:
     """
 
     def test_transport_error_during_handler_leaves_processed_at_null(
-        self, client, _patch_db_and_limiter, monkeypatch,
+        self,
+        client,
+        _patch_db_and_limiter,
+        monkeypatch,
     ):
         import httpx
         import main as backend_main
@@ -628,11 +712,15 @@ class TestTransportErrorMidProcessing:
             raise httpx.RemoteProtocolError("Server disconnected mid-UPDATE")
 
         monkeypatch.setattr(
-            backend_main, "_instantly_handle_sent", boom, raising=True,
+            backend_main,
+            "_instantly_handle_sent",
+            boom,
+            raising=True,
         )
 
         body = _body(
-            "evt-transport-proc", "email_sent",
+            "evt-transport-proc",
+            "email_sent",
             provider_message_id="instantly-msg-tp",
             recipient_email="r@x.com",
             sent_at="2026-05-27T12:00:00Z",
@@ -647,21 +735,21 @@ class TestTransportErrorMidProcessing:
         assert resp.status_code == 200
 
         webhook_updates = [
-            u for u in _patch_db_and_limiter.updates
-            if u[0] == "webhook_events"
+            u for u in _patch_db_and_limiter.updates if u[0] == "webhook_events"
         ]
         # The checkpoint UPDATE on webhook_events MUST be skipped for
         # transport-class errors. Any update stamping processed_at
         # would mask the row from the sweeper.
-        assert not any(
-            "processed_at" in u[1] for u in webhook_updates
-        ), (
+        assert not any("processed_at" in u[1] for u in webhook_updates), (
             "transport error mid-processing must NOT stamp processed_at; "
             f"got updates={webhook_updates}"
         )
 
     def test_non_transport_error_still_checkpoints_processed_at(
-        self, client, _patch_db_and_limiter, monkeypatch,
+        self,
+        client,
+        _patch_db_and_limiter,
+        monkeypatch,
     ):
         """Counter-pin: genuine handler bug (poison message) MUST still
         checkpoint, otherwise it would loop forever through the sweeper."""
@@ -671,11 +759,15 @@ class TestTransportErrorMidProcessing:
             raise ValueError("malformed payload field")
 
         monkeypatch.setattr(
-            backend_main, "_instantly_handle_sent", boom, raising=True,
+            backend_main,
+            "_instantly_handle_sent",
+            boom,
+            raising=True,
         )
 
         body = _body(
-            "evt-poison-1", "email_sent",
+            "evt-poison-1",
+            "email_sent",
             provider_message_id="instantly-msg-poison",
             recipient_email="r@x.com",
             custom_variables={"lds_message_id": "11111111-2222-3333-4444-555555555555"},
@@ -688,8 +780,7 @@ class TestTransportErrorMidProcessing:
         assert resp.status_code == 200
 
         webhook_updates = [
-            u for u in _patch_db_and_limiter.updates
-            if u[0] == "webhook_events"
+            u for u in _patch_db_and_limiter.updates if u[0] == "webhook_events"
         ]
         stamping = [u for u in webhook_updates if "processed_at" in u[1]]
         assert len(stamping) == 1, (
@@ -700,7 +791,8 @@ class TestTransportErrorMidProcessing:
 
     @pytest.mark.asyncio
     async def test_sweeper_reclaims_unstamped_row_after_transport_error(
-        self, monkeypatch,
+        self,
+        monkeypatch,
     ):
         """End-to-end: a row left ``processed_at IS NULL`` by the
         transport-error path is what the sweeper's

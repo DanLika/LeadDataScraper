@@ -28,6 +28,7 @@ because Supabase's "live state" already drifts on a couple of columns
 (``needs_manual_review`` text vs boolean, ``outreach_score`` double vs int).
 A future type-parity gate can be added once those are reconciled.
 """
+
 from __future__ import annotations
 
 import os
@@ -53,7 +54,13 @@ TABLES: tuple[str, ...] = (
     "sequence_variants",
 )
 TABLE_CONSTRAINT_KEYWORDS = {
-    "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "EXCLUDE", "LIKE",
+    "CONSTRAINT",
+    "PRIMARY",
+    "UNIQUE",
+    "FOREIGN",
+    "CHECK",
+    "EXCLUDE",
+    "LIKE",
 }
 
 # Named CHECK constraints declared in supabase_schema.sql. Drift in either
@@ -345,9 +352,7 @@ def check_add_lead_column(conn: psycopg.Connection) -> list[str]:
     if not secdef:
         errs.append("public.add_lead_column is not SECURITY DEFINER")
     if owner != "postgres":
-        errs.append(
-            f"public.add_lead_column owner is {owner!r}, expected 'postgres'"
-        )
+        errs.append(f"public.add_lead_column owner is {owner!r}, expected 'postgres'")
     if not any(s.lower().startswith("search_path=") for s in (cfg or [])):
         errs.append("public.add_lead_column has no search_path set")
 
@@ -359,8 +364,7 @@ def check_add_lead_column(conn: psycopg.Connection) -> list[str]:
     )
     for grantee, priv in cur.fetchall():
         errs.append(
-            f"public.add_lead_column has {priv} grant to {grantee} "
-            f"(must be revoked)"
+            f"public.add_lead_column has {priv} grant to {grantee} (must be revoked)"
         )
     return errs
 

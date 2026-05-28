@@ -7,6 +7,7 @@ Coverage:
 - HTML autoescape vs text mode
 - Trim modifiers + filters don't fool the allowlist check
 """
+
 from __future__ import annotations
 
 import unittest
@@ -82,11 +83,14 @@ class TestAssertColdEmailUnsubscribe(unittest.TestCase):
 class TestRender(unittest.TestCase):
     def test_happy_path(self) -> None:
         body = "Hi {{ first_name }}, from {{ operator_name }}. {{ unsubscribe_url }}"
-        out = render(body, {
-            "first_name": "Ana",
-            "operator_name": "Duško",
-            "unsubscribe_url": "https://lds/u/abc",
-        })
+        out = render(
+            body,
+            {
+                "first_name": "Ana",
+                "operator_name": "Duško",
+                "unsubscribe_url": "https://lds/u/abc",
+            },
+        )
         self.assertEqual(out, "Hi Ana, from Duško. https://lds/u/abc")
 
     def test_missing_var_raises_strict(self) -> None:
@@ -98,16 +102,20 @@ class TestRender(unittest.TestCase):
         """Context keys outside ALLOWED_VARS get filtered before render.
         Defensive — caller might pass a wider lead row by mistake."""
         body = "Hi {{ first_name }}"
-        out = render(body, {
-            "first_name": "Ana",
-            "api_key": "sk-xxx",  # not in ALLOWED_VARS — must be dropped
-        })
+        out = render(
+            body,
+            {
+                "first_name": "Ana",
+                "api_key": "sk-xxx",  # not in ALLOWED_VARS — must be dropped
+            },
+        )
         self.assertEqual(out, "Hi Ana")
 
     def test_html_autoescape_on(self) -> None:
         body = "<p>Hi {{ first_name }}</p>"
-        out = render(body, {"first_name": "<script>alert(1)</script>"},
-                     content_type="html")
+        out = render(
+            body, {"first_name": "<script>alert(1)</script>"}, content_type="html"
+        )
         # autoescaped → < becomes &lt; etc.
         self.assertIn("&lt;script&gt;", out)
         self.assertNotIn("<script>", out)
@@ -136,11 +144,24 @@ class TestAllowedVarsContract(unittest.TestCase):
     def test_canonical_11_vars(self) -> None:
         """Pinned set — adding a var requires updating template_renderer
         AND any AI generator / UI dropdown that surfaces the list."""
-        self.assertEqual(ALLOWED_VARS, frozenset({
-            "first_name", "last_name", "company", "website",
-            "city", "industry", "audit_score", "pain_point",
-            "operator_name", "operator_signature", "unsubscribe_url",
-        }))
+        self.assertEqual(
+            ALLOWED_VARS,
+            frozenset(
+                {
+                    "first_name",
+                    "last_name",
+                    "company",
+                    "website",
+                    "city",
+                    "industry",
+                    "audit_score",
+                    "pain_point",
+                    "operator_name",
+                    "operator_signature",
+                    "unsubscribe_url",
+                }
+            ),
+        )
 
 
 if __name__ == "__main__":

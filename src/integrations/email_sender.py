@@ -122,7 +122,7 @@ class SMTPEmailSender(EmailSenderBase):
         # also matches BEFORE a trailing `\n`, so `victim@x.com\n` would
         # otherwise smuggle CR/LF into the RCPT envelope. Locked in by
         # `tests/test_crlf_injection.py`.
-        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+\Z', to):
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+\Z", to):
             return {"status": "error", "error": "Invalid email format."}
 
         if to in self.bounced_emails:
@@ -135,7 +135,7 @@ class SMTPEmailSender(EmailSenderBase):
         # subsequent recipient on the message.
         sender_name = from_name or self.from_name
         for header_value in (subject, sender_name):
-            if any(ch in header_value for ch in ('\r', '\n')):
+            if any(ch in header_value for ch in ("\r", "\n")):
                 return {"status": "error", "error": "Invalid header value (CRLF)."}
 
         await self._wait_for_rate_limit()
@@ -152,11 +152,14 @@ class SMTPEmailSender(EmailSenderBase):
             # Send in executor with timeout to avoid blocking indefinitely
             loop = asyncio.get_event_loop()
             await asyncio.wait_for(
-                loop.run_in_executor(None, self._send_smtp, msg, to),
-                timeout=30
+                loop.run_in_executor(None, self._send_smtp, msg, to), timeout=30
             )
 
-            return {"status": "sent", "to": to, "sent_at": datetime.now(timezone.utc).isoformat()}
+            return {
+                "status": "sent",
+                "to": to,
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+            }
         except smtplib.SMTPRecipientsRefused:
             self.bounced_emails.add(to)
             return {"status": "bounced", "error": f"Recipient refused: {to}"}
@@ -236,7 +239,7 @@ class ResendEmailSender(EmailDispatcher):
         # CR/LF/VT/FF so attacker-controlled lead emails can't smuggle
         # additional recipients via the `to` field. Resend's API accepts
         # `to` as an array; this regex pins one address per call.
-        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+\Z', to):
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+\Z", to):
             return {"status": "error", "error": "Invalid email format."}
 
         if to in self.bounced_emails:
@@ -248,7 +251,7 @@ class ResendEmailSender(EmailDispatcher):
         # when that lands.
         sender_name = from_name or self.from_name
         for header_value in (subject, sender_name, self.reply_to):
-            if header_value and any(ch in header_value for ch in ('\r', '\n')):
+            if header_value and any(ch in header_value for ch in ("\r", "\n")):
                 return {"status": "error", "error": "Invalid header value (CRLF)."}
 
         await self._wait_for_rate_limit()
@@ -293,9 +296,14 @@ class ResendEmailSender(EmailDispatcher):
         except asyncio.TimeoutError:
             return {"status": "error", "error": "Email provider timeout."}
         except aiohttp.ClientError:
-            return {"status": "error", "error": "Network failure contacting email provider."}
+            return {
+                "status": "error",
+                "error": "Network failure contacting email provider.",
+            }
 
-    def _map_response(self, status_code: int, data: dict[str, Any], to: str) -> dict[str, Any]:
+    def _map_response(
+        self, status_code: int, data: dict[str, Any], to: str
+    ) -> dict[str, Any]:
         # Error strings never echo `data` payload directly except the
         # 422 `message`. Resend's 422 message is operator-config-driven
         # ("domain not verified", "invalid 'from' value") — the
@@ -317,8 +325,14 @@ class ResendEmailSender(EmailDispatcher):
         if status_code == 429:
             return {"status": "rate_limited", "error": "Email provider rate limit."}
         if 500 <= status_code < 600:
-            return {"status": "error", "error": f"Email provider error ({status_code})."}
-        return {"status": "error", "error": f"Unexpected provider response ({status_code})."}
+            return {
+                "status": "error",
+                "error": f"Email provider error ({status_code}).",
+            }
+        return {
+            "status": "error",
+            "error": f"Unexpected provider response ({status_code}).",
+        }
 
 
 def get_email_sender() -> EmailSenderBase:

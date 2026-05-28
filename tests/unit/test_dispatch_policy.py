@@ -4,6 +4,7 @@ Env-parsing fallback behaviour: every malformed value collapses to a
 safe default rather than booting a broken policy. Window/day-of-week
 checks must be correct on the boundary.
 """
+
 from __future__ import annotations
 
 import unittest
@@ -25,14 +26,16 @@ class TestEnvParsing(unittest.TestCase):
         self.assertEqual(p.timezone_mode, "lead")
 
     def test_explicit_values_roundtrip(self) -> None:
-        p = load_dispatch_policy({
-            "EMAIL_DAILY_CAP_PER_MAILBOX": "50",
-            "EMAIL_WARMUP_PER_MAILBOX": "20",
-            "SEND_WINDOW_START": "08:30",
-            "SEND_WINDOW_END": "18:00",
-            "SEND_DAYS": "mon,wed,fri",
-            "SEND_TIMEZONE_MODE": "UTC",
-        })
+        p = load_dispatch_policy(
+            {
+                "EMAIL_DAILY_CAP_PER_MAILBOX": "50",
+                "EMAIL_WARMUP_PER_MAILBOX": "20",
+                "SEND_WINDOW_START": "08:30",
+                "SEND_WINDOW_END": "18:00",
+                "SEND_DAYS": "mon,wed,fri",
+                "SEND_TIMEZONE_MODE": "UTC",
+            }
+        )
         self.assertEqual(p.daily_cap_per_mailbox, 50)
         self.assertEqual(p.warmup_per_mailbox, 20)
         self.assertEqual(p.send_window_start, "08:30")

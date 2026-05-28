@@ -29,6 +29,7 @@ Why timestamp window:
 Why ``hmac.compare_digest``:
 - Timing-safe — drops the test-vector + brute-force attack ladder.
 """
+
 from __future__ import annotations
 
 import base64
@@ -92,8 +93,9 @@ class UnsubscribePayload:
 # ----- Mint -----------------------------------------------------------------
 
 
-def mint(tracking_id: str, *, secret: Optional[str] = None,
-         issued_at: Optional[int] = None) -> str:
+def mint(
+    tracking_id: str, *, secret: Optional[str] = None, issued_at: Optional[int] = None
+) -> str:
     """Return a URL-safe base64 token binding ``tracking_id`` to ``issued_at``.
 
     ``tracking_id`` must be a canonical UUID-shaped string (36 chars,
@@ -118,9 +120,13 @@ def mint(tracking_id: str, *, secret: Optional[str] = None,
 # ----- Verify ---------------------------------------------------------------
 
 
-def verify(token: str, *, secret: Optional[str] = None,
-           ttl_days: int = DEFAULT_TTL_DAYS,
-           now: Optional[int] = None) -> UnsubscribePayload:
+def verify(
+    token: str,
+    *,
+    secret: Optional[str] = None,
+    ttl_days: int = DEFAULT_TTL_DAYS,
+    now: Optional[int] = None,
+) -> UnsubscribePayload:
     """Round-trip verify a token. Raises a ``TokenError`` subclass on any failure.
 
     Argument layout intentionally requires ``ttl_days`` and ``now`` as
@@ -140,7 +146,7 @@ def verify(token: str, *, secret: Optional[str] = None,
     if raw[:2] != _TOKEN_VERSION:
         raise InvalidToken(f"unknown token version {raw[:2]!r}")
 
-    payload, signature = raw[2:2 + 32], raw[2 + 32:]
+    payload, signature = raw[2 : 2 + 32], raw[2 + 32 :]
     expected = hmac.new(key, _TOKEN_VERSION + payload, sha256).digest()
     if not hmac.compare_digest(signature, expected):
         raise BadSignature("HMAC verification failed")
@@ -155,9 +161,7 @@ def verify(token: str, *, secret: Optional[str] = None,
         if age_secs < -300:
             raise InvalidToken(f"issued_at {issued_at} is in the future")
     elif age_secs > ttl_days * 86_400:
-        raise ExpiredToken(
-            f"token age {age_secs}s exceeds TTL {ttl_days}d"
-        )
+        raise ExpiredToken(f"token age {age_secs}s exceeds TTL {ttl_days}d")
 
     return UnsubscribePayload(tracking_id=tracking_id, issued_at=issued_at)
 
@@ -203,7 +207,9 @@ def _resolve_secret(secret: Optional[str]) -> bytes:
     """Resolve the HMAC key. Empty / unset secret is a hard failure —
     falling back to a hardcoded constant would defeat the whole scheme.
     """
-    key = secret if secret is not None else os.environ.get("UNSUBSCRIBE_TOKEN_SECRET", "")
+    key = (
+        secret if secret is not None else os.environ.get("UNSUBSCRIBE_TOKEN_SECRET", "")
+    )
     if not key:
         raise RuntimeError(
             "UNSUBSCRIBE_TOKEN_SECRET is not configured — cannot mint or verify"

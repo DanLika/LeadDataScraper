@@ -16,6 +16,7 @@ After the fix, ``perform_seo_audit_async``:
 Pure unit tests against the response-handling path using aiohttp test
 mocks.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -72,7 +73,9 @@ class TestBotBlockedStatuses:
         body = f"{status} Forbidden {status} Forbidden"
         response = _mock_aiohttp_response(status, body)
         session = _mock_aiohttp_session(response)
-        with patch("src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session):
+        with patch(
+            "src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session
+        ):
             result = asyncio.run(perform_seo_audit_async("https://example.com"))
 
         assert result["is_bot_blocked"] is True
@@ -91,7 +94,9 @@ class TestShortContentTrips:
         body = "ok"  # 2 bytes, well under threshold
         response = _mock_aiohttp_response(200, body)
         session = _mock_aiohttp_session(response)
-        with patch("src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session):
+        with patch(
+            "src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session
+        ):
             result = asyncio.run(perform_seo_audit_async("https://example.com"))
 
         assert result["is_bot_blocked"] is True
@@ -113,13 +118,18 @@ class TestNormalPagesPassThrough:
             "<html><head><title>Acme Co — Plumbing Services</title>"
             "<meta name='description' content='High-quality plumbing in the Tri-State area for 30 years.'>"
             "</head><body><h1>Welcome to Acme</h1>"
-            + ("<p>We do plumbing repairs, drain cleaning, water heater install, and more.</p>" * 30)
+            + (
+                "<p>We do plumbing repairs, drain cleaning, water heater install, and more.</p>"
+                * 30
+            )
             + "</body></html>"
         )
         assert len(body) > _MIN_AUDITABLE_CONTENT_BYTES
         response = _mock_aiohttp_response(200, body)
         session = _mock_aiohttp_session(response)
-        with patch("src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session):
+        with patch(
+            "src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session
+        ):
             result = asyncio.run(perform_seo_audit_async("https://example.com"))
 
         # Flag not set; page_text was extracted.
@@ -139,7 +149,9 @@ class TestStatusValuesAreSensible:
         body = body + (" filler" * 200)
         response = _mock_aiohttp_response(405, body)
         session = _mock_aiohttp_session(response)
-        with patch("src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session):
+        with patch(
+            "src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session
+        ):
             result = asyncio.run(perform_seo_audit_async("https://example.com"))
         assert result.get("is_bot_blocked") is not True
 

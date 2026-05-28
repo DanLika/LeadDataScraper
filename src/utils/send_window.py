@@ -22,6 +22,7 @@ Uses :mod:`zoneinfo` (stdlib, Python 3.9+) so there is no third-party
 TZ dependency. zoneinfo data comes from the system's IANA tz database;
 on Render Linux this is always current.
 """
+
 from __future__ import annotations
 
 import os
@@ -96,7 +97,10 @@ def is_within_window(
 
     # Compute next valid window start.
     next_start_local = _next_window_start(
-        now_local, send_days, start_time, end_time,
+        now_local,
+        send_days,
+        start_time,
+        end_time,
     )
     next_start_utc = next_start_local.astimezone(timezone.utc)
     return WindowCheck(in_window=False, next_window_start_utc=next_start_utc)

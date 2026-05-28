@@ -9,6 +9,7 @@ Round-trip + adversarial coverage:
 - timestamp window: ±5 min OK on either side
 - missing UNSUBSCRIBE_TOKEN_SECRET raises RuntimeError (operator misconfig)
 """
+
 from __future__ import annotations
 
 import time
@@ -84,7 +85,9 @@ class TestWrongSecret(unittest.TestCase):
 
 class TestExpiry(unittest.TestCase):
     def test_age_within_ttl_passes(self) -> None:
-        long_ago = int(time.time()) - DEFAULT_TTL_DAYS * 86_400 + 3600  # 1 hour shy of expiry
+        long_ago = (
+            int(time.time()) - DEFAULT_TTL_DAYS * 86_400 + 3600
+        )  # 1 hour shy of expiry
         token = mint(SAMPLE_TRACKING_ID, secret=SAMPLE_SECRET, issued_at=long_ago)
         result = verify(token, secret=SAMPLE_SECRET)
         self.assertEqual(result.tracking_id, SAMPLE_TRACKING_ID)

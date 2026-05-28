@@ -15,6 +15,7 @@ Requires:
 - `DATABASE_URL` pointing at the Supabase pooler URI.
 - PR #286 + this PR's ALTER applied to the target schema.
 """
+
 from __future__ import annotations
 
 import os
