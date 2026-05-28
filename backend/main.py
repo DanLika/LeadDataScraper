@@ -28,7 +28,13 @@ import aiofiles
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Literal, Optional, List
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, conlist, constr
+from pydantic import BaseModel, ConfigDict, Field, conlist
+
+# `safe_constr` is a drop-in for pydantic.constr that also rejects NUL /
+# Unicode Cc / Cf (except tab/LF/CR). Closes the 500 path observed in QA
+# terminal-6 sweep 2026-05-28 (POST /discovery/start + POST /campaigns).
+# See src/schemas/sanitized_str.py for rationale + allowed-control list.
+from src.schemas.sanitized_str import safe_constr
 from postgrest.exceptions import APIError
 from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -245,9 +251,9 @@ class PipelineFilters(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    type: Optional[constr(max_length=64)] = None
-    query: Optional[constr(max_length=200)] = None
-    location: Optional[constr(max_length=200)] = None
+    type: Optional[safe_constr(max_length=64)] = None
+    query: Optional[safe_constr(max_length=200)] = None
+    location: Optional[safe_constr(max_length=200)] = None
     limit: Optional[int] = Field(default=None, ge=1, le=1000)
 
 
@@ -261,9 +267,9 @@ class CampaignCreate(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    name: constr(min_length=1, max_length=200)
+    name: safe_constr(min_length=1, max_length=200)
     channel: CampaignChannel
-    segment_filter: Optional[constr(max_length=200)] = None
+    segment_filter: Optional[safe_constr(max_length=200)] = None
 
 
 class CampaignUpdate(BaseModel):
@@ -272,7 +278,7 @@ class CampaignUpdate(BaseModel):
     create time to keep the audience stable across runs."""
 
     model_config = ConfigDict(extra="forbid")
-    name: Optional[constr(min_length=1, max_length=200)] = None
+    name: Optional[safe_constr(min_length=1, max_length=200)] = None
     status: Optional[CampaignStatus] = None
 
 
@@ -283,7 +289,7 @@ class LeadProcessRequest(BaseModel):
     by the discovery / hunt path."""
 
     model_config = ConfigDict(extra="forbid")
-    unique_key: constr(min_length=1, max_length=128)
+    unique_key: safe_constr(min_length=1, max_length=128)
 
 
 class AskInstruction(BaseModel):
@@ -292,7 +298,7 @@ class AskInstruction(BaseModel):
     from being forwarded into the model context."""
 
     model_config = ConfigDict(extra="forbid")
-    text: constr(min_length=1, max_length=4000)
+    text: safe_constr(min_length=1, max_length=4000)
 
 
 class AskRequest(BaseModel):
@@ -310,8 +316,8 @@ class DiscoveryRequest(BaseModel):
     the search term (e.g. "dentists" or "law firms")."""
 
     model_config = ConfigDict(extra="forbid")
-    query: constr(min_length=1, max_length=500)
-    location: Optional[constr(max_length=200)] = ""
+    query: safe_constr(min_length=1, max_length=500)
+    location: Optional[safe_constr(max_length=200)] = ""
 
 
 class PipelineRequest(BaseModel):
@@ -328,9 +334,9 @@ class PipelineRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     filters: Optional[PipelineFilters] = None
     lead_ids: Optional[
-        conlist(constr(min_length=1, max_length=128), max_length=10_000)
+        conlist(safe_constr(min_length=1, max_length=128), max_length=10_000)
     ] = None
-    tasks: Optional[conlist(constr(min_length=1, max_length=64), max_length=64)] = None
+    tasks: Optional[conlist(safe_constr(min_length=1, max_length=64), max_length=64)] = None
 
 
 # /execute is the AI router's "execute the proposed plan" surface. Lock the
@@ -368,12 +374,12 @@ class ExecutePlanParams(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    unique_key: Optional[constr(min_length=1, max_length=128)] = None
-    query: Optional[constr(min_length=1, max_length=500)] = None
-    location: Optional[constr(max_length=200)] = None
-    query_text: Optional[constr(max_length=4000)] = None
-    filters: Optional[constr(max_length=64)] = None
-    type: Optional[constr(max_length=64)] = None
+    unique_key: Optional[safe_constr(min_length=1, max_length=128)] = None
+    query: Optional[safe_constr(min_length=1, max_length=500)] = None
+    location: Optional[safe_constr(max_length=200)] = None
+    query_text: Optional[safe_constr(max_length=4000)] = None
+    filters: Optional[safe_constr(max_length=64)] = None
+    type: Optional[safe_constr(max_length=64)] = None
 
 
 class ExecutePlanRequest(BaseModel):
@@ -881,10 +887,10 @@ class WebVitalsMetric(BaseModel):
     rating: Literal["good", "needs-improvement", "poor"]
     # Page route the measurement was taken on. Bounded so a hostile beacon
     # can't dump 1 MB into the log. Stripped of query/hash on the client.
-    path: constr(min_length=1, max_length=200)
+    path: safe_constr(min_length=1, max_length=200)
     # Client-generated unique id per page-load — useful for stitching
     # multiple beacons from the same nav into one trace. 64 chars max.
-    id: constr(min_length=1, max_length=64)
+    id: safe_constr(min_length=1, max_length=64)
 
 
 @app.post("/metrics", dependencies=[Depends(verify_api_key)])
