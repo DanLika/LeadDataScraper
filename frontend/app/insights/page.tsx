@@ -48,6 +48,18 @@ export default function InsightsPage() {
   }, isSidebarOpen);
   const COLORS = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--error)', 'var(--secondary)'];
 
+  // Phase 13.3 — honour the dashboard's "Show demo data" toggle. Demo
+  // rows are excluded by default; flipping the toggle on the dashboard
+  // is reflected here on the next mount (no cross-tab live sync). State
+  // (not inline `typeof window` check on every render) keeps the
+  // `useCallback` identities stable so the init effect only fires once.
+  const [includeDemo, setIncludeDemo] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem('lds-include-demo') === '1') setIncludeDemo(true);
+  }, []);
+  const demoSuffix = includeDemo ? '&include_demo=true' : '';
+
   const fetchLeads = useCallback(async (signal?: AbortSignal) => {
     try {
       // Insights needs the lead set for client-side aggregations (high-risk
@@ -55,7 +67,7 @@ export default function InsightsPage() {
       // counts match what the dashboard shows. Beyond 200 leads we should
       // fold the aggregation into a dedicated /stats-style endpoint
       // rather than paginate-all on the client.
-      const response = await apiFetch(`${API_BASE_URL}/leads?limit=200`, { signal });
+      const response = await apiFetch(`${API_BASE_URL}/leads?limit=200${demoSuffix}`, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setLeads(data.leads || []);
@@ -65,18 +77,21 @@ export default function InsightsPage() {
       if (signal?.aborted) return;
       console.error('Error fetching leads:', err);
     }
-  }, []);
+  }, [demoSuffix]);
 
   const fetchStats = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await apiFetch(`${API_BASE_URL}/stats`, { signal });
+      // `?` then `&` because the suffix starts with `&`. /stats has no
+      // other required params so the `?` lives in the join below.
+      const url = demoSuffix ? `${API_BASE_URL}/stats?include_demo=true` : `${API_BASE_URL}/stats`;
+      const response = await apiFetch(url, { signal });
       const data = await response.json();
       setStats(data);
     } catch (err) {
       if (signal?.aborted) return;
       console.error('Stats fetch failed:', err);
     }
-  }, []);
+  }, [demoSuffix]);
 
   const fetchInsightsData = useCallback(async (signal?: AbortSignal) => {
     setFetchingInsights(true);

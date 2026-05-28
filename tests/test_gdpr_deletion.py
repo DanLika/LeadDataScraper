@@ -67,14 +67,14 @@ def _build_mock_db(
     insert_should_fail: bool = False,
 ) -> MagicMock:
     """Mock SupabaseHelper.client that:
-      - returns `count` on .select(..., count='exact').execute()
-      - records every .insert() call (audit trail)
-      - records every .delete().neq(...).execute() call (deletion trail)
-      - raises on .insert if insert_should_fail
+    - returns `count` on .select(..., count='exact').execute()
+    - records every .insert() call (audit trail)
+    - records every .delete().neq(...).execute() call (deletion trail)
+    - raises on .insert if insert_should_fail
     """
     counts = counts or {}
     db = MagicMock()
-    db.insert_calls = []   # populated below for assertions
+    db.insert_calls = []  # populated below for assertions
     db.delete_calls = []
 
     def table_side_effect(table_name):
@@ -87,6 +87,7 @@ def _build_mock_db(
                 data=[], count=counts.get(table_name, 0)
             )
             return sel_chain
+
         chain.select.side_effect = select_side_effect
 
         # INSERT path (for account_deletions)
@@ -97,22 +98,28 @@ def _build_mock_db(
             ins_chain = MagicMock()
             ins_chain.execute.return_value = MagicMock(data=[row])
             return ins_chain
+
         chain.insert.side_effect = insert_side_effect
 
         # DELETE.neq().execute() path
         def delete_side_effect():
             del_chain = MagicMock()
+
             def neq_side_effect(key_col, sentinel):
-                db.delete_calls.append({
-                    "table": table_name,
-                    "key_col": key_col,
-                    "sentinel": sentinel,
-                })
+                db.delete_calls.append(
+                    {
+                        "table": table_name,
+                        "key_col": key_col,
+                        "sentinel": sentinel,
+                    }
+                )
                 neq_chain = MagicMock()
                 neq_chain.execute.return_value = MagicMock(data=[])
                 return neq_chain
+
             del_chain.neq.side_effect = neq_side_effect
             return del_chain
+
         chain.delete.side_effect = delete_side_effect
 
         return chain
@@ -136,6 +143,7 @@ def _set_env(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter_and_db():
     import main
+
     try:
         main.limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except Exception:
@@ -144,10 +152,14 @@ def _reset_rate_limiter_and_db():
         except Exception:
             pass
     # Default mock — 5 leads, 2 campaigns, 3 messages, 1 job.
-    main.db = _build_mock_db(counts={
-        "leads": 5, "campaigns": 2,
-        "campaign_messages": 3, "orchestration_jobs": 1,
-    })
+    main.db = _build_mock_db(
+        counts={
+            "leads": 5,
+            "campaigns": 2,
+            "campaign_messages": 3,
+            "orchestration_jobs": 1,
+        }
+    )
     main.router = MagicMock()
     main.auditor = MagicMock()
     main.orchestrator = MagicMock()
@@ -208,7 +220,9 @@ class TestAuthGates:
     def test_missing_confirmation_field_returns_422(self, client):
         r = client.request(
             "DELETE",
-            "/operator/account", headers=HEADERS_OK, content=json.dumps({}),
+            "/operator/account",
+            headers=HEADERS_OK,
+            content=json.dumps({}),
         )
         assert r.status_code == 422
 
@@ -217,10 +231,12 @@ class TestAuthGates:
             "DELETE",
             "/operator/account",
             headers=HEADERS_OK,
-            content=json.dumps({
-                "confirmation": "DELETE MY ACCOUNT",
-                "bypass": True,
-            }),
+            content=json.dumps(
+                {
+                    "confirmation": "DELETE MY ACCOUNT",
+                    "bypass": True,
+                }
+            ),
         )
         assert r.status_code == 422
 
@@ -233,7 +249,10 @@ class TestAuthGates:
 class TestAuditFirstInvariant:
     def test_happy_path_writes_audit_then_deletes(self, client):
         import main
-        r = client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+
+        r = client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["status"] == "deleted"
@@ -244,17 +263,22 @@ class TestAuditFirstInvariant:
         # 4 deletes in FK dependency order
         delete_tables = [c["table"] for c in main.db.delete_calls]
         assert delete_tables == [
-            "campaign_messages", "campaigns",
-            "orchestration_jobs", "leads",
+            "campaign_messages",
+            "campaigns",
+            "orchestration_jobs",
+            "leads",
         ]
 
     def test_audit_write_failure_aborts_deletion(self, client):
         import main
+
         main.db = _build_mock_db(
             counts={"leads": 5},
             insert_should_fail=True,
         )
-        r = client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+        r = client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         assert r.status_code == 503
         # CRITICAL: zero deletes ran because the audit row didn't land.
         assert len(main.db.delete_calls) == 0
@@ -267,34 +291,49 @@ class TestAuditFirstInvariant:
 
 class TestRowCountsSnapshot:
     def test_response_includes_pre_deletion_counts(self, client):
-        r = client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+        r = client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         assert r.status_code == 200
         body = r.json()
         rc = body["row_counts_deleted"]
         # Matches the default fixture in _reset_rate_limiter_and_db.
         assert rc == {
-            "leads": 5, "campaigns": 2,
-            "campaign_messages": 3, "orchestration_jobs": 1,
+            "leads": 5,
+            "campaigns": 2,
+            "campaign_messages": 3,
+            "orchestration_jobs": 1,
         }
 
     def test_audit_row_carries_row_counts(self, client):
         import main
-        client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+
+        client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         audit_row = main.db.insert_calls[0]["row"]
         assert audit_row["row_counts"] == {
-            "leads": 5, "campaigns": 2,
-            "campaign_messages": 3, "orchestration_jobs": 1,
+            "leads": 5,
+            "campaigns": 2,
+            "campaign_messages": 3,
+            "orchestration_jobs": 1,
         }
 
     def test_audit_row_carries_operator_email_from_env(self, client):
         import main
-        client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+
+        client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         audit_row = main.db.insert_calls[0]["row"]
         assert audit_row["operator_email"] == "operator@example.com"
 
     def test_audit_row_carries_remote_ip(self, client):
         import main
-        client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+
+        client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         audit_row = main.db.insert_calls[0]["row"]
         # TestClient uses 'testclient' as the synthetic peer.
         assert audit_row["remote_ip"] is not None
@@ -307,9 +346,13 @@ class TestRowCountsSnapshot:
 
 class TestRateLimit:
     def test_second_call_within_hour_returns_429(self, client):
-        r1 = client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+        r1 = client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         assert r1.status_code == 200, r1.text
-        r2 = client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+        r2 = client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         assert r2.status_code == 429, (
             f"second call should 429, got {r2.status_code}: {r2.text}"
         )
@@ -320,14 +363,18 @@ class TestRateLimit:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.live
 class TestRetention:
     def test_audit_expires_30_days_after_deletion(self, client):
         from datetime import datetime, timezone
         import main
+
         before = datetime.now(timezone.utc)
         r = client.request(
-            "DELETE", "/operator/account",
-            headers=HEADERS_OK, content=GOOD_BODY,
+            "DELETE",
+            "/operator/account",
+            headers=HEADERS_OK,
+            content=GOOD_BODY,
         )
         # Status-check + insert-presence diagnostics so a real test-isolation
         # leak (mock from a prior test bleeding through) fails fast with a
@@ -344,21 +391,25 @@ class TestRetention:
             f"got row_counts={audit_row['row_counts']}"
         )
 
-        deleted_at = datetime.fromisoformat(audit_row["deleted_at"].replace("Z", "+00:00"))
-        expires_at = datetime.fromisoformat(audit_row["expires_at"].replace("Z", "+00:00"))
+        deleted_at = datetime.fromisoformat(
+            audit_row["deleted_at"].replace("Z", "+00:00")
+        )
+        expires_at = datetime.fromisoformat(
+            audit_row["expires_at"].replace("Z", "+00:00")
+        )
         delta_days = (expires_at - deleted_at).total_seconds() / 86400.0
         # The handler captures `now` ONCE, then computes both timestamps
         # from it (deleted_at = now, expires_at = now + 30d). After ms
         # truncation, delta is EXACTLY 30.0 days. Tight tolerance catches
         # any future refactor that splits the two now() calls.
-        assert 29.999 < delta_days < 30.001, (
-            f"expected exact 30 days, got {delta_days}"
-        )
+        assert 29.999 < delta_days < 30.001, f"expected exact 30 days, got {delta_days}"
         # deleted_at is in the request window.
         assert deleted_at >= before
 
     def test_response_payload_includes_retention_fields(self, client):
-        r = client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+        r = client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         body = r.json()
         assert body["audit_retention_days"] == 30
         assert body["audit_expires_at"].endswith("Z")
@@ -372,9 +423,12 @@ class TestRetention:
 class TestDbUnavailable:
     def test_503_when_db_client_is_none(self, client):
         import main
+
         main.db = MagicMock()
         main.db.client = None
-        r = client.request("DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY)
+        r = client.request(
+            "DELETE", "/operator/account", headers=HEADERS_OK, content=GOOD_BODY
+        )
         assert r.status_code == 503
 
 

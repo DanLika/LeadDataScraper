@@ -48,10 +48,14 @@ class SpikeShape(LoadTestShape):
 
     _STAGES: List[Tuple[float, int, int]] = [
         # (end_time_seconds, target_users, spawn_rate)
-        (10.0, 100, 100),   # ramp up: get to 100 quickly. spawn_rate matches users so locust doesn't dawdle.
-        (70.0, 100, 100),   # plateau
-        (80.0, 0, 100),     # ramp down. spawn_rate is users-killed-per-sec.
-        (90.0, 0, 1),       # cool-down (idle window so p95 stats settle)
+        (
+            10.0,
+            100,
+            100,
+        ),  # ramp up: get to 100 quickly. spawn_rate matches users so locust doesn't dawdle.
+        (70.0, 100, 100),  # plateau
+        (80.0, 0, 100),  # ramp down. spawn_rate is users-killed-per-sec.
+        (90.0, 0, 1),  # cool-down (idle window so p95 stats settle)
     ]
 
     def tick(self) -> Optional[Tuple[int, int]]:

@@ -35,6 +35,7 @@ from typing import Any, Dict, List
 
 # Ensure repo root is importable when invoked as a script.
 import sys
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -101,9 +102,7 @@ async def _bench(label: str, limit: int, with_ai: bool) -> Dict[str, Any]:
 
         engine.deep_ai_parse = _noop  # type: ignore[assignment]
 
-    print(
-        f"[bench] label={label!r} leads={len(leads)} ai={'on' if with_ai else 'off'}"
-    )
+    print(f"[bench] label={label!r} leads={len(leads)} ai={'on' if with_ai else 'off'}")
     overall_start = time.perf_counter()
     results = await asyncio.gather(
         *(_time_one(engine, lead) for lead in leads),

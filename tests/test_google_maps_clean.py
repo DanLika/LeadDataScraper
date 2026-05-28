@@ -2,6 +2,7 @@
 cleaners in `src/processors/google_maps.py` — the non-string and
 short-number branches were uncovered.
 """
+
 import numpy as np
 import pandas as pd
 
@@ -9,6 +10,7 @@ from src.processors.google_maps import clean_website, clean_phone
 
 
 # ─────────────────────────── clean_website ───────────────────────────
+
 
 def test_clean_website_non_string_returns_nan():
     assert clean_website(None) is np.nan or pd.isna(clean_website(None))
@@ -35,6 +37,7 @@ def test_clean_website_trims_whitespace():
 
 
 # ──────────────────────────── clean_phone ────────────────────────────
+
 
 def test_clean_phone_non_string_returns_nan():
     assert pd.isna(clean_phone(None))

@@ -5,6 +5,7 @@
 Every test builds a real DataFrame / writes a real temp file and
 asserts the resulting data — no coverage-only assertions.
 """
+
 import csv
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ from src.utils.csv_helper import (
 
 
 # ───────────────────────── merge_and_deduplicate ──────────────────────
+
 
 def test_merge_empty_list_returns_empty_frame():
     out = merge_and_deduplicate([])
@@ -52,6 +54,7 @@ def test_merge_bad_input_returns_empty_frame_not_raise():
 
 # ─────────────────── load_csv_with_unique_key (key gen) ───────────────
 
+
 def test_load_csv_generates_unique_key_from_website_and_email(tmp_path):
     p = tmp_path / "leads.csv"
     p.write_text("Name,Website,email\nAcme,acme.com,a@acme.com\n")
@@ -68,33 +71,44 @@ def test_load_csv_unique_key_falls_back_to_index_when_no_identifiers(tmp_path):
 
 # ────────────────────────────── save_csv ─────────────────────────────
 
+
 def test_save_csv_writes_file_and_sanitises_formula_cells(tmp_path):
     p = tmp_path / "nested" / "out.csv"
     df = pd.DataFrame({"name": ["=HYPERLINK(1)", "Safe"], "n": [1, 2]})
     save_csv(df, str(p))
-    assert p.exists()                                   # nested dir created
+    assert p.exists()  # nested dir created
     rows = list(csv.reader(p.open()))
-    assert rows[1][0] == "'=HYPERLINK(1)"               # formula neutralised
+    assert rows[1][0] == "'=HYPERLINK(1)"  # formula neutralised
     assert rows[2][0] == "Safe"
 
 
 # ───────────────────── export_outreach_ready_csv ─────────────────────
 
+
 def test_export_outreach_maps_columns_and_drops_no_email_rows(tmp_path):
     p = tmp_path / "outreach.csv"
-    df = pd.DataFrame({
-        "email": ["a@x.com", "", "c@x.com"],
-        "website": ["x.com", "y.com", "z.com"],
-        "segment": ["SEO", "SEO", "Perf"],
-        "first_name": ["Ann", "Bob", "Cy"],
-        "pain_points": ["slow", "none", "weak"],
-    })
+    df = pd.DataFrame(
+        {
+            "email": ["a@x.com", "", "c@x.com"],
+            "website": ["x.com", "y.com", "z.com"],
+            "segment": ["SEO", "SEO", "Perf"],
+            "first_name": ["Ann", "Bob", "Cy"],
+            "pain_points": ["slow", "none", "weak"],
+        }
+    )
     out = export_outreach_ready_csv(df, str(p))
     # row with empty email dropped → 2 survive
     assert len(out) == 2
     assert set(out["email"]) == {"a@x.com", "c@x.com"}
     # canonical column layout
-    assert list(out.columns) == ["email", "website", "category", "first_name", "location", "pain_point"]
+    assert list(out.columns) == [
+        "email",
+        "website",
+        "category",
+        "first_name",
+        "location",
+        "pain_point",
+    ]
     assert p.exists()
 
 
@@ -107,14 +121,24 @@ def test_export_outreach_handles_list_valued_pain_points(tmp_path):
 
 # ───────────────────────── export_facebook_links ─────────────────────
 
+
 def test_export_facebook_links_extracts_unique_valid_links(tmp_path):
     p = tmp_path / "fb.csv"
-    df = pd.DataFrame({"facebook": [
-        "fb.com/acme", "fb.com/acme", "fb.com/beta", "", "no social found", "None",
-    ]})
+    df = pd.DataFrame(
+        {
+            "facebook": [
+                "fb.com/acme",
+                "fb.com/acme",
+                "fb.com/beta",
+                "",
+                "no social found",
+                "None",
+            ]
+        }
+    )
     out = export_facebook_links(df, str(p))
     links = set(out["Facebook Link"])
-    assert links == {"fb.com/acme", "fb.com/beta"}       # deduped, junk dropped
+    assert links == {"fb.com/acme", "fb.com/beta"}  # deduped, junk dropped
     assert p.exists()
 
 

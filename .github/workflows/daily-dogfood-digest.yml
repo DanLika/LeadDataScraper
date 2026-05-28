@@ -1,0 +1,86 @@
+name: daily-dogfood-digest
+
+# Daily dogfood digest. Aggregates lead count, storage, Gemini budget,
+# orchestration job status, and orphan/zombie counts into a single
+# Markdown summary, posts to Discord, and uploads as a workflow artifact
+# for day-over-day comparison.
+#
+# Active during the 2-week dogfood (roadmap 13.15). After dogfood
+# closes (2026-06-08), either:
+#   - Drop cadence to weekly (change cron to "0 7 * * MON")
+#   - Or delete the workflow entirely and rely on cost-report.yml +
+#     security.yml for ongoing observability.
+#
+# `src/scripts/daily_dogfood_digest.py` does the heavy lifting; this
+# workflow is the scheduling + Discord delivery glue. Mirrors
+# `cost-report.yml` deliberately for review-pattern consistency.
+
+on:
+  schedule:
+    # 07:00 UTC = 09:00 CEST = 09:00 Croatia local (summer time).
+    # Off-by-one in winter (DST) — operator sees 08:00 local Nov-Mar.
+    # Acceptable; consistent UTC easier to reason about than
+    # juggling per-DST cron entries.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: Aggregate + post daily dogfood digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install "psycopg[binary]>=3.1" requests
+
+      - name: Generate daily digest
+        id: digest
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+          # Gemini budget lives in a SQLite file on Render's filesystem;
+          # script reads it via the live backend's /admin/gemini-budget
+          # endpoint. Section skips cleanly if either secret is missing.
+          BACKEND_URL:    ${{ secrets.PROD_BACKEND_URL }}
+          API_SECRET_KEY: ${{ secrets.PROD_API_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          python -m src.scripts.daily_dogfood_digest > digest.md
+          echo "--- digest.md preview ---"
+          head -50 digest.md
+          {
+            echo "body<<__EOF__"
+            cat digest.md
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload digest as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: dogfood-digest-${{ github.run_id }}
+          path: digest.md
+          retention-days: 30
+
+      - name: Post digest to Discord
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          severity: info
+          title: "🐕 Daily dogfood digest"
+          message: ${{ steps.digest.outputs.body }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

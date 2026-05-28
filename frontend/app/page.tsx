@@ -115,6 +115,10 @@ function DashboardInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);
+  // DB-wide total from /stats, separate from the paginated `leads` array.
+  // Null until the first /stats response lands; StatsCards then displays it
+  // on the TOTAL LEADS card instead of the loaded-slice count.
+  const [totalLeads, setTotalLeads] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [outreachDraft, setOutreachDraft] = useState<{ text: string, leadName: string, subject?: string, leadEmail?: string } | null>(null);
   const [linkedinDraft, setLinkedinDraft] = useState<string>('');
@@ -124,6 +128,25 @@ function DashboardInner() {
   const [auditStatus, setAuditStatus] = useState<AuditStatusInfo | null>(null);
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [demoRemoveOpen, setDemoRemoveOpen] = useState(false);
+  const [demoRemoveText, setDemoRemoveText] = useState('');
+  const [isRemovingDemo, setIsRemovingDemo] = useState(false);
+
+  // Phase 13.3 — "Show demo data" toggle. Defaults OFF so the operator's
+  // first impression is real-lead-only. Persisted in localStorage as
+  // `lds-include-demo` so a refresh keeps the state; reading happens in
+  // a mount effect (not lazy initialState) so SSR + hydration agree on
+  // `false`, then client upgrades to the stored value.
+  const [showDemo, setShowDemo] = useState<boolean>(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem('lds-include-demo') === '1') setShowDemo(true);
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (showDemo) window.localStorage.setItem('lds-include-demo', '1');
+    else window.localStorage.removeItem('lds-include-demo');
+  }, [showDemo]);
 
   // Auto-open Settings / Discovery / set view when arriving from /insights or
   // /campaigns via ?openSettings=1 / ?openDiscovery=1 / ?view=audited|high-risk.
@@ -216,6 +239,18 @@ function DashboardInner() {
   const [hasMore, setHasMore] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
 
+  const fetchStats = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/stats`, { signal });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (typeof data?.total_leads === 'number') setTotalLeads(data.total_leads);
+    } catch (err) {
+      if (signal?.aborted) return;
+      console.error('Stats fetch failed:', err);
+    }
+  }, []);
+
   const fetchLeads = useCallback(async (signal?: AbortSignal) => {
     try {
       // Refresh (not append): drop any cursor and request the first page.
@@ -223,7 +258,8 @@ function DashboardInner() {
       // newly-discovered leads at the top of created_at DESC become
       // visible. The Load-more button uses a separate handler that
       // *appends* the next page.
-      const response = await apiFetch(`${API_BASE_URL}/leads?limit=50`, { signal });
+      const url = `${API_BASE_URL}/leads?limit=50${showDemo ? '&include_demo=true' : ''}`;
+      const response = await apiFetch(url, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setLeads(data.leads || []);
@@ -239,7 +275,7 @@ function DashboardInner() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [showDemo]);
 
   const loadMoreLeads = useCallback(async () => {
     if (!nextCursor || isLoadingMore) return;
@@ -248,7 +284,7 @@ function DashboardInner() {
       // encodeURIComponent the cursor — base64url is mostly URL-safe but
       // belt-and-braces for the `=` padding character.
       const response = await apiFetch(
-        `${API_BASE_URL}/leads?limit=50&cursor=${encodeURIComponent(nextCursor)}`
+        `${API_BASE_URL}/leads?limit=50&cursor=${encodeURIComponent(nextCursor)}${showDemo ? '&include_demo=true' : ''}`
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -266,7 +302,7 @@ function DashboardInner() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [nextCursor, isLoadingMore, showToast]);
+  }, [nextCursor, isLoadingMore, showToast, showDemo]);
 
   const fetchInsights = useCallback(async (signal?: AbortSignal) => {
     setFetchingInsights(true);
@@ -289,6 +325,7 @@ function DashboardInner() {
     // surfaces the browser-cancelled request as `TypeError: Load failed`.
     const controller = new AbortController();
     fetchLeads(controller.signal);
+    fetchStats(controller.signal);
     fetchInsights(controller.signal);
 
     // Poll the backend for fresh leads instead of subscribing via the browser
@@ -296,13 +333,14 @@ function DashboardInner() {
     // which is intentionally disabled by RLS — backend is now the only reader.
     const interval = setInterval(() => {
       fetchLeads(controller.signal);
+      fetchStats(controller.signal);
     }, 15000);
 
     return () => {
       controller.abort();
       clearInterval(interval);
     };
-  }, [fetchLeads, fetchInsights]);
+  }, [fetchLeads, fetchStats, fetchInsights]);
 
   // Combined status monitoring for legacy endpoints
   useEffect(() => {
@@ -327,30 +365,86 @@ function DashboardInner() {
 
   // Cross-tab job visibility — adopts a running orchestration job started
   // in another tab so the operator's second tab also shows the spinner +
-  // progress instead of looking idle. Polls every 5s when this tab has no
-  // job of its own; once adopted, the existing per-job poller (next
-  // useEffect) takes over and this loop pauses until the job clears.
+  // progress instead of looking idle.
+  //
+  // Cadence: starts at 5s, exponentially backs off to 10s then 30s once the
+  // tab has been idle for several consecutive ticks (no job adopted, no
+  // visibility change). Resets to 5s the moment the tab regains focus, on
+  // hard backend errors (so a transient blip doesn't push us straight to
+  // 30s), or once a job is adopted (next useEffect takes over the polling).
+  // Phase 15 observation: idle dashboards were issuing ~12 /orchestrator
+  // /active calls per minute (one fixed 5s setInterval × visible tab).
+  // Backoff brings that to ~2/min once the tab has been idle for ~30s.
+  //
+  // Visibility pause: when the tab is hidden, we skip the actual fetch but
+  // keep the setTimeout running so the loop is alive — the next tick is
+  // also short-circuited until visibility returns, at which point we fire
+  // immediately and reset the backoff.
   useEffect(() => {
     if (orchestratorJob) return;
     let cancelled = false;
+    let idleTicks = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const POLL_DELAYS_MS = [5_000, 10_000, 30_000] as const;
+    const computeDelay = (idle: number): number => {
+      if (idle < 2) return POLL_DELAYS_MS[0];
+      if (idle < 4) return POLL_DELAYS_MS[1];
+      return POLL_DELAYS_MS[2];
+    };
+
+    const schedule = () => {
+      if (cancelled) return;
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      timeoutId = setTimeout(tick, computeDelay(idleTicks));
+    };
+
     const tick = async () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        // Skip the fetch but keep the chain alive — visibility return
+        // re-fires immediately via the listener below.
+        schedule();
+        return;
+      }
       try {
         const res = await apiFetch(`${API_BASE_URL}/orchestrator/active`);
-        if (!res.ok) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          // Transient HTTP error — don't widen the backoff window on it;
+          // keep the current `idleTicks` and re-schedule.
+          schedule();
+          return;
+        }
         const data = await res.json();
         if (cancelled) return;
         if (data?.job && (data.job.status === 'running' || data.job.status === 'starting')) {
+          // Job adopted — the effect's deps change next render and this
+          // poller stops cleanly via the return below.
           setOrchestratorJob(data.job);
+          idleTicks = 0;
+          return;
         }
+        idleTicks += 1;
       } catch {
-        /* transient — next tick will retry */
+        /* network blip — re-schedule, don't widen backoff */
+      }
+      schedule();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        idleTicks = 0; // returning operator gets fast feedback
+        void tick();
       }
     };
+
     void tick();
-    const interval = setInterval(tick, 5000);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [orchestratorJob]);
 
@@ -777,6 +871,39 @@ function DashboardInner() {
     }
   };
 
+  const handleRemoveDemo = async () => {
+    if (demoRemoveText !== 'REMOVE DEMO' || isRemovingDemo) return;
+    setIsRemovingDemo(true);
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/leads/demo`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'REMOVE DEMO' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.detail || data.error || `Demo removal failed (HTTP ${res.status})`, 'error');
+        return;
+      }
+      const leadsDeleted = data.leads_deleted ?? 0;
+      const msgsDeleted = data.messages_deleted ?? 0;
+      showToast(
+        leadsDeleted
+          ? `Removed ${leadsDeleted} demo lead${leadsDeleted === 1 ? '' : 's'}${msgsDeleted ? ` + ${msgsDeleted} message${msgsDeleted === 1 ? '' : 's'}` : ''}.`
+          : 'No demo data found to remove.',
+        leadsDeleted ? 'success' : 'info'
+      );
+      setDemoRemoveOpen(false);
+      setDemoRemoveText('');
+      fetchLeads();
+    } catch (err) {
+      console.error('Demo removal failed:', err);
+      showToast('Demo removal failed — backend unreachable.', 'error');
+    } finally {
+      setIsRemovingDemo(false);
+    }
+  };
+
   const handleClearLeads = async () => {
     if (!confirm("Are you SURE you want to clear all leads? This cannot be undone.")) return;
     setLoading(true);
@@ -963,7 +1090,16 @@ function DashboardInner() {
     setFilterMinScore(0);
     setSearchTerm('');
     setSortKey(DEFAULT_SORT);
-  }, []);
+    // Strip URL params immediately. The bidirectional URL-sync write-effect
+    // below normally handles this, but the read-effect's `filterReadInFlightRef`
+    // suppression can occasionally race with the user clicking Clear right
+    // after a deep-link arrives (Phase 15 finding #2: state cleared, URL
+    // kept stale `?status=Pending&q=pacific&sort=...` and a subsequent reload
+    // re-applied the filters). Calling `router.replace('/')` here bypasses
+    // the race; the write-effect's diff check (line below) then short-
+    // circuits because URL == canonical state.
+    router.replace('/', { scroll: false });
+  }, [router]);
 
   // URL ↔ filter state sync. Bidirectional:
   //   - URL changes (deep-link, back/forward button) → mirror into local state
@@ -1215,7 +1351,7 @@ function DashboardInner() {
 
         <HealthChart leads={leads} />
 
-        <StatsCards leads={leads} />
+        <StatsCards leads={leads} totalLeads={totalLeads} />
 
         <div className="card card-no-hover" style={{ padding: '0', overflow: 'hidden' }}>
           <div className="table-container-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
@@ -1233,6 +1369,8 @@ function DashboardInner() {
               segmentOptions={segmentOptions}
               onClearFilters={clearFilters}
               hasActiveFilters={hasActiveFilters}
+              showDemo={showDemo}
+              setShowDemo={setShowDemo}
             />
 
             <LeadTable
@@ -1704,9 +1842,65 @@ function DashboardInner() {
 
               <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '12px', border: '1px solid var(--error-tint)' }}>
                 <h3 style={{ fontSize: '0.9rem', color: 'var(--error-strong)', marginBottom: '0.5rem' }}>Danger Zone</h3>
-                <button className="btn-secondary" style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }} onClick={handleClearLeads}>
-                  Clear All Leads
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {!demoRemoveOpen ? (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }}
+                      onClick={() => { setDemoRemoveOpen(true); setDemoRemoveText(''); }}
+                    >
+                      Remove all demo data
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <label htmlFor="confirm-remove-demo" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Type <code>REMOVE DEMO</code> to confirm. This wipes every <code>is_demo=true</code> lead and any campaign messages that reference them.
+                      </label>
+                      <input
+                        id="confirm-remove-demo"
+                        type="text"
+                        value={demoRemoveText}
+                        onChange={(e) => setDemoRemoveText(e.target.value)}
+                        placeholder="REMOVE DEMO"
+                        autoComplete="off"
+                        spellCheck={false}
+                        style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.5rem 0.75rem', color: 'var(--text-white)', fontSize: '0.85rem', outline: 'none' }}
+                      />
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ flex: 1, fontSize: '0.8rem' }}
+                          onClick={() => { setDemoRemoveOpen(false); setDemoRemoveText(''); }}
+                          disabled={isRemovingDemo}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ flex: 1, borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }}
+                          onClick={handleRemoveDemo}
+                          disabled={demoRemoveText !== 'REMOVE DEMO' || isRemovingDemo}
+                          aria-busy={isRemovingDemo}
+                        >
+                          {isRemovingDemo ? (
+                            <><Loader2 size={14} className="animate-spin" aria-hidden="true" /> Removing…</>
+                          ) : 'Confirm remove'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ width: '100%', borderColor: 'var(--error)', color: 'var(--error)', fontSize: '0.8rem' }}
+                    onClick={handleClearLeads}
+                  >
+                    Clear All Leads
+                  </button>
+                </div>
               </div>
             </div>
 

@@ -45,6 +45,11 @@ Status per provider as of 2026-05-22 (verify before changing approach):
 | `ALLOWED_ORIGINS` | CORS + Origin allowlist. | Not secret; misconfig is the risk (defaults to `localhost:3000` if unset → fail-closed Origin gate). | Update on domain change. | Origin-mismatch 403s are normal during rotation; sustained spike = misconfig. |
 | `OPERATOR_EMAIL` | Single-tenant assertion target. | Boot-time invariant only. | Update on operator change. | Backend boot log: `RuntimeError` on second user provisioned. |
 | `OPERATOR_NAME` | Non-secret — appears in outreach draft signatures. | Render env (cosmetic). | N/A | N/A |
+| `RESEND_API_KEY` | Resend HTTP API access for outreach email send + `Idempotency-Key` dedup (24h provider-side window). | Send-only scope (no domain admin, no team admin). | **Quarterly** (next: 2026-08-22). On leak: rotate in Resend dashboard, redeploy backend. Compromised key → spam from `mail.leaddatascraper.com` → DMARC reputation damage. | Resend dashboard usage chart + bounce rate; daily spend >2× normal. |
+| `RESEND_FROM_EMAIL` / `RESEND_FROM_NAME` | From-header config — `"Display Name <addr@mail.leaddatascraper.com>"`. | Not secret; misconfig is the risk (mismatch with verified domain → Resend 422). | On domain change. | Auth-Results header in seed-test inbox. |
+| `EMAIL_PROVIDER` | Factory switch in `src/integrations/email_sender.py::get_email_sender` — `smtp` (default) or `resend_api`. | Boot-time selection. Unknown value raises at startup. | Flip to `resend_api` only after `docs/email-deliverability.md` checklist passes 10/10. | Backend boot log: `ValueError: Unknown EMAIL_PROVIDER`. |
+| `EMAIL_REPLY_TO` | `Reply-To` header value — operator's real inbox (`mail.leaddatascraper.com` has no MX). | Not secret. | On operator-inbox change. | Replies arriving at wrong inbox. |
+| `EMAIL_LIST_UNSUBSCRIBE` | `List-Unsubscribe` header (`<https://...>` or `<mailto:...>`). Pair auto-emits `List-Unsubscribe-Post: List-Unsubscribe=One-Click`. | Operator config; required by Gmail at >5k/day. | On unsubscribe-endpoint URL change. | Gmail Postmaster Tools spam rate; missing header → Gmail Spam tab. |
 
 ### Production frontend (Render env)
 

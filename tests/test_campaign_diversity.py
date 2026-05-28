@@ -21,12 +21,14 @@ Three assertions:
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise.
 """
+
 import asyncio
 import math
 import os
 import re
 import sys
 import unittest
+import pytest
 from itertools import combinations
 from unittest.mock import patch
 
@@ -46,10 +48,28 @@ EMBED_MODEL = "text-embedding-004"
 # happens to be in the name. (Including these would let same-template emails
 # pass simply because each had a different proper noun.)
 COMPANY_NOUN_WORDS = {
-    "dental", "dentist", "dentistry", "clinic", "smile", "smiles", "tooth",
-    "teeth", "oral", "orthodontics",
-    "dr", "dr.", "doctor",
-    "co", "co.", "inc", "inc.", "llc", "ltd", "ltd.", "group", "practice",
+    "dental",
+    "dentist",
+    "dentistry",
+    "clinic",
+    "smile",
+    "smiles",
+    "tooth",
+    "teeth",
+    "oral",
+    "orthodontics",
+    "dr",
+    "dr.",
+    "doctor",
+    "co",
+    "co.",
+    "inc",
+    "inc.",
+    "llc",
+    "ltd",
+    "ltd.",
+    "group",
+    "practice",
 }
 
 
@@ -75,19 +95,48 @@ def _fixture_leads() -> list[dict]:
     something to vary that isn't supplied by the data.
     """
     clinic_names = [
-        "Acme Dental Clinic", "Bright Smile Dentistry", "City Centre Dental",
-        "Downtown Dental Care", "Elm Street Dental", "Family Smile Studio",
-        "Gentle Dental Group", "Harborview Dentistry", "Ivy Lane Dental",
-        "Juniper Family Dental", "Kingsway Dental Practice", "Lakeside Dental",
-        "Maple Avenue Dentistry", "Northgate Dental Care", "Oakwood Dental",
-        "Pinehill Dental Studio", "Riverbend Dentistry", "Sunrise Dental Group",
-        "Tower Bridge Dental", "Valley Dental Clinic",
+        "Acme Dental Clinic",
+        "Bright Smile Dentistry",
+        "City Centre Dental",
+        "Downtown Dental Care",
+        "Elm Street Dental",
+        "Family Smile Studio",
+        "Gentle Dental Group",
+        "Harborview Dentistry",
+        "Ivy Lane Dental",
+        "Juniper Family Dental",
+        "Kingsway Dental Practice",
+        "Lakeside Dental",
+        "Maple Avenue Dentistry",
+        "Northgate Dental Care",
+        "Oakwood Dental",
+        "Pinehill Dental Studio",
+        "Riverbend Dentistry",
+        "Sunrise Dental Group",
+        "Tower Bridge Dental",
+        "Valley Dental Clinic",
     ]
     contacts = [
-        "Dr. Anderson", "Dr. Bennett", "Dr. Carter", "Dr. Diaz", "Dr. Evans",
-        "Dr. Foster", "Dr. Garcia", "Dr. Hassan", "Dr. Iqbal", "Dr. Jones",
-        "Dr. Kowalski", "Dr. Larsen", "Dr. Martinez", "Dr. Nguyen", "Dr. Ortiz",
-        "Dr. Patel", "Dr. Quinn", "Dr. Reyes", "Dr. Singh", "Dr. Taylor",
+        "Dr. Anderson",
+        "Dr. Bennett",
+        "Dr. Carter",
+        "Dr. Diaz",
+        "Dr. Evans",
+        "Dr. Foster",
+        "Dr. Garcia",
+        "Dr. Hassan",
+        "Dr. Iqbal",
+        "Dr. Jones",
+        "Dr. Kowalski",
+        "Dr. Larsen",
+        "Dr. Martinez",
+        "Dr. Nguyen",
+        "Dr. Ortiz",
+        "Dr. Patel",
+        "Dr. Quinn",
+        "Dr. Reyes",
+        "Dr. Singh",
+        "Dr. Taylor",
     ]
     assert len(clinic_names) == N_LEADS == len(contacts), "fixture mismatch"
 
@@ -95,14 +144,16 @@ def _fixture_leads() -> list[dict]:
     leads = []
     for i, (clinic, contact) in enumerate(zip(clinic_names, contacts)):
         slug = re.sub(r"[^a-z0-9]+", "-", clinic.lower()).strip("-")
-        leads.append({
-            "unique_key": f"camp_{i:02d}",
-            "name": contact,
-            "company_name": clinic,
-            "website": f"https://{slug}.example",
-            "email": f"hello@{slug}.example",
-            "audit_results": audit,
-        })
+        leads.append(
+            {
+                "unique_key": f"camp_{i:02d}",
+                "name": contact,
+                "company_name": clinic,
+                "website": f"https://{slug}.example",
+                "email": f"hello@{slug}.example",
+                "audit_results": audit,
+            }
+        )
     return leads
 
 
@@ -163,26 +214,33 @@ def _cosine(a, b) -> float:
 
 
 async def _gen_one(router, lead: dict) -> dict:
-    return await router._generate_outreach_draft({
-        "unique_key": lead["unique_key"],
-        "lead_data": lead,
-    })
+    return await router._generate_outreach_draft(
+        {
+            "unique_key": lead["unique_key"],
+            "lead_data": lead,
+        }
+    )
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestCampaignDiversity(unittest.IsolatedAsyncioTestCase):
     """20-lead homogeneous-input campaign — output must still vary."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-            "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+                "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
+            },
+        )
         self.env_patcher.start()
         self.sb_patcher = patch("src.core.agentic_router.SupabaseHelper")
         self.sb_patcher.start()
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
         self.assertIsNotNone(self.router.client, "Gemini client must initialize")
 

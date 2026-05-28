@@ -4,6 +4,9 @@
 .env.development.local
 .env.test.local
 .env.production.local
+# Backups created when editing .env in place — never commit, may carry rotated secrets
+.env.bak
+.env*.bak
 
 # Python
 __pycache__/
@@ -31,6 +34,13 @@ node-compile-cache/
 # Database
 *.sqlite
 *.db
+# Gemini-budget runtime SQLite (created lazily by src/utils/gemini_budget.py;
+# default path data/gemini_budget.db).  Caught by *.db above but listed
+# explicitly so operators see it in the runtime-artifact inventory.
+data/gemini_budget.db
+data/gemini_budget.db-journal
+data/gemini_budget.db-wal
+data/gemini_budget.db-shm
 
 # OS
 .DS_Store
@@ -43,6 +53,7 @@ data/raw/*
 !data/raw/.gitkeep
 exports/*
 !exports/.gitkeep
+frontend/exports/
 logs/
 
 # Supabase CLI scratch state (project ref, org id, transient files)
@@ -53,6 +64,9 @@ supabase/.branches/
 *.jpg
 *.jpeg
 *.png
+# Allowed PNG exceptions: committed visual baselines + integration-report screenshots
+!frontend/e2e/visual.spec.ts-snapshots/*.png
+!tests/integration/screenshots-*/*.png
 
 # IDE / Tools
 .claude/
@@ -72,5 +86,18 @@ pytest-of-*/
 # Performance traces (large JSON, regenerated per session)
 tests/perf/*.json
 
+# Per-run transcript dumps from tests/test_refusal_boundaries.py.
+# CLAUDE.md "Live tier" notes: "Full transcript JSON dumped to a
+# tempfile; path printed each run." Pattern is
+# `refusal-boundaries-<timestamp>-<short-id>.json` and the files
+# land at repo root via `tempfile.NamedTemporaryFile(...)`. They're
+# debugging artifacts — keep on disk for forensics, ignore for
+# tracking.
+refusal-boundaries-*.json
+
 # context-mode tool configs (local-only)
 frontend/.cx_*.config.mjs
+
+# Mutation testing (mutmut)
+.mutmut-cache
+html/

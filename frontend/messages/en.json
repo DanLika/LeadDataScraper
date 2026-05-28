@@ -1,0 +1,78 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "insights": "Insights",
+    "campaigns": "Campaigns",
+    "settings": "Settings",
+    "signOut": "Sign Out"
+  },
+  "common": {
+    "save": "Save",
+    "saveAndClose": "Save & Close",
+    "cancel": "Cancel",
+    "close": "Close",
+    "loading": "Loading...",
+    "search": "Search",
+    "clear": "Clear",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "totalLeads": "Total Leads",
+    "pending": "Pending",
+    "highRisk": "High Risk",
+    "healthy": "Healthy",
+    "prospectInventory": "Prospect Inventory",
+    "searchLeads": "Search leads...",
+    "allSegments": "All Segments",
+    "allStatuses": "All Statuses",
+    "completed": "Completed",
+    "failed": "Failed",
+    "hideDemoData": "Hide demo data",
+    "clearFilters": "Clear filters",
+    "newestFirst": "Newest first",
+    "seoScoreDesc": "SEO score: high → low",
+    "seoScoreAsc": "SEO score: low → high",
+    "outreachScoreDesc": "Outreach score: high → low",
+    "nameAZ": "Name A→Z",
+    "nameZA": "Name Z→A"
+  },
+  "leadTable": {
+    "company": "Company",
+    "segment": "Segment",
+    "outreachScore": "Outreach Score",
+    "seoScore": "SEO Score",
+    "status": "Status",
+    "actions": "Actions"
+  },
+  "actions": {
+    "processAll": "Process All",
+    "deepHunt": "Deep Hunt",
+    "discover": "Discover",
+    "auditNow": "Audit Now",
+    "draftOutreach": "Draft Outreach",
+    "viewDetails": "View Details"
+  },
+  "settings": {
+    "title": "Settings",
+    "dangerZone": "Danger Zone",
+    "clearAllLeads": "Clear All Leads",
+    "removeAllDemoData": "Remove all demo data",
+    "downloadMyData": "Download my data"
+  },
+  "login": {
+    "title": "Sign in",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in..."
+  },
+  "localeSwitcher": {
+    "label": "Language",
+    "english": "English",
+    "croatian": "Hrvatski"
+  }
+}

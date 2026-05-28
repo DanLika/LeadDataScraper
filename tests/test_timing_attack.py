@@ -68,6 +68,7 @@ def _set_keys(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
     from main import limiter
+
     try:
         limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except Exception:
@@ -84,9 +85,11 @@ def _reset_rate_limiter():
 # silently changes to `==`, this test fires loudly.
 # ---------------------------------------------------------------------------
 
+
 class TestVerifyApiKeyUsesConstantTimeCompare(unittest.TestCase):
     def test_verify_api_key_source_uses_compare_digest(self):
         from pathlib import Path
+
         path = Path(__file__).resolve().parent.parent / "backend" / "main.py"
         source = path.read_text(encoding="utf-8")
         # Both the key + admin token verifiers must use compare_digest.
@@ -102,21 +105,24 @@ class TestVerifyApiKeyUsesConstantTimeCompare(unittest.TestCase):
             end = min((e for e in end_markers if e > 0), default=len(tail))
             body = tail[:end]
             self.assertIn(
-                "secrets.compare_digest", body,
-                f"{func_name} dropped secrets.compare_digest — timing leak"
+                "secrets.compare_digest",
+                body,
+                f"{func_name} dropped secrets.compare_digest — timing leak",
             )
             # And NOT the naive ==. (`if key != expected:` is the
             # vulnerable form; allowed comparisons like `if not key`
             # are fine because they don't compare against the secret.)
             self.assertNotIn(
-                f"key == expected", body,
-                f"{func_name} uses == for key comparison — timing leak"
+                f"key == expected",
+                body,
+                f"{func_name} uses == for key comparison — timing leak",
             )
 
 
 # ---------------------------------------------------------------------------
 # Empirical timing distribution.
 # ---------------------------------------------------------------------------
+
 
 def _sample_request_times(
     client: TestClient,
@@ -165,17 +171,27 @@ def test_api_key_compare_is_constant_time():
     dependency gates before any DB work)."""
     client = TestClient(app)
 
-    short_match = "X" + "A" * 63           # 1 char of secret right
-    long_match = "X" * 30 + "A" * 34       # 30 chars of secret right
+    short_match = "X" + "A" * 63  # 1 char of secret right
+    long_match = "X" * 30 + "A" * 34  # 30 chars of secret right
 
     # Warm-up — the first 50 requests pay path-init cost.
     _sample_request_times(client, "X-API-Key", short_match, "/leads", "GET", 50)
 
     short_times = _sample_request_times(
-        client, "X-API-Key", short_match, "/leads", "GET", SAMPLE_SIZE,
+        client,
+        "X-API-Key",
+        short_match,
+        "/leads",
+        "GET",
+        SAMPLE_SIZE,
     )
     long_times = _sample_request_times(
-        client, "X-API-Key", long_match, "/leads", "GET", SAMPLE_SIZE,
+        client,
+        "X-API-Key",
+        long_match,
+        "/leads",
+        "GET",
+        SAMPLE_SIZE,
     )
 
     short = _summary("short-1-char", short_times)
@@ -247,6 +263,7 @@ def test_admin_token_compare_is_constant_time():
 # Skipped if scipy isn't installed.
 # ---------------------------------------------------------------------------
 
+
 def test_api_key_welch_t_test_does_not_reject_same_mean():
     """Welch's t-test (unequal-variance) on the two timing
     distributions. If the comparator leaks timing, the two means
@@ -264,10 +281,20 @@ def test_api_key_welch_t_test_does_not_reject_same_mean():
     _sample_request_times(client, "X-API-Key", short_match, "/leads", "GET", 50)
 
     short_times = _sample_request_times(
-        client, "X-API-Key", short_match, "/leads", "GET", SAMPLE_SIZE,
+        client,
+        "X-API-Key",
+        short_match,
+        "/leads",
+        "GET",
+        SAMPLE_SIZE,
     )
     long_times = _sample_request_times(
-        client, "X-API-Key", long_match, "/leads", "GET", SAMPLE_SIZE,
+        client,
+        "X-API-Key",
+        long_match,
+        "/leads",
+        "GET",
+        SAMPLE_SIZE,
     )
 
     t_stat, p_value = stats.ttest_ind(short_times, long_times, equal_var=False)
@@ -287,6 +314,7 @@ def test_api_key_welch_t_test_does_not_reject_same_mean():
 # input; a key with 1 char shouldn't return faster than a key with 64.
 # ---------------------------------------------------------------------------
 
+
 def test_short_and_long_wrong_keys_have_overlapping_timing():
     client = TestClient(app)
     one_char = "X"
@@ -295,10 +323,20 @@ def test_short_and_long_wrong_keys_have_overlapping_timing():
     _sample_request_times(client, "X-API-Key", one_char, "/leads", "GET", 50)
 
     short_times = _sample_request_times(
-        client, "X-API-Key", one_char, "/leads", "GET", SAMPLE_SIZE,
+        client,
+        "X-API-Key",
+        one_char,
+        "/leads",
+        "GET",
+        SAMPLE_SIZE,
     )
     full_times = _sample_request_times(
-        client, "X-API-Key", sixty_four_chars, "/leads", "GET", SAMPLE_SIZE,
+        client,
+        "X-API-Key",
+        sixty_four_chars,
+        "/leads",
+        "GET",
+        SAMPLE_SIZE,
     )
 
     short = _summary("1-char", short_times)

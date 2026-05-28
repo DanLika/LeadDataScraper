@@ -12,8 +12,8 @@ def extract_json_from_response(text: str) -> Optional[dict]:
         return None
 
     # Step 1: Strip markdown code fences
-    cleaned = re.sub(r'```(?:json)?\s*', '', text)
-    cleaned = re.sub(r'```\s*$', '', cleaned).strip()
+    cleaned = re.sub(r"```(?:json)?\s*", "", text)
+    cleaned = re.sub(r"```\s*$", "", cleaned).strip()
 
     # Step 2: Try direct parse
     try:
@@ -25,16 +25,16 @@ def extract_json_from_response(text: str) -> Optional[dict]:
     depth = 0
     start = None
     for i, ch in enumerate(cleaned):
-        if ch == '{':
+        if ch == "{":
             if depth == 0:
                 start = i
             depth += 1
-        elif ch == '}':
+        elif ch == "}":
             if depth > 0:
                 depth -= 1
                 if depth == 0 and start is not None:
                     try:
-                        return json.loads(cleaned[start:i + 1])
+                        return json.loads(cleaned[start : i + 1])
                     except (json.JSONDecodeError, ValueError):
                         start = None
 

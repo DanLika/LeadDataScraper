@@ -4,15 +4,22 @@ import os
 
 from src.utils.supabase_helper import SupabaseHelper
 
+
 class TestSupabaseHelper(unittest.TestCase):
     def setUp(self):
         # Prevent SupabaseHelper from complaining about missing env vars
-        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://fake.url", "SUPABASE_SERVICE_ROLE_KEY": "fake_key"})
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "http://fake.url",
+                "SUPABASE_SERVICE_ROLE_KEY": "fake_key",
+            },
+        )
         self.env_patcher.start()
-        
-        self.client_patcher = patch('src.utils.supabase_helper.create_client')
+
+        self.client_patcher = patch("src.utils.supabase_helper.create_client")
         self.mock_create_client = self.client_patcher.start()
-        
+
         self.helper = SupabaseHelper()
         self.helper.client = MagicMock()
 
@@ -30,7 +37,7 @@ class TestSupabaseHelper(unittest.TestCase):
             "123invalid",
             "invalid column",
             "invalid;DROP TABLE leads;",
-            "in'valid"
+            "in'valid",
         ]
 
         mock_rpc = MagicMock()
@@ -69,7 +76,9 @@ class TestSupabaseHelper(unittest.TestCase):
 
     def test_check_schema_initial_fetch_error(self):
         """Test check_schema when the initial '*' select throws an exception."""
-        self.helper.client.table.return_value.select.return_value.limit.return_value.execute.side_effect = Exception("General DB error")
+        self.helper.client.table.return_value.select.return_value.limit.return_value.execute.side_effect = Exception(
+            "General DB error"
+        )
         self.assertEqual(self.helper.check_schema(), [])
 
     def test_check_schema_all_exist(self):
@@ -143,15 +152,23 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_get_pending_leads_success(self):
-        mock_execute = MagicMock(return_value=MagicMock(data=[{"unique_key": "123", "audit_status": "Pending"}]))
+        mock_execute = MagicMock(
+            return_value=MagicMock(
+                data=[{"unique_key": "123", "audit_status": "Pending"}]
+            )
+        )
         self.helper.client.table.return_value.select.return_value.eq.return_value.execute = mock_execute
-        
+
         result = self.helper.get_pending_leads()
-        
-        self.assertEqual(result.data, [{"unique_key": "123", "audit_status": "Pending"}])
+
+        self.assertEqual(
+            result.data, [{"unique_key": "123", "audit_status": "Pending"}]
+        )
         self.helper.client.table.assert_called_with("leads")
         self.helper.client.table.return_value.select.assert_called_with("*")
-        self.helper.client.table.return_value.select.return_value.eq.assert_called_with("audit_status", "Pending")
+        self.helper.client.table.return_value.select.return_value.eq.assert_called_with(
+            "audit_status", "Pending"
+        )
 
     def test_get_pending_leads_client_none(self):
         self.helper.client = None
@@ -163,17 +180,17 @@ class TestSupabaseHelper(unittest.TestCase):
         audit_data = {
             "score": 85,
             "emails": ["test@example.com"],
-            "high_risk_flag": True
+            "high_risk_flag": True,
         }
-        
+
         mock_execute = MagicMock(return_value="success")
         self.helper.client.table.return_value.update.return_value.eq.return_value.execute = mock_execute
-        
+
         result = self.helper.update_audit(unique_key, audit_data)
-        
+
         self.assertEqual(result, "success")
         self.helper.client.table.assert_called_with("leads")
-        
+
         update_call = self.helper.client.table.return_value.update.call_args[0][0]
         self.assertEqual(update_call["audit_status"], "Completed")
         self.assertEqual(update_call["email"], "test@example.com")
@@ -181,7 +198,9 @@ class TestSupabaseHelper(unittest.TestCase):
         self.assertEqual(update_call["high_risk_flag"], True)
 
     def test_update_audit_error(self):
-        self.helper.client.table.return_value.update.return_value.eq.return_value.execute.side_effect = Exception("DB Error")
+        self.helper.client.table.return_value.update.return_value.eq.return_value.execute.side_effect = Exception(
+            "DB Error"
+        )
         result = self.helper.update_audit("key", {})
         self.assertIsNone(result)
 
@@ -195,17 +214,26 @@ class TestSupabaseHelper(unittest.TestCase):
 
         self.assertEqual(result, "deleted")
         self.helper.client.table.assert_called_with("leads")
-        self.helper.client.table.return_value.delete.return_value.gte.assert_called_with("created_at", "1970-01-01")
+        self.helper.client.table.return_value.delete.return_value.gte.assert_called_with(
+            "created_at", "1970-01-01"
+        )
+
 
 class TestSupabaseHelperUpsert(unittest.TestCase):
     def setUp(self):
-        self.env_patcher = patch.dict(os.environ, {"SUPABASE_URL": "http://test-url", "SUPABASE_SERVICE_ROLE_KEY": "test-key"})
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "http://test-url",
+                "SUPABASE_SERVICE_ROLE_KEY": "test-key",
+            },
+        )
         self.env_patcher.start()
-        
+
         self.client_patcher = patch("src.utils.supabase_helper.create_client")
         self.mock_create = self.client_patcher.start()
         self.mock_create.return_value = MagicMock()
-        
+
         self.helper = SupabaseHelper()
 
     def tearDown(self):
@@ -245,7 +273,9 @@ class TestSupabaseHelperUpsert(unittest.TestCase):
     def test_upsert_leads_exception_schema_mismatch(self):
         """Test upsert_leads handling schema mismatch (column does not exist)."""
         leads_data = [{"unique_key": "123", "name": "Test Lead"}]
-        mock_execute = MagicMock(side_effect=Exception('column "missing_col" does not exist'))
+        mock_execute = MagicMock(
+            side_effect=Exception('column "missing_col" does not exist')
+        )
         mock_upsert = MagicMock(return_value=MagicMock(execute=mock_execute))
         mock_table = MagicMock(return_value=MagicMock(upsert=mock_upsert))
         self.helper.client.table = mock_table
@@ -254,8 +284,13 @@ class TestSupabaseHelperUpsert(unittest.TestCase):
             result = self.helper.upsert_leads(leads_data)
             self.assertIsNone(result)
             mock_logger.error.assert_called_once()
-            self.assertIn("DATABASE SCHEMA MISMATCH:", mock_logger.error.call_args[0][0])
-            mock_logger.warning.assert_called_with("Please run the SQL migration script provided in the implementation plan.")
+            self.assertIn(
+                "DATABASE SCHEMA MISMATCH:", mock_logger.error.call_args[0][0]
+            )
+            mock_logger.warning.assert_called_with(
+                "Please run the SQL migration script provided in the implementation plan."
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,7 @@ Why this test still earns its keep:
 
 Pure Python — no GEMINI_API_KEY, no network.
 """
+
 import os
 import sys
 import unittest
@@ -70,67 +71,126 @@ def _fixtures() -> list[dict]:
     """
     return [
         # --- Group A: pain-pattern short-circuits (priority order matters) ---
-        {"_id": "f01_security_ssl", "_expected": "Security/Critical Fix",
-         "pain_points": "Missing SSL — site served over HTTP. Critical security gap."},
-        {"_id": "f02_security_word", "_expected": "Security/Critical Fix",
-         "pain_points": "Multiple critical issues including missing SSL certificate."},
-        {"_id": "f03_perf_slow", "_expected": "Performance Optimization",
-         "pain_points": "Homepage slow to load — latency over 4 seconds."},
-        {"_id": "f04_perf_load_time", "_expected": "Performance Optimization",
-         "pain_points": "Poor performance: load time exceeds 8s on first paint."},
-        {"_id": "f05_mobile_viewport", "_expected": "Mobile Experience",
-         "pain_points": "No viewport meta — not responsive on phones."},
-
+        {
+            "_id": "f01_security_ssl",
+            "_expected": "Security/Critical Fix",
+            "pain_points": "Missing SSL — site served over HTTP. Critical security gap.",
+        },
+        {
+            "_id": "f02_security_word",
+            "_expected": "Security/Critical Fix",
+            "pain_points": "Multiple critical issues including missing SSL certificate.",
+        },
+        {
+            "_id": "f03_perf_slow",
+            "_expected": "Performance Optimization",
+            "pain_points": "Homepage slow to load — latency over 4 seconds.",
+        },
+        {
+            "_id": "f04_perf_load_time",
+            "_expected": "Performance Optimization",
+            "pain_points": "Poor performance: load time exceeds 8s on first paint.",
+        },
+        {
+            "_id": "f05_mobile_viewport",
+            "_expected": "Mobile Experience",
+            "pain_points": "No viewport meta — not responsive on phones.",
+        },
         # --- Group B: reputation pre-empts marketing/score branches ---
-        {"_id": "f06_low_rating", "_expected": "Reputation Repair",
-         "rating": 3.2, "reviews": 80, "pain_points": "Some marketing gaps."},
-        {"_id": "f07_low_rating_comma", "_expected": "Reputation Repair",
-         "rating": "3,5", "reviews": 25,
-         "pain_points": "Site fine, customer reviews concerning."},
-        {"_id": "f08_new_business_no_rating",
-         "_expected": "New Business / Growth",
-         "reviews": "4 reviews", "pain_points": ""},
-        {"_id": "f09_new_business_good_rating",
-         "_expected": "New Business / Growth",
-         "rating": 4.6, "reviews": 7, "pain_points": ""},
-
+        {
+            "_id": "f06_low_rating",
+            "_expected": "Reputation Repair",
+            "rating": 3.2,
+            "reviews": 80,
+            "pain_points": "Some marketing gaps.",
+        },
+        {
+            "_id": "f07_low_rating_comma",
+            "_expected": "Reputation Repair",
+            "rating": "3,5",
+            "reviews": 25,
+            "pain_points": "Site fine, customer reviews concerning.",
+        },
+        {
+            "_id": "f08_new_business_no_rating",
+            "_expected": "New Business / Growth",
+            "reviews": "4 reviews",
+            "pain_points": "",
+        },
+        {
+            "_id": "f09_new_business_good_rating",
+            "_expected": "New Business / Growth",
+            "rating": 4.6,
+            "reviews": 7,
+            "pain_points": "",
+        },
         # --- Group C: marketing pattern ---
-        {"_id": "f10_marketing_pixel", "_expected": "Marketing Analytics",
-         "pain_points": "No Facebook Pixel installed."},
-        {"_id": "f11_marketing_ga4", "_expected": "Marketing Analytics",
-         "pain_points": "Missing GA4 tracking and Google Tag Manager."},
-
+        {
+            "_id": "f10_marketing_pixel",
+            "_expected": "Marketing Analytics",
+            "pain_points": "No Facebook Pixel installed.",
+        },
+        {
+            "_id": "f11_marketing_ga4",
+            "_expected": "Marketing Analytics",
+            "pain_points": "Missing GA4 tracking and Google Tag Manager.",
+        },
         # --- Group D: niche enrichment (target_clients) ---
-        {"_id": "f12_enterprise", "_expected": "Enterprise B2B",
-         "pain_points": "Sales site decent, room for refinement.",
-         "target_clients": "Fortune 500 enterprise procurement teams"},
-        {"_id": "f13_enterprise_corporate", "_expected": "Enterprise B2B",
-         "pain_points": "",
-         "enrichment_data": {"target_clients": "Large corporate buyers"}},
-        {"_id": "f14_local_smb", "_expected": "Local SMB",
-         "pain_points": "",
-         "target_clients": "Local plumbers and small home-services shops"},
-        {"_id": "f15_local_smb_residential", "_expected": "Local SMB",
-         "pain_points": "",
-         "enrichment_data": {"target_clients": "Residential customers nearby"}},
-
+        {
+            "_id": "f12_enterprise",
+            "_expected": "Enterprise B2B",
+            "pain_points": "Sales site decent, room for refinement.",
+            "target_clients": "Fortune 500 enterprise procurement teams",
+        },
+        {
+            "_id": "f13_enterprise_corporate",
+            "_expected": "Enterprise B2B",
+            "pain_points": "",
+            "enrichment_data": {"target_clients": "Large corporate buyers"},
+        },
+        {
+            "_id": "f14_local_smb",
+            "_expected": "Local SMB",
+            "pain_points": "",
+            "target_clients": "Local plumbers and small home-services shops",
+        },
+        {
+            "_id": "f15_local_smb_residential",
+            "_expected": "Local SMB",
+            "pain_points": "",
+            "enrichment_data": {"target_clients": "Residential customers nearby"},
+        },
         # --- Group E: score-only branches (no pattern / reputation triggers) ---
-        {"_id": "f16_high_value", "_expected": "High Value / Outreach Ready",
-         "outreach_score": 85, "pain_points": ""},
-        {"_id": "f17_warm", "_expected": "Warm / Needs Personalization",
-         "outreach_score": 60, "pain_points": ""},
-        {"_id": "f18_low_priority", "_expected": "Low Priority Prospect",
-         "outreach_score": 15, "pain_points": ""},
+        {
+            "_id": "f16_high_value",
+            "_expected": "High Value / Outreach Ready",
+            "outreach_score": 85,
+            "pain_points": "",
+        },
+        {
+            "_id": "f17_warm",
+            "_expected": "Warm / Needs Personalization",
+            "outreach_score": 60,
+            "pain_points": "",
+        },
+        {
+            "_id": "f18_low_priority",
+            "_expected": "Low Priority Prospect",
+            "outreach_score": 15,
+            "pain_points": "",
+        },
         {"_id": "f19_empty_lead", "_expected": "Low Priority Prospect"},
-
         # --- Group F: precedence canary — security wins over reputation ---
         # If priority order in segment_lead is ever reordered (e.g. moving
         # reputation above security), this fixture's expected label flips
         # and the test fails — surfacing the precedence change.
-        {"_id": "f20_precedence_security_beats_reputation",
-         "_expected": "Security/Critical Fix",
-         "pain_points": "Missing SSL — critical security issue.",
-         "rating": 2.5, "reviews": 3},
+        {
+            "_id": "f20_precedence_security_beats_reputation",
+            "_expected": "Security/Critical Fix",
+            "pain_points": "Missing SSL — critical security issue.",
+            "rating": 2.5,
+            "reviews": 3,
+        },
     ]
 
 
@@ -153,8 +213,7 @@ class TestSegmentStability(unittest.TestCase):
         for f in self.fixtures:
             inputs = _strip_meta(f)
             self.results[f["_id"]] = [
-                self.hunter.segment_lead(deepcopy(inputs))
-                for _ in range(RUNS_PER_LEAD)
+                self.hunter.segment_lead(deepcopy(inputs)) for _ in range(RUNS_PER_LEAD)
             ]
 
     def test_per_lead_zero_variance(self):
@@ -170,7 +229,8 @@ class TestSegmentStability(unittest.TestCase):
                 )
         self.assertFalse(
             failures,
-            "Per-lead variance — segment_lead is not deterministic:\n" + "\n".join(failures)
+            "Per-lead variance — segment_lead is not deterministic:\n"
+            + "\n".join(failures),
         )
 
     def test_distinct_label_count_bounded(self):
@@ -184,9 +244,10 @@ class TestSegmentStability(unittest.TestCase):
         distribution = Counter(all_labels)
         distinct = set(all_labels)
         self.assertLessEqual(
-            len(distinct), MAX_DISTINCT_LABELS,
+            len(distinct),
+            MAX_DISTINCT_LABELS,
             f"{len(distinct)} distinct labels exceeds {MAX_DISTINCT_LABELS} "
-            f"ceiling. Distribution: {dict(distribution)}"
+            f"ceiling. Distribution: {dict(distribution)}",
         )
 
     def test_labels_within_closed_set(self):
@@ -199,7 +260,7 @@ class TestSegmentStability(unittest.TestCase):
             unknown,
             f"Labels emitted that are not in KNOWN_LABELS: {sorted(unknown)}.\n"
             f"Either segment_lead was updated and KNOWN_LABELS wasn't, OR a "
-            f"typo crept in. Update KNOWN_LABELS in this test deliberately."
+            f"typo crept in. Update KNOWN_LABELS in this test deliberately.",
         )
 
     def test_labels_non_empty_strings(self):
@@ -225,7 +286,7 @@ class TestSegmentStability(unittest.TestCase):
                 failures.append(f"{fixture['_id']}: got {got!r}, expected {want!r}")
         self.assertFalse(
             failures,
-            "Routing mismatch (input → expected segment):\n" + "\n".join(failures)
+            "Routing mismatch (input → expected segment):\n" + "\n".join(failures),
         )
 
 

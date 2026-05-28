@@ -58,12 +58,33 @@ route_var: ContextVar[Optional[str]] = ContextVar("route", default=None)
 
 # Standard LogRecord attributes — anything else in record.__dict__ is a
 # domain field passed via `extra={...}` and goes into the envelope.
-_RESERVED = frozenset({
-    "args", "asctime", "created", "exc_info", "exc_text", "filename",
-    "funcName", "levelname", "levelno", "lineno", "module", "msecs",
-    "message", "msg", "name", "pathname", "process", "processName",
-    "relativeCreated", "stack_info", "thread", "threadName", "taskName",
-})
+_RESERVED = frozenset(
+    {
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "message",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
+        "taskName",
+    }
+)
 
 
 class JsonFormatter(logging.Formatter):
@@ -85,11 +106,13 @@ class JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
-            "request_id": request_id_var.get(),
-            "user_id": user_id_var.get(),
-            "route": route_var.get(),
         }
-        # Merge in any domain fields passed via extra={...}.
+        # Merge any domain fields passed via extra={...} first so explicit
+        # callers win over ContextVar defaults. Starlette's BaseHTTPMiddleware
+        # spawns inner middleware in a child task, so a call site running in
+        # that child may have legitimate request_id / route values it grabbed
+        # off `request.state` even when the ContextVar for the spawned task
+        # never received them. Reserved record attrs stay filtered out.
         for key, value in record.__dict__.items():
             if key in _RESERVED or key in envelope:
                 continue
@@ -98,6 +121,10 @@ class JsonFormatter(logging.Formatter):
             except (TypeError, ValueError):
                 value = repr(value)
             envelope[key] = value
+        # ContextVar defaults only fill blanks the caller didn't supply.
+        envelope.setdefault("request_id", request_id_var.get())
+        envelope.setdefault("user_id", user_id_var.get())
+        envelope.setdefault("route", route_var.get())
         if record.exc_info:
             envelope["exception"] = self.formatException(record.exc_info)
         # default=str catches stragglers (datetime, UUID, Decimal);
@@ -119,8 +146,9 @@ class _CRLFScrubFilter(logging.Filter):
     stays on one row regardless of formatter (text OR JSON).
     """
 
-    _CRLF_MAP = str.maketrans({"\r": "\\r", "\n": "\\n", "\x0b": "\\x0b",
-                                "\x0c": "\\x0c"})
+    _CRLF_MAP = str.maketrans(
+        {"\r": "\\r", "\n": "\\n", "\x0b": "\\x0b", "\x0c": "\\x0c"}
+    )
 
     @classmethod
     def _scrub(cls, value: Any) -> Any:

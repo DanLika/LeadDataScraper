@@ -1,4 +1,5 @@
 """Tests for the logging configuration module."""
+
 import logging
 import os
 import pytest
@@ -23,11 +24,13 @@ def test_setup_logging(tmp_path, monkeypatch):
 
         setup_logging()
 
-        assert root.level == logging.INFO, \
+        assert root.level == logging.INFO, (
             f"Root logger level should be INFO (20), got {root.level}"
+        )
 
-        assert len(root.handlers) == 2, \
+        assert len(root.handlers) == 2, (
             f"Expected 2 handlers (stream + file), got {len(root.handlers)}: {root.handlers}"
+        )
 
         handler_types = {type(h).__name__ for h in root.handlers}
         assert "StreamHandler" in handler_types
@@ -37,7 +40,7 @@ def test_setup_logging(tmp_path, monkeypatch):
             assert logging.getLogger(name).level == logging.WARNING
     finally:
         for h in root.handlers[:]:
-            if hasattr(h, 'close'):
+            if hasattr(h, "close"):
                 h.close()
         root.handlers = original_handlers
         root.level = original_level

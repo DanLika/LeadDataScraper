@@ -41,8 +41,10 @@ def _load_env() -> dict[str, str]:
                 if v and k not in merged:
                     merged[k] = v
     for k in (
-        "RUN_OPEN_REDIRECT_E2E", "FRONTEND_URL",
-        "TEST_USER_EMAIL", "TEST_USER_PASSWORD",
+        "RUN_OPEN_REDIRECT_E2E",
+        "FRONTEND_URL",
+        "TEST_USER_EMAIL",
+        "TEST_USER_PASSWORD",
     ):
         v = os.environ.get(k)
         if v:
@@ -111,12 +113,14 @@ def _same_origin(url: str, frontend_url: str) -> bool:
     return (a.scheme, a.netloc) == (b.scheme, b.netloc)
 
 
-def _login_with_next(page, frontend_url: str, email: str, password: str,
-                     next_param: str) -> None:
+def _login_with_next(
+    page, frontend_url: str, email: str, password: str, next_param: str
+) -> None:
     """Drive the real login form with the payload pre-loaded as ?next=."""
     # Build the URL ourselves so the test payload survives unchanged —
     # `page.goto` doesn't re-encode the query string we hand it.
     from urllib.parse import quote
+
     target = f"{frontend_url}/login?next={quote(next_param, safe='')}"
     page.goto(target, wait_until="domcontentloaded")
     page.fill('input[name="email"]', email)
@@ -133,9 +137,7 @@ def _login_with_next(page, frontend_url: str, email: str, password: str,
 @pytest.mark.parametrize(
     "payload",
     OPEN_REDIRECT_PAYLOADS,
-    ids=[
-        f"payload-{i:02d}" for i in range(len(OPEN_REDIRECT_PAYLOADS))
-    ],
+    ids=[f"payload-{i:02d}" for i in range(len(OPEN_REDIRECT_PAYLOADS))],
 )
 def test_login_next_param_never_redirects_off_origin(payload):
     from playwright.sync_api import sync_playwright
@@ -146,7 +148,10 @@ def test_login_next_param_never_redirects_off_origin(payload):
         page = context.new_page()
         try:
             _login_with_next(
-                page, FRONTEND_URL, TEST_USER_EMAIL, TEST_USER_PASSWORD,
+                page,
+                FRONTEND_URL,
+                TEST_USER_EMAIL,
+                TEST_USER_PASSWORD,
                 payload,
             )
             final_url = page.url
@@ -173,7 +178,10 @@ def test_login_next_param_legit_path_still_works():
         page = context.new_page()
         try:
             _login_with_next(
-                page, FRONTEND_URL, TEST_USER_EMAIL, TEST_USER_PASSWORD,
+                page,
+                FRONTEND_URL,
+                TEST_USER_EMAIL,
+                TEST_USER_PASSWORD,
                 legit,
             )
             final_url = page.url
