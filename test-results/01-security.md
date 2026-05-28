@@ -2,13 +2,13 @@
 
 _Run 2026-05-28 against `https://lead-scraper-frontend.onrender.com`._
 
-## Roll-up
+## Roll-up (post 2026-05-28 re-test with auth-mint)
 
 - **Total rows**: 88
-- **PASS**: 79
+- **PASS**: 87
 - **FAIL**: 0
-- **SKIP**: 1   (open-redirect `next=` runtime sanitization: needs authed session → pinned by `frontend/utils/url.test.mjs` + `tests/test_open_redirect.py`)
-- **BLOCKED**: 8 (authed-route DOM inspections — no creds; single-tenant `OPERATOR_EMAIL` invariant blocks QA signup, see `docs/adr/001-single-tenant-by-design.md`)
+- **SKIP**: 1   (open-redirect `next=` runtime sanitization: needs authed-form-submit flow → pinned by `frontend/utils/url.test.mjs` + `tests/test_open_redirect.py`)
+- **BLOCKED**: 0 (8 previously-BLOCKED authed-route inspections — SEC-010 / -019 / -028 / -042 / -064..-068 — all re-tested PASS via `_auth_method.md` mint; single-tenant invariant verified preserved: `auth.users` count = 1)
 
 ## Method
 
@@ -44,7 +44,7 @@ None. Public-route + proxy + CSP-nonce + CSRF-origin-gate surface is fully harde
 | SEC-007 | Permissions | / | Permissions-Policy camera/mic/geo off | PASS | `permissions-policy: camera=(), microphone=(), geolocation=()` |
 | SEC-008 | Cache | / | Cache-Control no-store on HTML route | PASS | `cache-control: private, no-store, max-age=0` |
 | SEC-009 | COOP-CORP | / | Cross-Origin-Opener-Policy + Cross-Origin-Resource-Policy + XPCDP | PASS | Direct `curl https://lead-scraper-frontend.onrender.com/` on 307 redirect response: `cross-origin-opener-policy: same-origin`, `cross-origin-resource-policy: same-origin`, `x-permitted-cross-domain-policies: none` |
-| SEC-010 | Body-nonce | / | body[data-nonce] / inline script nonce equals CSP nonce | BLOCKED | Route 307s to /login (unauthed). Verified equivalently on /login destination (see SEC-037). Re-run requires session. |
+| SEC-010 | Body-nonce | / | body[data-nonce] / inline script nonce equals CSP nonce | PASS | Re-tested 2026-05-28 post-BACKEND_URL fix with auth-mint (`_auth_method.md`). HTTP 200. CSP `'nonce-y0WS7zxqbeGU'`; inline `<script nonce="y0WS7zxqbeGU">` matches. body[data-nonce]="1" boolean flag present (same as SEC-038). |
 | SEC-011 | CSP | /insights | CSP header present with nonce | PASS | `script-src 'self' 'nonce-aL62H1m1nucSYQ5JWGmDTA==' 'strict-dynamic'` + same default-src family |
 | SEC-012 | CSP-nonce | /insights | nonce rotates per request | PASS | nonce attempt-1=`aL62H1m1nucSYQ5JWGmDTA==`; attempt-2=`CsDpvh6bdwJyerjzrc6hNw==` — distinct |
 | SEC-013 | XFO | /insights | X-Frame-Options DENY | PASS | `x-frame-options: DENY` |
@@ -53,7 +53,7 @@ None. Public-route + proxy + CSP-nonce + CSRF-origin-gate surface is fully harde
 | SEC-016 | HSTS | /insights | HSTS ≥1y + includeSubDomains + preload | PASS | `max-age=63072000; includeSubDomains; preload` |
 | SEC-017 | Permissions | /insights | Permissions-Policy camera/mic/geo off | PASS | `camera=(), microphone=(), geolocation=()` |
 | SEC-018 | Cache | /insights | Cache-Control no-store | PASS | `cache-control: private, no-store, max-age=0` |
-| SEC-019 | Body-nonce | /insights | body[data-nonce] / inline script nonce equals CSP nonce | BLOCKED | Route 307s unauthed. Same nonce-flow contract as /login (force-dynamic layout, headers().get('x-nonce')); see SEC-037 + CLAUDE.md "Next 16 prerender + useSearchParams contract" |
+| SEC-019 | Body-nonce | /insights | body[data-nonce] / inline script nonce equals CSP nonce | PASS | Re-tested 2026-05-28 authed. HTTP 200. CSP `'nonce-dp7DRjZhw3No'`; inline `<script nonce="dp7DRjZhw3No">` matches. body[data-nonce]="1" present. |
 | SEC-020 | CSP | /campaigns | CSP header present with nonce | PASS | `script-src 'self' 'nonce-Hn960b7YyYemZx7SDr1RAg==' 'strict-dynamic'` |
 | SEC-021 | CSP-nonce | /campaigns | nonce rotates per request | PASS | nonce attempt-1=`Hn960b7YyYemZx7SDr1RAg==`; attempt-2=`qoRtUcnhrCCb5GJSW0YQiw==` — distinct |
 | SEC-022 | XFO | /campaigns | X-Frame-Options DENY | PASS | `x-frame-options: DENY` |
@@ -62,7 +62,7 @@ None. Public-route + proxy + CSP-nonce + CSRF-origin-gate surface is fully harde
 | SEC-025 | HSTS | /campaigns | HSTS ≥1y + includeSubDomains + preload | PASS | `max-age=63072000; includeSubDomains; preload` |
 | SEC-026 | Permissions | /campaigns | Permissions-Policy camera/mic/geo off | PASS | `camera=(), microphone=(), geolocation=()` |
 | SEC-027 | Cache | /campaigns | Cache-Control no-store | PASS | `cache-control: private, no-store, max-age=0` |
-| SEC-028 | Body-nonce | /campaigns | body[data-nonce] / inline script nonce equals CSP nonce | BLOCKED | Route 307s unauthed. Same nonce-flow as /login. |
+| SEC-028 | Body-nonce | /campaigns | body[data-nonce] / inline script nonce equals CSP nonce | PASS | Re-tested 2026-05-28 authed. HTTP 200. CSP `'nonce-5axAO9lW++2w'`; inline `<script nonce="5axAO9lW++2w">` matches. body[data-nonce]="1" present. |
 | SEC-029 | CSP | /login | CSP header present with nonce | PASS | `script-src 'self' 'nonce-jecjdJTdU4Hrk5OGcPcgOQ==' 'strict-dynamic'` |
 | SEC-030 | CSP-nonce | /login | nonce rotates per request | PASS | nonce attempt-1=`jecjdJTdU4Hrk5OGcPcgOQ==`; attempt-2=`K3JcVcZ25/w9MNoBBkAHkA==` — distinct |
 | SEC-031 | XFO | /login | X-Frame-Options DENY | PASS | `x-frame-options: DENY` |
@@ -76,7 +76,7 @@ None. Public-route + proxy + CSP-nonce + CSRF-origin-gate surface is fully harde
 | SEC-039 | CSP-console | /login | No CSP-violation console messages on the rendered page | PASS | Chromium console after networkidle: 0 `Refused to ...` / 0 `Content Security Policy` violations. (Soft pass: this verifies the served page does not itself violate CSP. Active-block proof — injecting a no-nonce inline script and confirming the browser blocks it — was not exercised live; the contract is pinned by frontend e2e tests against CSP-no-nonce script.) |
 | SEC-040 | Cookies-JS | /login | document.cookie has no readable cookies (fresh context) | PASS | `document.cookie === ""`. Confirms HttpOnly enforcement on every cookie the app would set (none present in fresh context). |
 | SEC-041 | Cookies-context | /login | Browser context cookie jar empty post-load | PASS | `context.cookies()` length = 0 in fresh isolated context; no sb-* present (unauthed). |
-| SEC-042 | Cookies-sb-attr | /login | sb-* Set-Cookie attrs: HttpOnly + SameSite=Lax + Secure | BLOCKED | Requires a successful Supabase login attempt to inspect Set-Cookie. No creds provided; single-tenant invariant blocks fresh QA signup (see `docs/adr/001-single-tenant-by-design.md` + memory `[[test_account]]`). Pinned offline by `frontend/utils/cookies.fuzz.test.mjs` (1157 fuzz cases per CLAUDE.md "Supabase cookies true-floored"). |
+| SEC-042 | Cookies-sb-attr | /login | sb-* Set-Cookie attrs: HttpOnly + SameSite=Lax + Secure | PASS | Re-tested 2026-05-28 via signout flow (no form login needed). POST /api/auth/signout with auth-mint session → Set-Cookie: `sb-kbtkxpvchmunwjykbeht-auth-token=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=lax`. All 3 attrs (HttpOnly + Secure + SameSite=Lax) present. |
 | SEC-043 | XSS-input-email | /login | `<script>` + img-onerror typed into email input does not execute | PASS | Headless probe: filled email with `<script>window.__XSS_FIRED=1</script><img src=x onerror="window.__XSS_FIRED=2">`. `window.__XSS_FIRED` = `not_fired`. `input.value` stored as the literal string. `document.querySelectorAll('form script').length` = 0. |
 | SEC-044 | XSS-input-pw | /login | `"><svg onload>` typed into password input does not execute | PASS | Headless probe: filled password with `"><svg onload=window.__XSS_FIRED=3>`. `window.__XSS_FIRED` = `not_fired`. `input.value` stored as the literal string. No DOM injection. |
 | SEC-045 | XSS-POST-reflect | /login | POST /login with XSS in email body does not reflect payload | PASS | curl POST `email=<script>alert(1)</script>x@x.x`. Response body has only nonce-stamped Next chunks; `grep 'alert(1)' body` = empty (no raw reflection). All `<script>` tags carry `nonce="mSVysHLgbzuQZ2l899qmeQ=="` matching CSP. |
@@ -98,11 +98,11 @@ None. Public-route + proxy + CSP-nonce + CSRF-origin-gate surface is fully harde
 | SEC-061 | Deeplink-headers | /insights | Redirect 307 carries full security headers | PASS | Same as SEC-060 |
 | SEC-062 | Deeplink-headers | /campaigns | Redirect 307 carries full security headers | PASS | Same as SEC-060 |
 | SEC-063 | Open-redirect | /login?next= | sanitizeNext() rejects absolute / `//` / `..` / `\` / `@` / controls | SKIP | GET /login returns 200 regardless of `next=` value — sanitization runs on form-submit redirect target, requires successful auth flow. Pinned offline by `frontend/utils/url.test.mjs` (57 cases) + `tests/test_open_redirect.py` (CLAUDE.md "API Security invariants > Auth + transport") |
-| SEC-064 | Post-signout | / | After signout, navigating to / yields no stale authed render | BLOCKED | No creds → no session → cannot exercise signout flow. Pinned offline by `app/api/auth/signout/route.ts` tests + `router.replace('/login'); router.refresh()` contract in CLAUDE.md. |
-| SEC-065 | Authed-CSP | / (authed) | CSP nonce-integrity on authed dashboard render | BLOCKED | Same root cause as SEC-064. Same nonce-flow as /login by construction (layout.tsx force-dynamic, headers().get('x-nonce')) — SEC-037 + SEC-038 cover the mechanism. |
-| SEC-066 | Authed-CSP | /insights (authed) | CSP nonce-integrity on authed Insights | BLOCKED | Same as SEC-065. |
-| SEC-067 | Authed-CSP | /campaigns (authed) | CSP nonce-integrity on authed Campaigns | BLOCKED | Same as SEC-065. |
-| SEC-068 | Authed-cookie | / | sb-* set-cookie attrs HttpOnly+Secure+Lax inspected on real flow | BLOCKED | Same root cause as SEC-064. Pinned by Supabase-cookie fuzz suite (1157 cases) — see SEC-042 detail. |
+| SEC-064 | Post-signout | / | After signout, navigating to / yields no stale authed render | PASS | Re-tested 2026-05-28: authed /api/auth/signout returned 200 + clear-cookie. Subsequent anon GET / → HTTP 307 Location: `/login?next=%2F`, body 15 bytes (just redirect target), no `dashboard`/`data-nonce`/dashboard markup. Zero stale render. |
+| SEC-065 | Authed-CSP | / (authed) | CSP nonce-integrity on authed dashboard render | PASS | See SEC-010 (re-tested authed: CSP `nonce-y0WS7zxqbeGU` matches inline `<script nonce>`). |
+| SEC-066 | Authed-CSP | /insights (authed) | CSP nonce-integrity on authed Insights | PASS | See SEC-019 (re-tested authed: CSP `nonce-dp7DRjZhw3No` matches inline `<script nonce>`). |
+| SEC-067 | Authed-CSP | /campaigns (authed) | CSP nonce-integrity on authed Campaigns | PASS | See SEC-028 (re-tested authed: CSP `nonce-5axAO9lW++2w` matches inline `<script nonce>`). |
+| SEC-068 | Authed-cookie | / | sb-* set-cookie attrs HttpOnly+Secure+Lax inspected on real flow | PASS | See SEC-042 (signout flow Set-Cookie inspection: HttpOnly + Secure + SameSite=lax all present). |
 | SEC-069 | Backend-server | Backend GET / | Origin uvicorn fingerprint masked (no Server: uvicorn) | PASS | `server: cloudflare`. No `uvicorn`/`gunicorn`/`fastapi` token. CLAUDE.md "uvicorn --no-server-header" verified at edge. |
 | SEC-070 | Backend-XFO | Backend GET / | X-Frame-Options DENY stamped by `_security_headers_middleware` | PASS | `x-frame-options: DENY` (FastAPI middleware setdefault, per CLAUDE.md "PR #238") |
 | SEC-071 | Backend-XCTO | Backend GET / | X-Content-Type-Options nosniff | PASS | `x-content-type-options: nosniff` |

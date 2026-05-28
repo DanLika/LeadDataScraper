@@ -1,0 +1,58 @@
+[
+  {
+    "terminal": "01-security",
+    "pass": 87,
+    "fail": 0,
+    "skip": 1,
+    "blocked": 0,
+    "total": 88
+  },
+  {
+    "terminal": "02-responsive",
+    "pass": 106,
+    "fail": 1,
+    "skip": 0,
+    "blocked": 0,
+    "total": 107
+  },
+  {
+    "terminal": "03-navigation",
+    "pass": 47,
+    "fail": 0,
+    "skip": 0,
+    "blocked": 0,
+    "total": 47
+  },
+  {
+    "terminal": "03b-navigation",
+    "pass": 24,
+    "fail": 0,
+    "skip": 0,
+    "blocked": 0,
+    "total": 24
+  },
+  {
+    "terminal": "05-a11y",
+    "pass": 20,
+    "fail": 1,
+    "skip": 1,
+    "blocked": 0,
+    "total": 22
+  },
+  {
+    "terminal": "06-backend-api",
+    "pass": 227,
+    "fail": 0,
+    "skip": 25,
+    "blocked": 0,
+    "total": 252
+  },
+  {
+    "terminal": "10-mobile",
+    "pass": 41,
+    "fail": 6,
+    "skip": 0,
+    "blocked": 0,
+    "total": 47
+  }
+]
