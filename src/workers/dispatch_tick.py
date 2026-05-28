@@ -61,7 +61,15 @@ _DEFAULT_MAX_RUNTIME_SEC = 50  # Render Cron 60s hard cap; 10s safety margin
 
 @dataclass
 class TickResult:
-    """Structured per-stage counts for one tick run."""
+    """Structured per-stage counts for one tick run.
+
+    ``swallowed`` (Issue #367) counts per-lead errors from
+    ``push_leads`` that could NOT be reconciled to a claimed
+    ``message_id`` — distinct from ``failed`` (provider-reported
+    failure count) and from ``result.errors`` (tick-level error tags).
+    Operator sees stranded ``dispatching`` rows in the summary log
+    immediately rather than waiting for the stale-claim sweeper.
+    """
 
     swept_stale: int = 0
     claimed: int = 0
@@ -69,6 +77,7 @@ class TickResult:
     skipped_window: int = 0
     dispatched: int = 0
     failed: int = 0
+    swallowed: int = 0
     errors: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
 
@@ -90,8 +99,45 @@ async def run_tick(
     All injection points (db_client, dispatcher) accept None to fall
     through to defaults — production wiring constructs them from env;
     tests pass mocks. ``now_iso`` lets tests freeze the clock.
+
+    Issue #367 invariant: the ``dispatch_tick summary`` log line is
+    emitted on EVERY return path (try/finally) so cron output is
+    auditable without operator-side wrapper scripts.
     """
     started = _monotonic_now()
+    result = TickResult()
+    try:
+        await _run_tick_inner(
+            result,
+            started=started,
+            db_client=db_client,
+            dispatcher=dispatcher,
+            batch_size=batch_size,
+            claim_timeout_min=claim_timeout_min,
+            max_runtime_sec=max_runtime_sec,
+            now_iso=now_iso,
+        )
+    finally:
+        result.elapsed_seconds = _monotonic_now() - started
+        logger.info("dispatch_tick summary", extra=result.as_dict())
+    return result
+
+
+async def _run_tick_inner(
+    result: TickResult,
+    *,
+    started: float,
+    db_client: Optional[Any],
+    dispatcher: Optional[Any],
+    batch_size: Optional[int],
+    claim_timeout_min: Optional[int],
+    max_runtime_sec: Optional[int],
+    now_iso: Optional[str],
+) -> None:
+    """Inner body of :func:`run_tick`. Mutates ``result`` in place;
+    never returns a value. Outer wrapper finalizes
+    ``elapsed_seconds`` + summary log inside its ``finally`` so every
+    early exit remains observable (Issue #367)."""
     bs = batch_size if batch_size is not None else _env_int(
         "DISPATCH_TICK_BATCH_SIZE", _DEFAULT_BATCH_SIZE,
     )
@@ -101,15 +147,13 @@ async def run_tick(
     runtime_cap = max_runtime_sec if max_runtime_sec is not None else _env_int(
         "DISPATCH_TICK_MAX_RUNTIME_SEC", _DEFAULT_MAX_RUNTIME_SEC,
     )
-    result = TickResult()
 
     db = db_client
     if db is None:
         db = _resolve_db_client()
         if db is None:
             result.errors.append("db_client_unavailable")
-            result.elapsed_seconds = _monotonic_now() - started
-            return result
+            return
 
     from src.repositories.campaign_message_repo import CampaignMessageRepository
     from src.repositories.suppression_repo import SuppressionRepository
@@ -135,8 +179,7 @@ async def run_tick(
 
     if _exceeded_runtime(started, runtime_cap):
         result.errors.append("runtime_cap_after_sweep")
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
 
     # 2. Atomic claim. Two-phase status-transition pattern in the repo.
     try:
@@ -144,13 +187,11 @@ async def run_tick(
     except Exception as exc:  # noqa: BLE001
         logger.exception("dispatch_tick claim failed")
         result.errors.append(f"claim_failed:{type(exc).__name__}")
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
     result.claimed = len(claimed)
 
     if not claimed:
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
 
     # 3. Phase 15.3 batch-fetch — 4 PostgREST calls regardless of claim
     #    size, instead of N+1 per claimed row. Order:
@@ -196,8 +237,7 @@ async def run_tick(
     except Exception:  # noqa: BLE001 — single boundary catch
         logger.exception("dispatch_tick batch fetch failed")
         result.errors.append("batch_fetch_failed")
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
 
     # 4. Suppression precheck — emails now sourced from leads_by_uk
     #    (the canonical projection) rather than the campaign_messages
@@ -226,8 +266,7 @@ async def run_tick(
 
     if _exceeded_runtime(started, runtime_cap):
         result.errors.append("runtime_cap_after_suppression")
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
 
     # 5. Build the per-message dispatch payloads. Filter out:
     #     * no_email          → release as 'failed' (lead deleted /
@@ -243,8 +282,7 @@ async def run_tick(
     dispatch_impl = dispatcher or _resolve_dispatcher()
     if dispatch_impl is None:
         result.errors.append("dispatcher_unavailable")
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
 
     operator_name = (os.environ.get("OPERATOR_NAME") or "").strip()
     operator_signature = (os.environ.get("OPERATOR_SIGNATURE") or "").strip()
@@ -372,18 +410,16 @@ async def run_tick(
             list_unsubscribe_urls[uk] = payload.list_unsubscribe_url
 
     if not leads_payload:
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
 
     if _exceeded_runtime(started, runtime_cap):
         result.errors.append("runtime_cap_before_dispatch")
-        result.elapsed_seconds = _monotonic_now() - started
-        return result
+        return
 
-    # leads_payload + message_ids already populated by the per-message
-    # build loop above (Phase 15.3 rewire). The dispatcher push path
-    # (Phase 14.1 + 14.3) accepts the lead-row dicts directly.
-
+    # 6. Dispatch. push_leads may raise (network / transport) OR return
+    #    with per-lead errors in push_result.errors. Both paths produce
+    #    distinct telemetry — see Issue #367.
+    push_result: Optional[Any] = None
     try:
         push_result = await dispatch_impl.push_leads(
             leads=leads_payload,
@@ -398,32 +434,139 @@ async def run_tick(
         logger.exception("dispatch_tick dispatcher.push_leads failed")
         result.errors.append(f"dispatch_failed:{type(exc).__name__}")
         # Don't mark every row failed — the dispatcher may have partially
-        # succeeded server-side; leave the rows in 'dispatching' and
-        # let the sweeper reset them on the next tick.
+        # succeeded server-side; sweeper resets the rows on the next tick.
+        # Per-lead fan-out skipped: push_result has no per-lead detail.
+        return
 
-    # 7. Per-result error handling. push_leads.errors carries per-lead
-    #    rejections (auth / rate / validation). Each maps back to its
-    #    message_id via the lead's unique_key and triggers
-    #    mark_send_failed.
-    per_lead_errors = list(getattr(push_result, "errors", []) or []) if 'push_result' in locals() else []
+    # 7. Per-lead error fan-out (Issue #367). Buckets, tracked
+    #    SEPARATELY in the summary log so operators distinguish:
+    #      * matched → mark_send_failed (dispatching → bounced) + INFO
+    #      * single-batch fallback (1 claim + 1 error, no email match)
+    #          → mark_send_failed + WARNING
+    #      * unmatched in multi-batch → ``result.swallowed += 1`` +
+    #          WARNING + ``result.errors.append("push_leads_unmatched:<code>")``
+    #          (row stays dispatching; sweeper resets on next tick)
+    #      * mark_send_failed returns matched=False → WARNING +
+    #          ``result.errors.append("mark_send_failed_noop:<code>")``
+    await _handle_per_lead_errors(
+        push_result=push_result,
+        message_ids=message_ids,
+        emails_by_msg_id=emails_by_msg_id,
+        msg_repo=msg_repo,
+        result=result,
+    )
+
+
+async def _handle_per_lead_errors(
+    *,
+    push_result: Any,
+    message_ids: dict[str, str],
+    emails_by_msg_id: dict[str, str],
+    msg_repo: Any,
+    result: TickResult,
+) -> None:
+    """Issue #367 step-7 telemetry. Always log raw push_leads error
+    BEFORE reconciliation so operators see every failure regardless of
+    whether the email → message_id lookup succeeds."""
+    per_lead_errors = list(getattr(push_result, "errors", []) or [])
+    if not per_lead_errors:
+        return
+
+    # Reverse map: lower-cased email → unique_key. Casing differences
+    # between dispatcher response and our claimed batch shouldn't break
+    # reconciliation (previous code did a O(N) inner loop with case
+    # match — equivalent, but the reverse map makes the fallback
+    # discriminator below cheap).
+    email_to_uk: dict[str, str] = {}
+    for uk, mid in message_ids.items():
+        e = emails_by_msg_id.get(mid, "").strip().lower()
+        if e:
+            email_to_uk[e] = uk
+
+    single_batch = len(message_ids) == 1 and len(per_lead_errors) == 1
+
     for err in per_lead_errors:
-        err_email = (getattr(err, "email", "") or "").lower()
-        # Look up message_id from the email → unique_key mapping.
-        uk_match: Optional[str] = None
-        for uk, mid in message_ids.items():
-            if emails_by_msg_id.get(mid, "").lower() == err_email:
-                uk_match = uk
-                break
-        if not uk_match:
-            continue
-        msg_id = message_ids[uk_match]
-        await msg_repo.mark_send_failed(
-            msg_id,
-            error=f"{getattr(err, 'error_code', 'unknown')}:{getattr(err, 'error_message', '')[:120]}",
+        err_email = (getattr(err, "email", "") or "").strip().lower()
+        err_code = str(getattr(err, "error_code", "") or "unknown")
+        err_msg = str(getattr(err, "error_message", "") or "")[:200]
+
+        # ALWAYS log raw error first — operators see every failure even
+        # when reconciliation drops the row downstream.
+        logger.info(
+            "dispatch_tick push_leads per-lead error",
+            extra={
+                "err_email": err_email,
+                "error_code": err_code,
+                "error_message": err_msg,
+                "claimed_count": len(message_ids),
+            },
         )
 
-    result.elapsed_seconds = _monotonic_now() - started
-    return result
+        uk_match = email_to_uk.get(err_email)
+        used_fallback = False
+
+        if not uk_match and single_batch:
+            uk_match = next(iter(message_ids))
+            used_fallback = True
+            logger.warning(
+                "dispatch_tick push_leads error email %r not in claimed "
+                "batch; single-message fallback assigns to %s",
+                err_email, uk_match,
+                extra={
+                    "err_email": err_email,
+                    "claimed_emails": list(email_to_uk.keys()),
+                    "fallback_uk": uk_match,
+                    "error_code": err_code,
+                },
+            )
+
+        if not uk_match:
+            result.swallowed += 1
+            result.errors.append(f"push_leads_unmatched:{err_code}")
+            logger.warning(
+                "dispatch_tick push_leads error for unknown email; "
+                "cannot reconcile with claimed message_ids",
+                extra={
+                    "err_email": err_email,
+                    "error_code": err_code,
+                    "error_message": err_msg,
+                    "claimed_emails": sorted(email_to_uk.keys()),
+                },
+            )
+            continue
+
+        msg_id = message_ids[uk_match]
+        mark = await msg_repo.mark_send_failed(
+            msg_id,
+            error=f"{err_code}:{err_msg[:120]}",
+        )
+        if not mark.matched:
+            result.errors.append(f"mark_send_failed_noop:{err_code}")
+            logger.warning(
+                "dispatch_tick mark_send_failed matched 0 rows for "
+                "msg=%s — row may have changed state mid-tick",
+                msg_id,
+                extra={
+                    "lds_message_id": msg_id,
+                    "lead_unique_key": uk_match,
+                    "error_code": err_code,
+                    "mark_error": mark.error,
+                    "used_fallback": used_fallback,
+                },
+            )
+            continue
+
+        logger.info(
+            "dispatch_tick marked msg=%s bounced (send_failed)",
+            msg_id,
+            extra={
+                "lds_message_id": msg_id,
+                "lead_unique_key": uk_match,
+                "recipient_email": err_email,
+                "error_code": err_code,
+                "used_fallback": used_fallback,
+            },
+        )
 
 
 # ----- Internals -----------------------------------------------------------
