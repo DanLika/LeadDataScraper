@@ -403,7 +403,13 @@ jobs:
             | sudo tar -xz -C /usr/local/bin gitleaks
           gitleaks version
       - name: Scan full history
-        run: gitleaks detect --no-banner --redact --verbose --exit-code 1
+        # `--config .gitleaks.toml` mirrors ci.yml: extends default
+        # ruleset + allowlists triaged historical commit SHAs (rotated
+        # tokens + test fixtures). Exit-1 on any new commit. Daily
+        # cron still catches drift.
+        run: |
+          gitleaks detect --no-banner --redact --verbose --exit-code 1 \
+            --config .gitleaks.toml
 
   semgrep:
     name: semgrep (SAST)

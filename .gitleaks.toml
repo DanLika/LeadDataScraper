@@ -1,0 +1,57 @@
+# gitleaks config — extends the bundled default ruleset and allowlists
+# four historical commits whose findings have been triaged.
+#
+# Triage discipline preserved: any leak in any OTHER commit still
+# exits the scanner with code 1. To re-triage on a new finding,
+# rotate the credential at the provider FIRST, then add the
+# fresh-history SHA to `commits` below and commit alongside the
+# rotation evidence.
+#
+# Why config-allowlist instead of --baseline-path:
+# gitleaks v8.21.2 (pinned by ci.yml + security.yml) fails to match
+# baseline entries when File contains whitespace — observed on
+# "pythins scriptis from gogole collab.md" (4/8 entries un-suppressed
+# on PR #373 first CI run). The commit-SHA allowlist is independent
+# of File parsing and matches by Hash equality only.
+#
+# Bypass intent: this config block is the ONLY supported way to
+# acknowledge a known historical finding. Adding entries here is a
+# review-gated decision; the entries must reference the rotation
+# evidence in the related PR/commit message.
+
+title = "LeadDataScraper gitleaks config"
+
+[extend]
+# Pull in the bundled default ruleset (generic-api-key, jwt, aws-*,
+# gcp-*, slack-*, etc.). Without `useDefault` the scanner runs with
+# zero rules and reports zero findings — making the gate effectively
+# a no-op.
+useDefault = true
+
+[allowlist]
+description = "Historical leaks triaged in PR #373 (supersedes #316). Each commit's credential is either rotated at provider or is a test fixture."
+commits = [
+  # CRAWLBASE_NORMAL_TOKEN + CRAWLBASE_JS_TOKEN in
+  # "pythins scriptis from gogole collab.md" (lines 1307, 1308, 1936, 1937).
+  # Historical Google Colab notebook ingest. Tokens rotated at
+  # Crawlbase 2026-05-25; history retained (BFG-cleanup cost outweighs
+  # benefit for a key with zero live exposure).
+  "65da3ac3f759a8ea4c9f3d27d276833998e3987b",
+
+  # API_KEY = "test-unsubscribe-32-chars-long-secret-x" in
+  # tests/test_unsubscribe_endpoints.py:31. Test fixture, never a
+  # real credential. Squash-twin commits (same content, two SHAs
+  # from PR β squash + branch pair).
+  "5887c4f5da567b69ad0139a3227dd7b6f04efc82",
+  "05be51205333da4413d0cf79013ef912df9f2bcb",
+
+  # Anon Supabase publishable key in TEST_RESULTS.md:384. Public-by-
+  # design tier — gated by RLS deny-all on every table. Documented
+  # in a security testing report as part of the round-7 live exploit
+  # re-test (sb_publishable_aLXdwuimGfu1py4UR2riOA_55rU2n5h).
+  "3e210ef220c331120f35239229887cf962a0b1c5",
+
+  # Historical JWT fixture in tests/test_endpoints.py:21 from an
+  # early test pass.
+  "29bf9ee30e20cef8a112e50432533c8fffd393ad",
+]
