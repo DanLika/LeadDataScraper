@@ -11,6 +11,7 @@ What this covers:
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise. Supabase is mocked.
 """
+
 import asyncio
 import json
 import os
@@ -85,7 +86,13 @@ def _golden_leads() -> list[dict]:
                 "ssl_valid": False,
                 "pain_points": "Site served over HTTP — no SSL certificate. Visitors see a 'Not secure' warning.",
             },
-            "expected_keywords": ["ssl", "https", "secure", "certificate", "not secure"],
+            "expected_keywords": [
+                "ssl",
+                "https",
+                "secure",
+                "certificate",
+                "not secure",
+            ],
         },
         {
             "unique_key": "g3",
@@ -119,7 +126,16 @@ def _golden_leads() -> list[dict]:
                 "ssl_valid": False,
                 "pain_points": "Multiple critical SEO issues: no title, no meta description, no H1, no SSL.",
             },
-            "expected_keywords": ["ssl", "https", "title", "description", "h1", "heading", "seo", "score"],
+            "expected_keywords": [
+                "ssl",
+                "https",
+                "title",
+                "description",
+                "h1",
+                "heading",
+                "seo",
+                "score",
+            ],
         },
         {
             "unique_key": "g5",
@@ -170,7 +186,14 @@ def _golden_leads() -> list[dict]:
                 "ssl_valid": False,
                 "pain_points": "HTTP only — modern browsers warn visitors before page loads.",
             },
-            "expected_keywords": ["ssl", "https", "secure", "certificate", "warn", "browser"],
+            "expected_keywords": [
+                "ssl",
+                "https",
+                "secure",
+                "certificate",
+                "warn",
+                "browser",
+            ],
         },
         {
             "unique_key": "g8",
@@ -204,7 +227,14 @@ def _golden_leads() -> list[dict]:
                 "ssl_valid": True,
                 "pain_points": "Homepage missing H1 and meta description — both hurt organic ranking.",
             },
-            "expected_keywords": ["h1", "heading", "description", "meta", "ranking", "organic"],
+            "expected_keywords": [
+                "h1",
+                "heading",
+                "description",
+                "meta",
+                "ranking",
+                "organic",
+            ],
         },
         {
             "unique_key": "g10",
@@ -221,7 +251,16 @@ def _golden_leads() -> list[dict]:
                 "ssl_valid": False,
                 "pain_points": "Everything missing: no SSL, no title, no description, no H1. Site looks abandoned.",
             },
-            "expected_keywords": ["ssl", "https", "title", "description", "h1", "heading", "secure", "score"],
+            "expected_keywords": [
+                "ssl",
+                "https",
+                "title",
+                "description",
+                "h1",
+                "heading",
+                "secure",
+                "score",
+            ],
         },
     ]
 
@@ -242,10 +281,12 @@ def _matches_any(text: str, patterns: list[str]) -> list[str]:
 
 async def _generate_one(router, lead: dict) -> dict:
     """Call _generate_outreach_draft with lead_data bypass (no DB round-trip)."""
-    return await router._generate_outreach_draft({
-        "unique_key": lead["unique_key"],
-        "lead_data": lead,
-    })
+    return await router._generate_outreach_draft(
+        {
+            "unique_key": lead["unique_key"],
+            "lead_data": lead,
+        }
+    )
 
 
 async def _generate_all(router, leads: list[dict]) -> list[dict]:
@@ -259,14 +300,16 @@ def _build_judge_prompt(graded: list[dict]) -> str:
     """
     items = []
     for i, g in enumerate(graded, start=1):
-        items.append({
-            "id": i,
-            "company_name": g["lead"]["company_name"],
-            "business_details": g["lead"]["business_details"],
-            "audit_pain_points": g["lead"]["audit_results"]["pain_points"],
-            "draft_subject": g["draft"].get("subject", ""),
-            "draft_body": g["draft"].get("draft", ""),
-        })
+        items.append(
+            {
+                "id": i,
+                "company_name": g["lead"]["company_name"],
+                "business_details": g["lead"]["business_details"],
+                "audit_pain_points": g["lead"]["audit_results"]["pain_points"],
+                "draft_subject": g["draft"].get("subject", ""),
+                "draft_body": g["draft"].get("draft", ""),
+            }
+        )
     return (
         "You are grading cold outreach emails for personalization quality.\n"
         "For each draft, rate 1-10 (10 = highly personalized, references the\n"
@@ -299,19 +342,25 @@ class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
     """Live golden-set quality bar for /draft-outreach."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+            },
+        )
         self.env_patcher.start()
         self.supabase_patcher = patch("src.core.agentic_router.SupabaseHelper")
         self.supabase_patcher.start()
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
         # AgenticRouter caches GEMINI_API_KEY in __init__; sanity-check the
         # client wired up so failures here scream loud, not silent skip.
-        self.assertIsNotNone(self.router.client, "Gemini client must initialize for live golden-set")
+        self.assertIsNotNone(
+            self.router.client, "Gemini client must initialize for live golden-set"
+        )
 
         self.leads = _golden_leads()
         drafts = await _generate_all(self.router, self.leads)
@@ -331,7 +380,10 @@ class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
                 failures.append(f"{g['lead']['unique_key']}: {d['error']}")
             elif not (d.get("draft") or "").strip():
                 failures.append(f"{g['lead']['unique_key']}: empty draft body")
-        self.assertFalse(failures, "Generator returned errors / empty bodies:\n" + "\n".join(failures))
+        self.assertFalse(
+            failures,
+            "Generator returned errors / empty bodies:\n" + "\n".join(failures),
+        )
 
     def test_each_draft_personalized(self):
         """Body must reference first_name OR company_name."""
@@ -368,7 +420,9 @@ class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
             body = g["draft"].get("draft", "")
             wc = _word_count(body)
             if wc < 80 or wc > 200:
-                failures.append(f"{g['lead']['unique_key']}: word_count={wc} (need 80-200)")
+                failures.append(
+                    f"{g['lead']['unique_key']}: word_count={wc} (need 80-200)"
+                )
         self.assertFalse(failures, "Word count out of band:\n" + "\n".join(failures))
 
     def test_no_ai_disclaimers(self):
@@ -377,7 +431,9 @@ class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
             body = g["draft"].get("draft", "")
             hits = _matches_any(body, DISCLAIMER_PATTERNS)
             if hits:
-                failures.append(f"{g['lead']['unique_key']}: disclaimers matched {hits}")
+                failures.append(
+                    f"{g['lead']['unique_key']}: disclaimers matched {hits}"
+                )
         self.assertFalse(failures, "AI disclaimer leakage:\n" + "\n".join(failures))
 
     def test_no_placeholders(self):
@@ -388,13 +444,16 @@ class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
             body = g["draft"].get("draft", "")
             hits = _matches_any(body, PLACEHOLDER_PATTERNS)
             if hits:
-                failures.append(f"{g['lead']['unique_key']}: placeholders matched {hits}")
+                failures.append(
+                    f"{g['lead']['unique_key']}: placeholders matched {hits}"
+                )
         self.assertFalse(failures, "Placeholder leakage:\n" + "\n".join(failures))
 
     def test_judge_average_at_least_7_5(self):
         """Second Gemini call rates each draft 1-10. Average must be >= 7.5."""
         prompt = _build_judge_prompt(self.graded)
         from google.genai import types as genai_types
+
         resp = self.router.client.models.generate_content(
             model="gemini-flash-latest",
             contents=prompt,
@@ -412,8 +471,9 @@ class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
             self.fail(f"Judge JSON parse failed: {e}\nRaw: {raw[:500]}")
 
         self.assertEqual(
-            len(scores), len(self.graded),
-            f"Judge returned {len(scores)} scores for {len(self.graded)} drafts"
+            len(scores),
+            len(self.graded),
+            f"Judge returned {len(scores)} scores for {len(self.graded)} drafts",
         )
         for s in scores:
             self.assertGreaterEqual(s, 1)
@@ -424,8 +484,9 @@ class TestOutreachGoldenSet(unittest.IsolatedAsyncioTestCase):
             f"{g['lead']['unique_key']}={s}" for g, s in zip(self.graded, scores)
         )
         self.assertGreaterEqual(
-            avg, 7.5,
-            f"Judge average {avg:.2f} below 7.5 threshold. Per-draft: {breakdown}"
+            avg,
+            7.5,
+            f"Judge average {avg:.2f} below 7.5 threshold. Per-draft: {breakdown}",
         )
 
 

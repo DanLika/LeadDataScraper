@@ -25,6 +25,7 @@ and the ROLLBACK undoes them entirely. Even a network drop mid-test leaves
 the DB clean — Postgres rolls back any open transaction when the backend
 session ends. UUIDs prevent collisions between concurrent CI runs.
 """
+
 from __future__ import annotations
 
 import os
@@ -52,8 +53,7 @@ def _run_cascade_test(conn: psycopg.Connection) -> list[str]:
     )
     for _ in range(5):
         conn.execute(
-            "INSERT INTO campaign_messages (campaign_id, channel) "
-            "VALUES (%s, %s)",
+            "INSERT INTO campaign_messages (campaign_id, channel) VALUES (%s, %s)",
             (campaign_id, "email"),
         )
 
@@ -141,8 +141,9 @@ def main() -> int:
         # Unexpected DB error — surface it as a misconfiguration rather
         # than a silent pass. NOT a regular failure since the rollback
         # below still cleans up.
-        print(f"ERROR: unexpected DB error during integrity probe: {e}",
-              file=sys.stderr)
+        print(
+            f"ERROR: unexpected DB error during integrity probe: {e}", file=sys.stderr
+        )
         return 2
     finally:
         # ALWAYS roll back — never leave _integrity_test_* rows on prod.

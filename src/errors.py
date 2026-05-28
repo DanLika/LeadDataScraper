@@ -35,10 +35,12 @@ the parent classes match #195's shape exactly so the two changes merge
 cleanly regardless of order. Once #195 lands, the additional siblings
 land alongside without renaming or re-parenting anything here.
 """
+
 from __future__ import annotations
 
 
 # ---- Base hierarchy ----------------------------------------------
+
 
 class DomainError(Exception):
     """Base for every typed exception this application raises.
@@ -52,6 +54,7 @@ class DomainError(Exception):
 
 
 # ---- SEO audit domain --------------------------------------------
+
 
 class AuditError(DomainError):
     """Per-domain catch-all for SEO audit failures."""

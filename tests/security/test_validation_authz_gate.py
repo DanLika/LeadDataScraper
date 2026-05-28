@@ -9,6 +9,7 @@ should return a generic 403 to unauthenticated callers, and preserve the
 full Pydantic detail array only for authenticated ones (so the frontend's
 `detail[].msg` join keeps working for legitimate errors).
 """
+
 import os
 import sys
 import pytest
