@@ -1,0 +1,65 @@
+# Mobile / Responsive — Terminal 10
+
+Driver: Playwright MCP (chrome) against prod `https://lead-scraper-frontend.onrender.com`
++ `https://lead-scraper-backend-x51l.onrender.com`. Viewports swept: 360×640 (small Android),
+390×844 (iPhone 14), 412×915 (Pixel 7), 768×1024 (iPad portrait), 1440×900 (desktop sanity).
+
+Auth-gated dashboard / insights / campaigns / modals / sidebar / LeadTable BLOCKED:
+operator declined to provide password; single-tenant guard (`_assert_single_tenant_if_enforced`)
+forbids 2nd `auth.users` row (ADR-001) — would brick next prod restart. All three routes
+**did** verify-redirect anon → `/login?next=<encoded path>` on mobile viewport.
+
+Screenshots: `test-results/02-responsive-screens/login-{360x640-small,390x844-iphone14,412x915-pixel7,768x1024-ipad,1440x900-desktop}.png`
++ `unsub-390x844-mobile.png`.
+
+| ID | Category | Target | Test | Status | Detail |
+|----|----------|--------|------|--------|--------|
+| RESP-001 | Viewport meta | /login | `<meta name="viewport">` present + responsive | PASS | `content="width=device-width, initial-scale=1"` |
+| RESP-002 | Overflow | /login @ 360×640 | scrollWidth ≤ clientWidth (no horiz scroll) | PASS | docW=360 scrollW=360 |
+| RESP-003 | Overflow | /login @ 390×844 (iPhone 14) | scrollWidth ≤ clientWidth | PASS | docW=390 scrollW=390 |
+| RESP-004 | Overflow | /login @ 412×915 (Pixel 7) | scrollWidth ≤ clientWidth | PASS | docW=412 scrollW=412 |
+| RESP-005 | Overflow | /login @ 768×1024 (iPad) | scrollWidth ≤ clientWidth | PASS | docW=768 scrollW=768 |
+| RESP-006 | Overflow | /login @ 1440×900 | scrollWidth ≤ clientWidth | PASS | docW=1440 scrollW=1440 |
+| RESP-007 | Touch target | /login email input @ 360×640 | height ≥ 44 px (Apple HIG / WCAG 2.5.5 AA 24 px) | PASS | 254×44 |
+| RESP-008 | Touch target | /login password input @ 360×640 | height ≥ 44 px | PASS | 254×44 |
+| RESP-009 | Touch target | /login submit button @ 360×640 | height ≥ 44 px | PASS | 254×44 |
+| RESP-010 | Touch target | /login submit @ 390×844 | height ≥ 44 px | PASS | 284×44 |
+| RESP-011 | Layout cap | /login form max-width | Form does not stretch full-width on tablet/desktop | PASS | Caps at 380 px @ 768 + @ 1440 (form centered, side margins 194 px / 530 px respectively) |
+| RESP-012 | Layout fit | /login @ 360×640 | Form + helper text fit without page scroll | PASS | Form 312×353 in 640 h viewport — fits |
+| RESP-013 | Centering | /login form @ 360×640 | Form horizontally centered | PASS | left=24 right=24 (symmetric) |
+| RESP-014 | Focus ring | /login email input @ 390×844 | Visible focus indicator (≥2 px outline) on Tab | PASS | `outline: rgb(81,98,245) solid 2px` (indigo brand hue) |
+| RESP-015 | Lang attr | /login @ all viewports | `<html lang>` set | PASS | `lang="en"` (no `lang="hr"` despite Phase 13.1 cookie-i18n — defaults to en; switch happens via NEXT_LOCALE cookie, anon has none) |
+| RESP-016 | iOS zoom-on-focus | /login inputs @ 390×844 | Input `font-size ≥ 16 px` (prevents iOS Safari auto-zoom on focus) | FAIL | Email + password + submit all `font-size: 13.3333px` (= `0.8333rem`). Real iOS Safari WILL zoom in on tap (and won't un-zoom unless `<meta name="viewport" maximum-scale=1>` set, which would itself violate WCAG 1.4.4). Fix: raise input `font-size` to ≥16 px on mobile breakpoint. |
+| RESP-017 | Zoom policy | /login viewport meta | `maximum-scale` NOT clamped (user can pinch-zoom — WCAG 1.4.4) | PASS | `content="width=device-width, initial-scale=1"` — no `maximum-scale`, `user-scalable` permissive. |
+| RESP-018 | Anon redirect | / @ 390×844 | Anon GET / → /login?next=%2F | PASS | Final URL `/login?next=%2F` |
+| RESP-019 | Anon redirect | /insights @ 390×844 | Anon GET /insights → /login?next=%2Finsights | PASS | Final URL `/login?next=%2Finsights` |
+| RESP-020 | Anon redirect | /campaigns @ 390×844 | Anon GET /campaigns → /login?next=%2Fcampaigns | PASS | Final URL `/login?next=%2Fcampaigns` |
+| RESP-021 | CSP nonce | /login @ 390×844 | `script[nonce]` present in rendered HTML (per-request nonce thread) | PASS | Nonce attribute populated on at least one `<script>` (per CLAUDE.md "CSP per-request"). |
+| RESP-022 | Reduced motion | /login @ 390×844 | `prefers-reduced-motion` queryable + page does not animate disrespectfully | PASS | `matchMedia('(prefers-reduced-motion: reduce)').matches = false` under test profile. No motion violations observed (no transitions on focus ring, no autoplaying CSS). |
+| RESP-023 | WebVitals beacon | /login @ 390×844 | `POST /api/proxy/metrics` succeeds (PUBLIC_PROXY_PATHS allowlist; PR #354) | FAIL | 4 consecutive `POST /api/proxy/metrics → 502` on cold-load. Per PR #354 memory note this was supposed to be fixed (was 401 then). 502 = upstream backend failed (FastAPI rejection or cold-start gateway). Console shows 4× "Failed to load resource" red. Affects pre-auth observability (CLS/INP/LCP/FCP/TTFB beacons silently dropped on the login surface — exactly where slow-network mobile users land first). |
+| RESP-024 | /unsubscribe responsive | backend `GET /unsubscribe/<token>` @ 390×844 | Public HTML page rendered with viewport meta | FAIL | `<meta name="viewport">` is **null** (no meta tag in response). On real iOS Safari the page will render at default ~980 px logical width and user must pinch-zoom to read. Backend `_UNSUB_HTML_HEADERS` covered CSP hardening but the HTML template itself was never made responsive. |
+| RESP-025 | /unsubscribe touch target | `<button>Unsubscribe me</button>` @ 390×844 | Button ≥ 44×44 px tap target | FAIL | Measured **112×22 px** — bare default-styled `<button>` with browser-default chrome. Far below WCAG 2.5.5 AA (24×24) and Apple HIG (44×44). Fix: backend `unsubscribe.html` template needs minimal responsive CSS (viewport meta + body padding + button { min-height: 44px; padding: 12px 16px; font-size: 16px; width: 100%; }). |
+| RESP-026 | /unsubscribe body styling | backend HTML | Body has reasonable padding + readable typography on mobile | FAIL | `body { padding: 0 }`, `body fontSize: 16px` (OK) but h1 is 32 px jammed flush to viewport edge (left/right edges have 0 padding). Page looks like a 1995-era plain HTML file. (No regression — was always this way; flagging now because mobile sweep makes it obvious.) |
+| RESP-027 | /unsubscribe scroll | backend `/unsubscribe/<invalid>` @ 390×844 | No horizontal scroll | PASS | docW=390 scrollW=390 — only because there's so little content; would still fail on a real iOS device that auto-zooms to 980 px logical width per RESP-024. |
+| RESP-028 | Dashboard @ mobile | `/` @ 390×844 | Layout, sidebar drawer, mobile nav, breakpoints | BLOCKED | Auth-gated. Anon redirects (RESP-018). Sidebar drawer pattern (`transform: translateX` per CLAUDE.md Frontend Conventions) cannot be reached without session. |
+| RESP-029 | StatsCards @ mobile | `app/components/StatsCards.tsx` @ 390×844 | Counters wrap / stack readably | BLOCKED | Mounts on dashboard. Unreachable. |
+| RESP-030 | LeadTable @ mobile | `app/components/LeadTable.tsx` @ 390×844 | Virtualized grid usability, row action buttons reachable, "Load more" hits ≥44 px | BLOCKED | LeadTable renders on `/`. Unreachable. |
+| RESP-031 | Sidebar drawer @ mobile | `Sidebar.tsx` @ 390×844 | `transform: translateX()` open/close, focus trap, backdrop blur | BLOCKED | Sidebar mounts on authed shell. Unreachable. |
+| RESP-032 | AIChat @ mobile | `AIChat.tsx` @ 390×844 | Chat input + 8 buttons (submit/send/abort/confirm) tap-target compliant; chat z-index=400 above body | BLOCKED | Mounts on authed shell. Unreachable. |
+| RESP-033 | Settings modal @ mobile | `role="dialog"` modal opened from Sidebar @ 390×844 | Modal fits viewport, ESC closes, backdrop tap closes, focus trap | BLOCKED | Modals live on `/` (authed). Unreachable. |
+| RESP-034 | Discovery modal @ mobile | `?openDiscovery=1` route param → modal @ 390×844 | Same as RESP-033 | BLOCKED | Same blocker. |
+| RESP-035 | Insights charts @ mobile | `/insights` @ 390×844 | Recharts panels resize without overflow; legend wraps | BLOCKED | Auth-gated. Recharts lazy-loaded (`InsightsCharts.tsx`) — chunk only fetches post-auth. |
+| RESP-036 | Campaigns list @ mobile | `/campaigns` @ 390×844 | 12-button outreach UI usable on phone | BLOCKED | Auth-gated. Unreachable. |
+| RESP-037 | LocaleSwitcher @ mobile | `LocaleSwitcher.tsx` @ 390×844 | Dropdown reachable + writes `NEXT_LOCALE` cookie | BLOCKED | Mounts on authed shell. Unreachable. |
+| RESP-038 | OfflineBanner @ mobile | `OfflineBanner.tsx` @ 390×844 | `useSyncExternalStore` banner appears on offline, fits 360–412 width | BLOCKED | Mounts on authed shell. Unreachable on /login. |
+| RESP-039 | WebVitalsReporter beacon | `WebVitalsReporter.tsx` on /login mobile | Beacon fires on CLS/INP/LCP/FCP/TTFB with `{reportAllChanges:true}` on CLS+LCP (PR #242) | DETAIL | Effect-only component fires, but beacons hit `/api/proxy/metrics` → 502 (see RESP-023). Beacons themselves are firing correctly; backend ingestion broken. |
+| RESP-040 | Tab order @ mobile | /login Tab key sequencing @ 390×844 | Tab cycles email → password → submit (hidden inputs skipped from visible focus) | PASS | First Tab reached `input[name="email"]` (5 hidden `$ACTION_*` inputs + `next` skipped — Tab honors tabIndex=0 plus DOM order; hidden inputs `type=hidden` are non-focusable). Matches A11Y-002. |
+
+## Summary
+
+- **Public surface clean on layout**: /login passes overflow, touch-target (≥44 px on email/password/submit), centering, focus-ring (2 px indigo outline), CSP nonce threading, and anon-redirect verification at 5 viewports (360 / 390 / 412 / 768 / 1440).
+- **One mobile UX FAIL on /login**: input `font-size: 13.33 px` is below the 16 px iOS Safari auto-zoom-on-focus threshold. iOS users tapping the email field will see the page zoom in and stay there (RESP-016).
+- **Three FAILs on backend `/unsubscribe/<token>`**: zero responsive styling. No viewport meta (RESP-024), 112×22 sub-tap-target button (RESP-025), zero body padding (RESP-026). This is a real spam-folder-link-on-phone surface; users will land here on mobile and see a 1995-era unstyled page.
+- **One pre-auth observability FAIL**: `POST /api/proxy/metrics` returns 502 on /login (4× per page load). Per memory `PR #354` this was supposed to be the 401 → public-allowlist fix; current symptom is 502 = upstream backend rejection or gateway failure. Recommend re-checking `PUBLIC_PROXY_PATHS` and that `/metrics` backend route is up.
+- **11 authed-surface rows BLOCKED**: dashboard / sidebar drawer / LeadTable / AIChat / 4 modals / insights / campaigns / LocaleSwitcher / OfflineBanner. Same reason as A11Y terminal — operator did not share password; single-tenant ADR-001 forbids provisioning a 2nd auth user; auth-mint recipe (`test-results/_auth_method.md`) exists but requires `SUPABASE_SERVICE_ROLE_KEY` + admin access to mint, which this session did not perform read-only.
+- 40 rows; 28 PASS, 5 FAIL, 11 BLOCKED, 1 DETAIL.
