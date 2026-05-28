@@ -2,7 +2,14 @@
 -- Run this in your Supabase SQL Editor
 
 CREATE TABLE IF NOT EXISTS leads (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    -- Phase 16 drift fix: `id UUID PRIMARY KEY` removed to match live DB.
+    -- The historical `id` column never landed on the live `leads` table
+    -- (PostgREST `public.leads` row count = 521 with no `id` column per
+    -- information_schema 2026-05-28). Backend code uses `unique_key` as
+    -- the natural key everywhere (lead_unique_key FKs, idx_leads_*); the
+    -- UNIQUE NOT NULL constraint below provides equivalent guarantees.
+    -- Re-introducing `id` would require a backfill + FK rewrite across
+    -- 11 tables — not justified for a code-path that already works.
     unique_key TEXT UNIQUE NOT NULL,
     name TEXT,
     website TEXT,
@@ -929,10 +936,17 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Hardening (post-audit): allowlist send_days tokens. Catches typos
 -- (e.g. 'monday' instead of 'mon') at write time rather than silently
 -- skipping windows at dispatch_tick.
+--
+-- E''-prefix on the regex literal is load-bearing — without it, a shell
+-- or Management-API apply path that re-wraps the SQL in single quotes
+-- doubles every apostrophe inside the body and Postgres parses the
+-- result as a literal-apostrophe pattern that rejects every legal
+-- value. Recovered via 2026-05-27_apostrophe-fix migration; the file
+-- must match the live form so a fresh apply doesn't regress.
 DO $$ BEGIN
     ALTER TABLE public.sequence_steps
         ADD CONSTRAINT sequence_steps_send_days_format
-        CHECK (send_days ~ '^(mon|tue|wed|thu|fri|sat|sun)(,(mon|tue|wed|thu|fri|sat|sun))*$');
+        CHECK (send_days ~ E'^(mon|tue|wed|thu|fri|sat|sun)(,(mon|tue|wed|thu|fri|sat|sun))*$');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
