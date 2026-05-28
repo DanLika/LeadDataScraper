@@ -82,9 +82,12 @@ function LoginForm() {
             name="email"
             autoComplete="email"
             required
+            // fontSize: 16 prevents iOS Safari auto-zoom on focus (RESP-016).
+            // <16px triggers zoom + sticky viewport that doesn't reset on blur.
             style={{
               padding: '10px 12px',
               minHeight: 44,
+              fontSize: 16,
               background: 'var(--surface-elevated, #1c1c26)',
               color: 'inherit',
               border: '1px solid var(--border, #2a2a36)',
@@ -99,9 +102,11 @@ function LoginForm() {
             name="password"
             autoComplete="current-password"
             required
+            // fontSize: 16 — see email input comment above (iOS zoom-on-focus guard).
             style={{
               padding: '10px 12px',
               minHeight: 44,
+              fontSize: 16,
               background: 'var(--surface-elevated, #1c1c26)',
               color: 'inherit',
               border: '1px solid var(--border, #2a2a36)',
