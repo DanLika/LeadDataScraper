@@ -64,7 +64,37 @@ Extracted from `CLAUDE.md` (2026-05-26 shrink; original ~164k chars). Restored t
   EXISTS` for table-level CHECKs). `schema_drift_check.py` has an
   `EXPECTED_CHECK_CONSTRAINTS` allowlist + `check_check_constraints()`
   asserting parity in both directions (missing-in-DB **and**
-  undeclared-in-schema). 10 constraints currently locked in:
+  undeclared-in-schema).
+
+  > **CHECK-allowlist pairing rule (PR #377).** Adding a CHECK to
+  > `supabase_schema.sql` REQUIRES appending its name to the
+  > `EXPECTED_CHECK_CONSTRAINTS` dict in `schema_drift_check.py` in
+  > the SAME PR. The drift check compares live DB `pg_constraint`
+  > names against the Python dict, NOT against parsed SQL. Forget
+  > the dict update → every subsequent PR's `Schema drift + RLS
+  > posture` job fails with "CHECK constraints present in DB but
+  > not declared in schema", even though the SQL file declares
+  > them. PRs #353/#356/#366 each fell into this trap. PR #377
+  > retroactively appended the 6 missing names: `campaign_messages_bounce_reason_size`,
+  > `webhook_events_event_id_size`, `sequence_steps_window_ordered`,
+  > `sequence_steps_send_days_format`, `sequence_variants_body_size`,
+  > `sequence_variants_content_type_allowed`.
+
+  > **Regex / IN-list CHECK literal trap.** Body literals containing
+  > apostrophes (regex anchors, `IN ('text','html')`-style lists) MUST
+  > use the `E''`-prefix on the regex literal so Postgres' string
+  > parser treats it as an escape-string. Without the prefix, any
+  > apply path that re-wraps the SQL in single quotes (shell `psql
+  > -c`, Management API SQL endpoint, etc.) doubles every internal
+  > apostrophe and Postgres parses the result as a literal-apostrophe
+  > pattern that rejects every legal value — including the column
+  > default. Recovered as PR #366 + audit-trail migration
+  > `scripts/migrations/2026-05-27_apostrophe-fix-and-leads-last-name.sql`.
+
+  10 constraints currently locked in (pre-Phase-14/15; the seven
+  Phase 14/15 hardening additions live in the `EXPECTED_CHECK_CONSTRAINTS`
+  dict but are not enumerated here — see the dict for the canonical
+  list):
   - `leads_seo_score_range` / `leads_outreach_score_range` — 0..100
     inclusive, NULL allowed.
   - `leads_audit_status_allowed` — wide allowlist matching producer
