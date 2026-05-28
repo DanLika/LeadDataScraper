@@ -89,7 +89,7 @@ export default function Sidebar({
     let timeout: NodeJS.Timeout;
     const check = () => {
       clearTimeout(timeout);
-      timeout = setTimeout(() => setIsMobile(window.innerWidth <= 1024), 150);
+      timeout = setTimeout(() => setIsMobile(window.innerWidth < 1024), 150);
     };
     check();
     window.addEventListener('resize', check);

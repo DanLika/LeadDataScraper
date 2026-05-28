@@ -999,7 +999,7 @@ select:focus-visible {
 }
 
 /* Tablet & Laptop specific overrides (NOT mobile - mobile uses drawer) */
-@media (max-width: 1280px) and (min-width: 1025px) {
+@media (max-width: 1280px) and (min-width: 1024px) {
   /* Force sidebar to act as collapsed if it's not explicitly marked as expanded by user */
   .sidebar.expanded:not(.user-expanded),
   .sidebar:not(.expanded):not(.collapsed) {
@@ -1037,7 +1037,7 @@ select:focus-visible {
   animation: fadeIn 0.3s ease;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1023px) {
   .dashboard-container {
     flex-direction: column;
   }
@@ -1154,19 +1154,12 @@ select:focus-visible {
 
   .header-actions {
     width: 100%;
-    overflow-x: auto;
-    padding-bottom: 0.5rem;
-    -webkit-overflow-scrolling: touch;
-    flex-wrap: nowrap;
-    scrollbar-width: none;
-  }
-
-  .header-actions::-webkit-scrollbar {
-    display: none;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
   }
 
   .header-actions .btn-group {
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap;
   }
 
   .btn-primary, .btn-secondary {
@@ -1231,10 +1224,18 @@ select:focus-visible {
   inset: 0;
   background: var(--modal-backdrop-bg);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  overflow-y: auto;
   z-index: var(--z-modal-backdrop);
-  padding: 1rem;
+  padding: clamp(1rem, 4vh, 4rem) 1rem;
+}
+
+.modal-backdrop > .card,
+.modal-backdrop > .modal-content {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  margin-block: auto;
 }
 
 /* Modal content */

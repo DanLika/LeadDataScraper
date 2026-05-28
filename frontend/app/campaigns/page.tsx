@@ -261,7 +261,7 @@ export default function CampaignsPage() {
               <Link
                 href="/"
                 aria-label="Back to dashboard"
-                style={{ color: 'var(--text-muted)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                style={{ color: 'var(--text-muted)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.625rem', minHeight: '44px', minWidth: '44px', borderRadius: '10px' }}
               >
                 <ArrowLeft size={20} aria-hidden="true" />
                 <Shield size={20} aria-hidden="true" />
@@ -496,7 +496,7 @@ export default function CampaignsPage() {
                 <p style={{ color: 'var(--text-muted)', marginTop: '1rem' }}>Loading campaigns...</p>
               </div>
             ) : campaigns.length === 0 ? (
-              <div className="card" style={{ textAlign: 'center', padding: '4rem' }}>
+              <div className="card" style={{ textAlign: 'center', padding: 'clamp(2rem, 6vw, 4rem)', marginBottom: '6rem' }}>
                 <Mail size={48} style={{ color: 'var(--text-dim)', marginBottom: '1rem' }} />
                 <h2 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Campaigns Yet</h2>
                 <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Create your first outreach campaign to start reaching leads.</p>
