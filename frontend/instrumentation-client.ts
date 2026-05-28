@@ -18,8 +18,15 @@ if (dsn) {
     tracesSampleRate: 0.1,   // 10% transaction sampling for perf
     sendDefaultPii: false,
     maxBreadcrumbs: 50,
-    // Tunnel client beacons through /monitoring (configured in next.config.ts)
-    // so ad-blockers don't drop ingestion. Same-origin so no CSP change.
+    // Tunnel client beacons through same-origin /monitoring so ad-blockers
+    // (uBlock / Brave / DDG / 1Blocker) don't match `*.sentry.io` and drop
+    // them. `withSentryConfig.tunnelRoute` in `next.config.ts` ALSO sets
+    // this via build-time env injection — keeping it explicit here is
+    // belt-and-braces, since the auto-injection was empirically failing
+    // in prod (RESP-044, /monitoring → 404). Handler:
+    // `app/monitoring/route.ts`. Same-origin POST → CSP `connect-src
+    // 'self'` already permits it; no header change needed.
+    tunnel: '/monitoring',
   });
 }
 
