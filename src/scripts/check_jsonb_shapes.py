@@ -39,6 +39,7 @@ Exit codes:
     1 = at least one row violates an expected shape
     2 = misconfigured run (missing DATABASE_URL, can't reach DB, etc.)
 """
+
 from __future__ import annotations
 
 import os
@@ -64,8 +65,7 @@ class ShapeCheck:
 
 CHECKS: tuple[ShapeCheck, ...] = (
     ShapeCheck(
-        label="leads.audit_results missing required keys "
-              "(Completed audits only)",
+        label="leads.audit_results missing required keys (Completed audits only)",
         sql="""
             SELECT unique_key,
                    array(SELECT k FROM unnest(
@@ -83,8 +83,7 @@ CHECKS: tuple[ShapeCheck, ...] = (
         """,
     ),
     ShapeCheck(
-        label="leads.audit_results value-type drift "
-              "(Completed audits only)",
+        label="leads.audit_results value-type drift (Completed audits only)",
         sql="""
             SELECT unique_key,
                    jsonb_typeof(audit_results->'tech_flags') AS tech_flags_t,
@@ -104,7 +103,7 @@ CHECKS: tuple[ShapeCheck, ...] = (
     ),
     ShapeCheck(
         label="orchestration_jobs.filters shape drift "
-              "(must be {type} OR {query+location})",
+        "(must be {type} OR {query+location})",
         sql="""
             SELECT id, filters
             FROM orchestration_jobs
@@ -164,8 +163,7 @@ def main() -> int:
         for check in CHECKS:
             failures.extend(_run_check(conn, check))
     except psycopg.Error as e:
-        print(f"ERROR: unexpected DB error during JSONB probe: {e}",
-              file=sys.stderr)
+        print(f"ERROR: unexpected DB error during JSONB probe: {e}", file=sys.stderr)
         return 2
     finally:
         conn.close()

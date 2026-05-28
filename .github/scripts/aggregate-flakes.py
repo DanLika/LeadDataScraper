@@ -150,8 +150,9 @@ def _build_issue_body(flakes: Iterable[dict[str, Any]], gate_days: int) -> str:
         "## Active gate (block-merge if PR touches these files)\n",
     ]
     if not gate_active:
-        lines.append("_No tests flagged in the last "
-                     f"{gate_days} days. Gate inactive._\n")
+        lines.append(
+            f"_No tests flagged in the last {gate_days} days. Gate inactive._\n"
+        )
     else:
         lines.append("| Test | File | First seen | Last seen | Occurrences |")
         lines.append("|---|---|---|---|---|")
@@ -195,17 +196,28 @@ def _build_issue_body(flakes: Iterable[dict[str, Any]], gate_days: int) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reports", nargs="+", required=True, type=Path,
-                        help="pytest-json-report files from the parallel runs")
-    parser.add_argument("--previous", type=Path,
-                        help="prior flaky-tests.json to merge with (optional)")
+    parser.add_argument(
+        "--reports",
+        nargs="+",
+        required=True,
+        type=Path,
+        help="pytest-json-report files from the parallel runs",
+    )
+    parser.add_argument(
+        "--previous", type=Path, help="prior flaky-tests.json to merge with (optional)"
+    )
     parser.add_argument("--retention-days", type=int, default=14)
-    parser.add_argument("--gate-days", type=int, default=7,
-                        help="window used by ci.yml flaky-gate")
-    parser.add_argument("--out", type=Path, required=True,
-                        help="path to write flaky-tests.json")
-    parser.add_argument("--issue-body-out", type=Path,
-                        help="optional path to write the markdown issue body")
+    parser.add_argument(
+        "--gate-days", type=int, default=7, help="window used by ci.yml flaky-gate"
+    )
+    parser.add_argument(
+        "--out", type=Path, required=True, help="path to write flaky-tests.json"
+    )
+    parser.add_argument(
+        "--issue-body-out",
+        type=Path,
+        help="optional path to write the markdown issue body",
+    )
     args = parser.parse_args()
 
     runs = [_load_report(p) for p in args.reports]
@@ -216,8 +228,10 @@ def main() -> int:
         try:
             previous = json.loads(args.previous.read_text())
         except json.JSONDecodeError:
-            print(f"Warning: {args.previous} not valid JSON; starting fresh",
-                  file=sys.stderr)
+            print(
+                f"Warning: {args.previous} not valid JSON; starting fresh",
+                file=sys.stderr,
+            )
 
     flakes = _merge_with_history(todays, previous, args.retention_days)
 
@@ -231,9 +245,7 @@ def main() -> int:
     print(f"Wrote {len(flakes)} flake entries to {args.out}")
 
     if args.issue_body_out:
-        args.issue_body_out.write_text(
-            _build_issue_body(flakes, args.gate_days)
-        )
+        args.issue_body_out.write_text(_build_issue_body(flakes, args.gate_days))
 
     return 0
 

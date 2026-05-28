@@ -17,11 +17,13 @@ in-flight via a semaphore so we don't trip flash RPM ceilings.
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise.
 """
+
 import asyncio
 import os
 import re
 import sys
 import unittest
+import pytest
 from collections import Counter
 from itertools import combinations
 from typing import Iterable
@@ -42,14 +44,50 @@ CONCURRENCY = 10
 # a category, ANY of its tokens triggers a hit for that run.
 PAIN_CATEGORIES: dict[str, tuple[str, ...]] = {
     "ssl": ("ssl", "https", "certificate", "tls", "not secure", "insecure"),
-    "mobile": ("mobile", "viewport", "responsive", "mobile-friendly", "mobile friendly"),
-    "analytics": ("analytics", "ga4", "google analytics", "gtm", "tag manager", "tracking"),
+    "mobile": (
+        "mobile",
+        "viewport",
+        "responsive",
+        "mobile-friendly",
+        "mobile friendly",
+    ),
+    "analytics": (
+        "analytics",
+        "ga4",
+        "google analytics",
+        "gtm",
+        "tag manager",
+        "tracking",
+    ),
     "pixel": ("pixel", "facebook pixel", "retargeting", "ad tracking"),
     "performance": ("slow", "latency", "load time", "performance", "speed", "loading"),
     "cms": ("shopify", "wordpress", "webflow", "wix", "squarespace", "cms", "platform"),
-    "seo": ("sitemap", "robots.txt", "title tag", "meta description", "h1", "heading", "ranking", "seo"),
-    "social": ("social media", "instagram", "facebook page", "linkedin", "twitter", "social presence"),
-    "design": ("outdated", "design", "layout", "modern design", "user experience", "ux"),
+    "seo": (
+        "sitemap",
+        "robots.txt",
+        "title tag",
+        "meta description",
+        "h1",
+        "heading",
+        "ranking",
+        "seo",
+    ),
+    "social": (
+        "social media",
+        "instagram",
+        "facebook page",
+        "linkedin",
+        "twitter",
+        "social presence",
+    ),
+    "design": (
+        "outdated",
+        "design",
+        "layout",
+        "modern design",
+        "user experience",
+        "ux",
+    ),
     "portal": ("portal", "client dashboard", "login area", "self-service"),
     "structure": ("structure", "value proposition", "messaging", "copy"),
     "footprint": ("digital footprint", "online presence", "discoverability"),
@@ -241,17 +279,22 @@ async def _analyze_once(hunter, lead: dict, sem: asyncio.Semaphore) -> str:
         )
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestPainPointConsistency(unittest.IsolatedAsyncioTestCase):
     """Per-lead stability + cross-lead divergence for analyze_pain_points_async."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+            },
+        )
         self.env_patcher.start()
 
         from src.processors.leadhunter import LeadHunter
+
         self.hunter = LeadHunter()
         self.assertIsNotNone(self.hunter.client, "Gemini client must initialize")
 
@@ -308,8 +351,13 @@ class TestPainPointConsistency(unittest.IsolatedAsyncioTestCase):
             for i, top in enumerate(per_run):
                 if not top:
                     text = self.outputs_by_lead[lead_id][i]
-                    failures.append(f"{lead_id}#{i}: no category hit  text={text[:140]!r}")
-        self.assertFalse(failures, "Runs producing no recognised pain category:\n" + "\n".join(failures))
+                    failures.append(
+                        f"{lead_id}#{i}: no category hit  text={text[:140]!r}"
+                    )
+        self.assertFalse(
+            failures,
+            "Runs producing no recognised pain category:\n" + "\n".join(failures),
+        )
 
     def test_intra_lead_stability(self):
         """Same input × 10 runs → pairwise top-K Jaccard average >= 0.60."""
@@ -346,7 +394,7 @@ class TestPainPointConsistency(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(
             failures,
             "Cross-lead overlap too high — model may be ignoring inputs:\n"
-            + "\n".join(failures)
+            + "\n".join(failures),
         )
 
 

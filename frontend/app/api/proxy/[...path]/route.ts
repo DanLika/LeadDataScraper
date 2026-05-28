@@ -43,6 +43,18 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // exact on the joined dynamic segments (no query string, no prefixing).
 const ADMIN_TOKEN_PATHS = new Set<string>([
   'leads/clear',
+  'leads/demo',
+  'operator/account',
+  'admin/gemini-budget',
+]);
+
+// Paths that skip the session-auth gate. Mirror middleware.ts public-path
+// allowlist so XHR/fetch traffic (which bypasses middleware redirect) can
+// still reach truly-public backend endpoints. Match is exact on the joined
+// dynamic segments. Keep this list TIGHT — every entry is unauthenticated
+// access to the upstream API with the server-side X-API-Key injected.
+const PUBLIC_PROXY_PATHS = new Set<string>([
+  'metrics',  // WebVitals beacons fire pre-login from any HTML route
 ]);
 
 // Match backend `/upload`'s MAX_UPLOAD_BYTES (50 MB). Defense-in-depth
@@ -91,20 +103,29 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     );
   }
 
+  const { path } = await ctx.params;
+  const joinedPath = (path || []).join('/');
+  const isPublicPath = PUBLIC_PROXY_PATHS.has(joinedPath);
+
   // 1) Auth gate. Middleware already redirects HTML pages, but proxy traffic
   // (fetch/XHR) skips the redirect — so we re-check the session here. Without
   // this, anyone who can reach the proxy URL gets the server-side API key
-  // attached to every request.
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401, headers: NO_STORE_HEADERS });
+  // attached to every request. PUBLIC_PROXY_PATHS opts specific paths out of
+  // this re-check (mirrors middleware.ts public-path allowlist) so beacons
+  // like /api/proxy/metrics fire pre-login without a 401.
+  if (!isPublicPath) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401, headers: NO_STORE_HEADERS });
+    }
   }
 
   // 2) Origin gate for state-changing methods — defence-in-depth CSRF block.
   // Modern browsers always send Origin on cross-origin POST/PUT/DELETE; reject
   // both mismatched and missing Origin so we fail closed on edge-case clients.
-  // Cookies are SameSite=Lax already; this is belt-and-braces.
+  // Cookies are SameSite=Lax already; this is belt-and-braces. Public paths
+  // STILL get this gate — anonymous != cross-origin.
   if (!SAFE_METHODS.has(req.method.toUpperCase())) {
     const origin = req.headers.get('origin');
     if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
@@ -112,7 +133,6 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     }
   }
 
-  const { path } = await ctx.params;
   const subPath = (path || []).map(encodeURIComponent).join('/');
   const search = req.nextUrl.search || '';
   const target = `${BACKEND_URL.replace(/\/$/, '')}/${subPath}${search}`;
@@ -130,7 +150,6 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   // ADMIN_TOKEN_PATHS at the top of this file — exact match on the
   // joined dynamic segments, so prefix collisions like `leads/clear-cache`
   // can't accidentally inherit the admin token.
-  const joinedPath = (path || []).join('/');
   if (ADMIN_TOKEN_PATHS.has(joinedPath)) {
     const adminToken = process.env.ADMIN_TOKEN || '';
     if (adminToken) headers.set('X-Admin-Token', adminToken);

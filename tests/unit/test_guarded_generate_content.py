@@ -21,6 +21,24 @@ from src.utils import gemini_call  # noqa: E402
 from src.utils.gemini_budget import BudgetExceededError  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _restore_real_budget_gate(monkeypatch):
+    """The suite-wide ``tests/conftest.py`` neuters
+    ``gemini_call.check_budget`` + ``record_usage`` to no-ops so other
+    tests don't trip the daily-token ceiling. This file *exercises*
+    the gate itself — restore the originals (stashed on the module by
+    the conftest as ``_real_check_budget`` / ``_real_record_usage``)
+    for the duration of each test in this file, then ``monkeypatch``
+    auto-rolls back on teardown.
+    """
+    real_check = getattr(gemini_call, "_real_check_budget", None)
+    real_record = getattr(gemini_call, "_real_record_usage", None)
+    if real_check is not None:
+        monkeypatch.setattr(gemini_call, "check_budget", real_check)
+    if real_record is not None:
+        monkeypatch.setattr(gemini_call, "record_usage", real_record)
+
+
 @pytest.fixture
 def isolated_budget(tmp_path, monkeypatch):
     """Per-test isolated SQLite + permissive default ceiling."""
@@ -68,7 +86,8 @@ class TestGuardedGenerateContentSync:
         # record_usage delta is computed off the SDK numbers.
         client = MagicMock()
         client.models.generate_content.return_value = _fake_response(
-            prompt_tokens=123, candidates_tokens=456,
+            prompt_tokens=123,
+            candidates_tokens=456,
         )
 
         response = gemini_call.guarded_generate_content(
@@ -185,7 +204,9 @@ class TestGuardedGenerateContentAsync:
             estimate_output=80,
         )
         client.aio.models.generate_content.assert_awaited_once_with(
-            model="m", contents="hello", config=None,
+            model="m",
+            contents="hello",
+            config=None,
         )
         state = gemini_budget.get_state()
         # estimate 40/80 was pre-debited; actual was 50/75.
@@ -271,7 +292,8 @@ class TestExtractUsageEdgeCases:
         # silently revert the pre-debit to zero.
         r = SimpleNamespace(
             usage_metadata=SimpleNamespace(
-                prompt_token_count=0, candidates_token_count=0,
+                prompt_token_count=0,
+                candidates_token_count=0,
             ),
         )
         a, b = gemini_call._extract_usage(r, 42, 17)

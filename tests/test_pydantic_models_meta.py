@@ -14,6 +14,7 @@ The meta-test means new models cannot be added to backend.main without
 satisfying the same hardening invariants. Failure messages name the
 offending Model.field so the fix is one line.
 """
+
 import os
 import re
 import sys
@@ -39,8 +40,8 @@ from pydantic import BaseModel
 # Add to this set when the schema introduces a new enum-shaped field.
 ENUMISH_FIELD_NAMES = {
     "channel",  # CampaignChannel
-    "status",   # CampaignStatus
-    "task",     # ExecutableTask
+    "status",  # CampaignStatus
+    "task",  # ExecutableTask
     "kind",
     "role",
 }
@@ -50,7 +51,11 @@ def _all_basemodels(module) -> list[type[BaseModel]]:
     out: list[type[BaseModel]] = []
     for name in dir(module):
         obj = getattr(module, name)
-        if isinstance(obj, type) and issubclass(obj, BaseModel) and obj is not BaseModel:
+        if (
+            isinstance(obj, type)
+            and issubclass(obj, BaseModel)
+            and obj is not BaseModel
+        ):
             # Exclude pydantic-internal classes that might be re-exported.
             if obj.__module__ != module.__name__:
                 continue
@@ -64,7 +69,11 @@ def _annotation_is_str_or_optional_str(ann) -> bool:
     if ann is str:
         return True
     if get_origin(ann) is Union:
-        return any(_annotation_is_str_or_optional_str(a) for a in get_args(ann) if a is not type(None))
+        return any(
+            _annotation_is_str_or_optional_str(a)
+            for a in get_args(ann)
+            if a is not type(None)
+        )
     # Pydantic v2 constr returns an Annotated[str, ...] alias whose underlying
     # type is str. Check via __origin__/__metadata__ if present.
     underlying = getattr(ann, "__origin__", None)
@@ -101,7 +110,7 @@ def _field_has_max_length(finfo) -> bool:
     (a list of annotated_types objects like `MaxLen` / `StringConstraints`).
     `constr(max_length=N)` ends up in this list, not on the bare annotation.
     """
-    for m in (finfo.metadata or ()):
+    for m in finfo.metadata or ():
         if getattr(m, "max_length", None) is not None:
             return True
     # Fallback: an Annotated[...] annotation that carries MaxLen inline.
@@ -113,7 +122,9 @@ def _annotation_is_literal(ann) -> bool:
     if get_origin(ann) is Literal:
         return True
     if get_origin(ann) is Union:
-        return any(_annotation_is_literal(a) for a in get_args(ann) if a is not type(None))
+        return any(
+            _annotation_is_literal(a) for a in get_args(ann) if a is not type(None)
+        )
     return False
 
 
@@ -123,12 +134,14 @@ def _field_is_constrained_or_literal(finfo) -> bool:
 
 
 class TestPydanticModelsMeta(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
         from backend import main as backend_main
+
         cls.models = _all_basemodels(backend_main)
-        assert cls.models, "Found zero BaseModel subclasses in backend.main — discovery broken"
+        assert cls.models, (
+            "Found zero BaseModel subclasses in backend.main — discovery broken"
+        )
 
     def test_models_discovered(self):
         names = sorted(m.__name__ for m in self.models)
@@ -137,9 +150,15 @@ class TestPydanticModelsMeta(unittest.TestCase):
         # Sanity — the well-known set must be present. Anything new gets caught
         # by the rules below; this just guards against renames.
         expected_subset = {
-            "CampaignCreate", "CampaignUpdate", "LeadProcessRequest",
-            "AskInstruction", "AskRequest", "DiscoveryRequest",
-            "PipelineRequest", "ExecutePlanParams", "ExecutePlanRequest",
+            "CampaignCreate",
+            "CampaignUpdate",
+            "LeadProcessRequest",
+            "AskInstruction",
+            "AskRequest",
+            "DiscoveryRequest",
+            "PipelineRequest",
+            "ExecutePlanParams",
+            "ExecutePlanRequest",
         }
         missing = expected_subset - set(names)
         self.assertFalse(missing, f"Renamed/removed models: {missing}")
@@ -148,12 +167,18 @@ class TestPydanticModelsMeta(unittest.TestCase):
         failures = []
         for model in self.models:
             cfg = model.model_config or {}
-            extra = cfg.get("extra") if isinstance(cfg, dict) else getattr(cfg, "extra", None)
+            extra = (
+                cfg.get("extra")
+                if isinstance(cfg, dict)
+                else getattr(cfg, "extra", None)
+            )
             if extra != "forbid":
-                failures.append(f"{model.__name__}: model_config.extra={extra!r} (want 'forbid')")
+                failures.append(
+                    f"{model.__name__}: model_config.extra={extra!r} (want 'forbid')"
+                )
         self.assertFalse(
             failures,
-            "Mass-assignment defense (extra='forbid') missing:\n" + "\n".join(failures)
+            "Mass-assignment defense (extra='forbid') missing:\n" + "\n".join(failures),
         )
 
     def test_every_string_field_has_max_length(self):
@@ -174,7 +199,7 @@ class TestPydanticModelsMeta(unittest.TestCase):
                     )
         self.assertFalse(
             failures,
-            "Unbounded string fields (memory-DoS surface):\n" + "\n".join(failures)
+            "Unbounded string fields (memory-DoS surface):\n" + "\n".join(failures),
         )
 
     def test_enumish_fields_use_literal(self):
@@ -194,8 +219,7 @@ class TestPydanticModelsMeta(unittest.TestCase):
                         f"is {ann!r} (want Literal[...])"
                     )
         self.assertFalse(
-            failures,
-            "Enum-like fields not Literal-typed:\n" + "\n".join(failures)
+            failures, "Enum-like fields not Literal-typed:\n" + "\n".join(failures)
         )
 
     def test_every_collection_field_has_max_length(self):
@@ -210,9 +234,7 @@ class TestPydanticModelsMeta(unittest.TestCase):
                 # Detect list / conlist via origin
                 inner = ann
                 if get_origin(ann) is Union:
-                    inner = next(
-                        (a for a in get_args(ann) if a is not type(None)), ann
-                    )
+                    inner = next((a for a in get_args(ann) if a is not type(None)), ann)
                 if get_origin(inner) is list:
                     # Plain `list[...]` without max_length — flag.
                     if not _field_has_max_length(finfo):
@@ -222,10 +244,7 @@ class TestPydanticModelsMeta(unittest.TestCase):
                         )
                 # conlist returns an Annotated[list[...], MaxLen(N), ...] —
                 # already covered by _annotation_has_max_length.
-        self.assertFalse(
-            failures,
-            "Unbounded list fields:\n" + "\n".join(failures)
-        )
+        self.assertFalse(failures, "Unbounded list fields:\n" + "\n".join(failures))
 
 
 if __name__ == "__main__":

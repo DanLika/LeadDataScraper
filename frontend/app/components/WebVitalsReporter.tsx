@@ -76,9 +76,15 @@ export default function WebVitalsReporter() {
           });
         };
 
-        onCLS(report);
+        // `reportAllChanges: true` makes LCP and CLS fire eagerly on every
+        // value update rather than waiting for the page to enter the hidden
+        // state. Without this we observed zero beacons in the first 10s of a
+        // still-active tab (#226 Phase 15 P2). web-vitals also installs its
+        // own pagehide + visibilitychange listeners internally, so the final
+        // snapshot still ships when the tab closes.
+        onCLS(report, { reportAllChanges: true });
         onINP(report);
-        onLCP(report);
+        onLCP(report, { reportAllChanges: true });
         onFCP(report);
         onTTFB(report);
       } catch {

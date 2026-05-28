@@ -1,6 +1,19 @@
 # Use the official Microsoft Playwright image which comes with all necessary dependencies
-# This avoids complicated dependency installation for browser automation on Linux
-FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+# This avoids complicated dependency installation for browser automation on Linux.
+#
+# Tag v1.60.0-jammy is the LATEST published playwright/python tag at the
+# time of this commit (verified 2026-05-28 against MCR
+# /v2/playwright/python/tags/list). The image bundles Chromium and a set
+# of apt-installed media/TLS libs whose upstream Ubuntu packages have
+# rolling CVEs that Microsoft picks up on each rebuild. We inherit the
+# rebuilds via Dependabot's `docker` ecosystem; in the meantime
+# `.grype.yaml` in the repo root documents the accepted-risk allowlist
+# (Chromium + libgnutls30 + libcaca0 + gstreamer1.0-plugins-good +
+# libgstreamer-plugins-good1.0-0), each entry with a reachability
+# analysis. Trivy still gates merge on CRITICAL + fixable-HIGH against
+# the FULL image — the allowlist applies only to grype, the
+# second-opinion tool. Issue #363 bucket #9 cleanup.
+FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
 
 # Build-time release tag for Sentry. Defaults to "unknown" if the build
 # context didn't pass --build-arg GIT_SHA (e.g. `docker build .` locally).

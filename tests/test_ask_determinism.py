@@ -24,11 +24,13 @@ phrasing, and limit-extraction flakiness.
 Live test — requires GEMINI_API_KEY. Skipped otherwise. Supabase is
 mocked (empty lead_index path).
 """
+
 import asyncio
 import math
 import os
 import sys
 import unittest
+import pytest
 from collections import Counter
 from unittest.mock import patch
 
@@ -66,13 +68,16 @@ async def _route_one(router, instruction: str):
     return await router.route_instruction(instruction)
 
 
+@pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
-
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+            },
+        )
         self.env_patcher.start()
 
         # Mock Supabase so route_instruction's lead-index lookup short-circuits.
@@ -83,6 +88,7 @@ class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
         sb_mock.return_value.client = None
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
         self.assertIsNotNone(self.router.client, "Gemini client must initialize")
 
@@ -109,13 +115,13 @@ class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
         tasks = [p.get("task") for p in self.plans]
         dist = Counter(tasks)
         self.assertEqual(
-            len(dist), 1,
-            f"Task routing unstable across {N_RUNS} runs: {dict(dist)}"
+            len(dist), 1, f"Task routing unstable across {N_RUNS} runs: {dict(dist)}"
         )
         chosen = next(iter(dist))
         self.assertIn(
-            chosen, ALLOWED_TASKS,
-            f"Routed to unexpected task {chosen!r} (allowed: {ALLOWED_TASKS})"
+            chosen,
+            ALLOWED_TASKS,
+            f"Routed to unexpected task {chosen!r} (allowed: {ALLOWED_TASKS})",
         )
 
     def test_query_param_semantically_similar(self):
@@ -129,8 +135,9 @@ class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
             params = dict(p.get("params") or {})
             q = params.get("query")
             self.assertIsInstance(
-                q, str,
-                f"run {i}: params.query missing or non-string. Got params={params}"
+                q,
+                str,
+                f"run {i}: params.query missing or non-string. Got params={params}",
             )
             queries.append(q)
 
@@ -156,7 +163,7 @@ class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
             failures,
             f"Query embedding drift below {QUERY_SIMILARITY_THRESHOLD}:\n"
             + "\n".join(failures)
-            + f"\nDistinct phrasings observed: {distinct}"
+            + f"\nDistinct phrasings observed: {distinct}",
         )
 
     def test_limit_param_consistent(self):
@@ -165,8 +172,9 @@ class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
         # Bucket by (key, value) tuple. None,None means Gemini omitted it.
         shapes = Counter(extracted)
         self.assertEqual(
-            len(shapes), 1,
-            f"limit param shape unstable across {N_RUNS} runs: {dict(shapes)}"
+            len(shapes),
+            1,
+            f"limit param shape unstable across {N_RUNS} runs: {dict(shapes)}",
         )
 
         key, value = next(iter(shapes))
@@ -177,8 +185,9 @@ class TestAskDeterminism(unittest.IsolatedAsyncioTestCase):
         # If a limit was emitted, it should match the "5" in the prompt.
         try:
             self.assertEqual(
-                int(value), 5,
-                f"limit extracted as {value!r} via key {key!r}, expected 5"
+                int(value),
+                5,
+                f"limit extracted as {value!r} via key {key!r}, expected 5",
             )
         except (TypeError, ValueError):
             self.fail(f"limit value not coercible to int: key={key!r} value={value!r}")

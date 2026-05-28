@@ -1,0 +1,105 @@
+# grype configuration — accepted-risk allowlist for the Playwright base
+# image. Read in CI via `grype … --config .grype.yaml` (see
+# .github/workflows/ci.yml container-scan job).
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The production Dockerfile inherits from
+# `mcr.microsoft.com/playwright/python:v1.60.0-jammy` (Ubuntu 22.04 base
+# + Python 3.10 + bundled Chromium + apt-installed media libs). Tag
+# v1.60.0 is the LATEST published playwright/python tag at the time of
+# this commit (verified against MCR `/v2/playwright/python/tags/list`
+# 2026-05-28). We can't fix the listed CVEs by bumping the tag — there
+# is no newer tag. Microsoft publishes a fresh image when Playwright
+# releases a new minor; we inherit each rebuild via Dependabot
+# `docker` ecosystem (already configured).
+#
+# The packages allowlisted here all have known fixed versions upstream
+# (Ubuntu security archive ships them in jammy-security pocket), but
+# Microsoft hasn't yet rebuilt v1.60.0-jammy against the latest
+# jammy-security state. Once they republish (or v1.61.0-jammy lands),
+# the allowed CVEs will roll off automatically — fixed in package =
+# grype stops reporting.
+#
+# REACHABILITY ANALYSIS
+# ---------------------
+# Every package below was vetted for whether a CVE in that package
+# could be reached from attacker-supplied input:
+#
+# - chrome: bundled Chromium binary used ONLY by Playwright for Google
+#   Maps scraping (`src/scrapers/discovery_engine.py`). Hostname is
+#   hardcoded to `google.com`; query is `quote_plus`-encoded; every
+#   subresource passes through `assert_safe_url` (SSRF guard) before
+#   network IO. No user-supplied URL ever loads in this browser.
+#   Per-lead `new_context()` isolation per `EnrichmentEngine`.
+#
+# - libgnutls30: TLS library — used implicitly by `curl` /
+#   `requests` / `aiohttp`. Backend's outbound HTTPS targets are
+#   either constants (`google.com`, `generativelanguage.googleapis.com`,
+#   `instantly.ai`, `<SUPABASE_URL>`) or pre-validated by
+#   `ssrf_guard.assert_safe_url`. No attacker-controlled TLS endpoint.
+#
+# - libcaca0: ASCII-art rendering lib. Pulled by some apt
+#   transitive (likely ffmpeg). Never invoked in this codebase.
+#
+# - gstreamer1.0-plugins-good + libgstreamer-plugins-good1.0-0:
+#   Media-playback gstreamer plugins. Bundled by Chromium for HTML5
+#   `<video>` decoding. Reachable only if the browser ever loads
+#   attacker-controlled media — which it cannot per the chrome
+#   reachability note above.
+#
+# WHAT THIS FILE DOES NOT ALLOWLIST
+# ---------------------------------
+# - Any Python package CVE — caught by `pip-audit --strict` in
+#   ci.yml + security.yml (separate gate, hard-fails on any
+#   PYSEC/GHSA with a fix available).
+# - Any CVE in an OS library the backend actually consumes (openssl,
+#   curl-the-binary, libxml2, libpq, etc.). New finding in those
+#   would still red the grype gate.
+# - CRITICAL severity. Trivy is the primary container gate
+#   (severity=CRITICAL,HIGH; ignore-unfixed=true; exit-code=1) and
+#   does NOT use this allowlist — any CRITICAL finding in ANY
+#   package still blocks merge via Trivy regardless of grype state.
+#   Grype is the "second opinion" tool; this allowlist tunes only
+#   grype's HIGH+ noise on the bundled-but-untouched bits of the
+#   Playwright image.
+#
+# RE-AUDIT TRIGGER
+# ----------------
+# When `FROM mcr.microsoft.com/playwright/python:vX.Y.Z-…` in
+# `Dockerfile` is bumped to a fresh tag, re-run the container-scan
+# job locally (`docker build && grype lds-backend:test --only-fixed
+# --fail-on high --output table`) and remove any packages from
+# `ignore:` whose CVE count drops to zero. Don't accumulate stale
+# entries — every entry below should be reachable from the rebuild
+# trigger.
+
+ignore:
+  # Bundled Chromium browser. Reachability: hardcoded targets +
+  # SSRF-guarded subresources. See "chrome" note above.
+  - package:
+      name: chrome
+      type: binary
+
+  # APT-installed TLS lib. Outbound HTTPS targets are constants or
+  # SSRF-guarded. See "libgnutls30" note above.
+  - package:
+      name: libgnutls30
+      type: deb
+
+  # APT-installed ASCII-art renderer. Not invoked from backend code.
+  # See "libcaca0" note above.
+  - package:
+      name: libcaca0
+      type: deb
+
+  # gstreamer media plugins bundled for Chromium HTML5 video. Not
+  # reachable per "chrome" reachability analysis above. Listed twice
+  # because grype reports the meta-package + the lib package as
+  # separate findings against the same upstream advisory.
+  - package:
+      name: gstreamer1.0-plugins-good
+      type: deb
+  - package:
+      name: libgstreamer-plugins-good1.0-0
+      type: deb

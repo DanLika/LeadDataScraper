@@ -66,7 +66,18 @@ def assert_safe_scheme(url: str) -> None:
     _assert_public_ip(ip, parsed.hostname)
 
 
-def _assert_public_ip(ip: ipaddress._BaseAddress, host: str) -> None:
+def _assert_public_ip(
+    ip: "ipaddress.IPv4Address | ipaddress.IPv6Address", host: str
+) -> None:
+    # `ipaddress._BaseAddress` is the runtime parent of both IPv4Address
+    # and IPv6Address, BUT under Python 3.14 the typeshed stub no longer
+    # exposes is_multicast / is_reserved / is_unspecified / is_global at
+    # the base-class level — those attrs live on the concrete subclasses
+    # only (which is also where the runtime implementation has always
+    # been). mypy --strict on py3.14 (Ratchet workflow runner) flags this
+    # as `attr-defined`. ipaddress.ip_address() returns a Union of the
+    # two concrete types, so callers already pass the right runtime
+    # value — just need the annotation to match.
     if ip.is_multicast or ip.is_reserved or ip.is_unspecified or not ip.is_global:
         raise SSRFError(f"Blocked non-public IP {ip} for host {host!r}")
 

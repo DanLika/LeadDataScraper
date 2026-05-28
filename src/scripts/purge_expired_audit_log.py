@@ -16,6 +16,7 @@ Exit codes:
     0 = ok (zero or more rows purged)
     2 = misconfigured (DATABASE_URL missing or unreachable)
 """
+
 from __future__ import annotations
 
 import os
@@ -41,9 +42,7 @@ def main() -> int:
         # supabase-pooler may suppress rowcount reporting depending on
         # statement-cache state.
         cur = conn.execute(
-            "DELETE FROM public.account_deletions "
-            "WHERE expires_at < now() "
-            "RETURNING id"
+            "DELETE FROM public.account_deletions WHERE expires_at < now() RETURNING id"
         )
         purged = list(cur.fetchall())
     except psycopg.Error as e:
