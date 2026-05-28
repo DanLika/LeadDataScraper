@@ -150,7 +150,7 @@ test.afterAll(async () => {
   try {
     await db.from('leads').delete().like('email', `%@${FIXTURE_DOMAIN}`)
   } catch (err) {
-    // eslint-disable-next-line no-console
+
     console.warn('csv-upload cleanup failed:', err)
   }
 })

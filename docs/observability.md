@@ -439,6 +439,71 @@ docker logs lead-scraper-backend 2>&1 \
   | jq -c 'select(.message=="slow handler" and .path=="/process-all") | {timestamp, duration_ms}'
 ```
 
+### Dispatch tick telemetry (Issue #367 / PR #371)
+
+Every cron invocation of `src/workers/dispatch_tick.run_tick` emits a
+single `dispatch_tick summary` INFO line on EVERY return path —
+including early exits like `db_client_unavailable`, `runtime_cap_after_sweep`,
+`dispatcher_unavailable`, `batch_fetch_failed`. Operator no longer
+needs a wrapper script to see what happened in a given tick.
+
+The summary log carries `result.as_dict()` via `extra={}` — every
+`TickResult` field is a top-level structured field on the log
+record.
+
+**Counter buckets — orthogonal, never merged:**
+
+| Field | What it counts |
+|-------|----------------|
+| `claimed` | Rows transitioned `pending → dispatching` this tick |
+| `dispatched` | `push_leads.success_count` (rows successfully sent) |
+| `failed` | Pre-dispatch rejects (no_email / missing_step / no_variants / render error) + provider-reported `push_leads.failed_count` |
+| `swallowed` | Per-lead `push_result.errors[]` rows we couldn't reconcile to a claimed `message_id`. Row stays in `'dispatching'`; sweeper resets after `claim_timeout_min`. **Operator action**: investigate dispatcher contract drift |
+| `skipped_suppressed` | Address landed on suppression between schedule and tick |
+| `skipped_window` | Out-of-window OR `PriorMessageNotReadyError` (+1h bump) |
+| `swept_stale` | Stale `'dispatching'` rows reset to `'pending'` at top of tick |
+| `errors[]` | Tick-level error tags: `dispatch_failed:<exc>`, `push_leads_unmatched:<code>`, `mark_send_failed_noop:<code>`, `db_client_unavailable`, `runtime_cap_after_*`, etc. |
+
+**Per-lead error fan-out (`_handle_per_lead_errors`):**
+
+For every `push_result.errors[]` entry, the function ALWAYS logs the
+raw error at INFO BEFORE reconciliation, so operators see every
+failure regardless of whether the email → `message_id` lookup
+succeeds. Four reconciliation outcomes, each with a distinct log
+level:
+
+| Outcome | Log level | `errors[]` entry | `swallowed` |
+|---------|-----------|------------------|-------------|
+| Matched email → `mark_send_failed` succeeds | INFO `dispatch_tick marked msg=… bounced (send_failed)` | none | 0 |
+| Single-batch fallback (1 claim + 1 err, email mismatch) | WARNING `single-message fallback assigns to …` | none | 0 |
+| Unmatched multi-batch (orphan claim) | WARNING `unknown email; cannot reconcile` | `push_leads_unmatched:<code>` | +1 |
+| `mark_send_failed.matched=False` (row state changed mid-tick) | WARNING `mark_send_failed matched 0 rows for msg=…` | `mark_send_failed_noop:<code>` | 0 |
+
+**Greppable recipes:**
+
+```bash
+# Every tick summary on prod (Render log stream)
+docker logs lead-scraper-backend 2>&1 \
+  | jq -c 'select(.message=="dispatch_tick summary") | {timestamp, claimed, dispatched, failed, swallowed, elapsed_seconds}'
+
+# Find ticks with orphan claims (operator action item)
+docker logs lead-scraper-backend 2>&1 \
+  | jq -c 'select(.message=="dispatch_tick summary" and .swallowed > 0)'
+
+# Raw per-lead errors for one cron tick (use the timestamp window from the summary)
+docker logs lead-scraper-backend 2>&1 \
+  | jq -c 'select(.message=="dispatch_tick push_leads per-lead error") | {timestamp, err_email, error_code, error_message}'
+
+# All ticks that hit a transport-level dispatcher exception
+docker logs lead-scraper-backend 2>&1 \
+  | jq -c 'select(.message=="dispatch_tick summary" and (.errors[]? | startswith("dispatch_failed:")))'
+```
+
+The `mark_send_failed` repo method predicate is `status='dispatching'`
+(PR #369), not `status='pending'` — without that fix, every per-lead
+reconciliation matched zero rows and the row stranded until the stale-claim
+sweeper reset it ~15 min later.
+
 ### Domain field convention
 
 Pass attacker-controllable values via the **args path**

@@ -53,9 +53,12 @@ def _load_env() -> dict[str, str]:
                 if v and k not in merged:
                     merged[k] = v
     for k in (
-        "RUN_JWT_MANIPULATION_E2E", "FRONTEND_URL",
-        "TEST_USER_EMAIL", "TEST_USER_PASSWORD",
-        "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_URL",
+        "RUN_JWT_MANIPULATION_E2E",
+        "FRONTEND_URL",
+        "TEST_USER_EMAIL",
+        "TEST_USER_PASSWORD",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_URL",
     ):
         v = os.environ.get(k)
         if v:
@@ -82,6 +85,7 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # JWT + Supabase-cookie helpers.
 # ---------------------------------------------------------------------------
+
 
 def _b64url_decode(s: str) -> bytes:
     pad = "=" * (-len(s) % 4)
@@ -128,22 +132,24 @@ def _auth_cookie_names_for(ref: str) -> str:
 
 def _find_auth_cookies(cookies: list[dict], base_name: str) -> list[dict]:
     """All chunks of the Supabase SSR auth cookie."""
-    return [c for c in cookies if c["name"] == base_name or c["name"].startswith(base_name + ".")]
+    return [
+        c
+        for c in cookies
+        if c["name"] == base_name or c["name"].startswith(base_name + ".")
+    ]
 
 
 def _decode_session_value(cookies: list[dict], base_name: str) -> dict:
     """Concatenate chunked cookie values → strip `base64-` prefix → b64-decode → JSON parse."""
     chunks = sorted(
         _find_auth_cookies(cookies, base_name),
-        key=lambda c: (
-            int(c["name"].rsplit(".", 1)[-1]) if "." in c["name"] else -1
-        ),
+        key=lambda c: int(c["name"].rsplit(".", 1)[-1]) if "." in c["name"] else -1,
     )
     if not chunks:
         raise RuntimeError(f"Auth cookie {base_name!r} not found")
     raw = "".join(c["value"] for c in chunks)
     if raw.startswith("base64-"):
-        raw = raw[len("base64-"):]
+        raw = raw[len("base64-") :]
     return json.loads(_b64url_decode(raw))
 
 
@@ -160,20 +166,25 @@ def _replace_auth_cookie(
     context.clear_cookies(name=base_name)
     for i in range(0, 10):
         context.clear_cookies(name=f"{base_name}.{i}")
-    context.add_cookies([{
-        "name": base_name,
-        "value": new_value,
-        "domain": domain,
-        "path": path,
-        "httpOnly": False,
-        "secure": False,
-        "sameSite": "Lax",
-    }])
+    context.add_cookies(
+        [
+            {
+                "name": base_name,
+                "value": new_value,
+                "domain": domain,
+                "path": path,
+                "httpOnly": False,
+                "secure": False,
+                "sameSite": "Lax",
+            }
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Login + probe helpers.
 # ---------------------------------------------------------------------------
+
 
 def _login(page, frontend_url: str, email: str, password: str) -> None:
     page.goto(f"{frontend_url}/login", wait_until="domcontentloaded")
@@ -211,9 +222,7 @@ def _fresh_context_with_tamper(p, tamper_fn) -> int:
 
         # Sanity check: legitimate session works.
         baseline = _probe_status(context)
-        assert baseline == 200, (
-            f"Login probe failed before tampering: {baseline}"
-        )
+        assert baseline == 200, f"Login probe failed before tampering: {baseline}"
 
         cookies = context.cookies()
         session = _decode_session_value(cookies, base_name)
@@ -233,6 +242,7 @@ def _fresh_context_with_tamper(p, tamper_fn) -> int:
 # The six manipulation tests.
 # ---------------------------------------------------------------------------
 
+
 def test_role_promotion_to_service_role_rejected():
     """Flip `role` → `service_role` in the access_token payload, re-sign
     with an empty key. The trio of header.payload.sig is well-formed JWT
@@ -247,9 +257,7 @@ def test_role_promotion_to_service_role_rejected():
         # Blank refresh_token so the SSR client can't auto-refresh past the
         # tamper using the still-valid refresh cookie.
         session["refresh_token"] = ""
-        _replace_auth_cookie(
-            context, base_name, _encode_session_value(session), domain
-        )
+        _replace_auth_cookie(context, base_name, _encode_session_value(session), domain)
 
     with sync_playwright() as p:
         status = _fresh_context_with_tamper(p, tamper)
@@ -269,9 +277,7 @@ def test_expired_jwt_replay_rejected():
         session["access_token"] = forged
         session["refresh_token"] = ""
         session["expires_at"] = int(time.time()) - 3600
-        _replace_auth_cookie(
-            context, base_name, _encode_session_value(session), domain
-        )
+        _replace_auth_cookie(context, base_name, _encode_session_value(session), domain)
 
     with sync_playwright() as p:
         status = _fresh_context_with_tamper(p, tamper)
@@ -289,9 +295,7 @@ def test_sub_tampering_rejected():
         forged = _encode_jwt(header, payload, sig)  # keep original sig
         session["access_token"] = forged
         session["refresh_token"] = ""
-        _replace_auth_cookie(
-            context, base_name, _encode_session_value(session), domain
-        )
+        _replace_auth_cookie(context, base_name, _encode_session_value(session), domain)
 
     with sync_playwright() as p:
         status = _fresh_context_with_tamper(p, tamper)
@@ -308,9 +312,7 @@ def test_signature_stripped_rejected():
         # malformed HS256 JWT.
         session["access_token"] = f"{h}.{p}."
         session["refresh_token"] = ""
-        _replace_auth_cookie(
-            context, base_name, _encode_session_value(session), domain
-        )
+        _replace_auth_cookie(context, base_name, _encode_session_value(session), domain)
 
     with sync_playwright() as p:
         status = _fresh_context_with_tamper(p, tamper)
@@ -335,12 +337,14 @@ def test_double_cookie_smuggling_rejected():
         # First forged session — sub A.
         h1, p1, _ = _decode_jwt(session["access_token"])
         p1a = dict(p1, sub=str(uuid.uuid4()))
-        session_a = dict(session, access_token=_hs256_sign(h1, p1a, b""),
-                         refresh_token="")
+        session_a = dict(
+            session, access_token=_hs256_sign(h1, p1a, b""), refresh_token=""
+        )
         # Second forged session — sub B.
         p1b = dict(p1, sub=str(uuid.uuid4()))
-        session_b = dict(session, access_token=_hs256_sign(h1, p1b, b""),
-                         refresh_token="")
+        session_b = dict(
+            session, access_token=_hs256_sign(h1, p1b, b""), refresh_token=""
+        )
 
         # Replace the canonical cookie with forged A.
         _replace_auth_cookie(
@@ -348,15 +352,19 @@ def test_double_cookie_smuggling_rejected():
         )
         # Smuggle B at a more-specific path — browsers send both, the SSR
         # parser must not blindly trust either.
-        context.add_cookies([{
-            "name": base_name,
-            "value": _encode_session_value(session_b),
-            "domain": domain,
-            "path": "/api",
-            "httpOnly": False,
-            "secure": False,
-            "sameSite": "Lax",
-        }])
+        context.add_cookies(
+            [
+                {
+                    "name": base_name,
+                    "value": _encode_session_value(session_b),
+                    "domain": domain,
+                    "path": "/api",
+                    "httpOnly": False,
+                    "secure": False,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
 
     with sync_playwright() as p:
         status = _fresh_context_with_tamper(p, tamper)
@@ -382,9 +390,7 @@ def test_long_lived_forged_jwt_rejected():
         session["access_token"] = forged
         session["refresh_token"] = ""
         session["expires_at"] = payload["exp"]
-        _replace_auth_cookie(
-            context, base_name, _encode_session_value(session), domain
-        )
+        _replace_auth_cookie(context, base_name, _encode_session_value(session), domain)
 
     with sync_playwright() as p:
         status = _fresh_context_with_tamper(p, tamper)

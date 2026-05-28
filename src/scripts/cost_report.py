@@ -27,6 +27,7 @@ Run locally:
     DATABASE_URL=... RENDER_API_KEY=... \\
     python -m src.scripts.cost_report
 """
+
 from __future__ import annotations
 
 import json
@@ -112,11 +113,12 @@ def _supabase_section() -> tuple[str, float]:
     if db_url:
         try:
             import psycopg  # type: ignore
+
             with psycopg.connect(db_url, autocommit=True) as conn:
                 row = conn.execute(
                     "SELECT pg_database_size(current_database())"
                 ).fetchone()
-            mb = (row[0] or 0) / (1024 ** 2)
+            mb = (row[0] or 0) / (1024**2)
             size_line = f"- DB size: **{mb:,.1f} MB**\n"
         except Exception as e:  # noqa: BLE001
             size_line = f"- DB size: _(could not read — {e})_\n"
@@ -148,7 +150,10 @@ def _render_section() -> tuple[str, float]:
 
     # Render service plan pricing (USD/month). Update when pricing changes.
     PLAN_MONTHLY_USD = {
-        "free": 0.0, "starter": 7.0, "standard": 25.0, "pro": 85.0,
+        "free": 0.0,
+        "starter": 7.0,
+        "standard": 25.0,
+        "pro": 85.0,
     }
 
     lines: list[str] = []
@@ -246,8 +251,7 @@ def main() -> int:
         pct = (delta / prev_total) * 100.0
         sign = "+" if delta >= 0 else ""
         delta_line = (
-            f"\n_Δ vs. last week: **{sign}{_money(delta)}** "
-            f"({sign}{pct:.1f}%)_"
+            f"\n_Δ vs. last week: **{sign}{_money(delta)}** ({sign}{pct:.1f}%)_"
         )
     else:
         delta_line = "\n_No baseline available — first run; comparison from next week._"
@@ -262,7 +266,7 @@ def main() -> int:
         "section is per-call indicative only. Cross-check the real number "
         "weekly at <https://aistudio.google.com/usage> and add it to this "
         "total manually until automated retrieval lands "
-        "(`docs/roadmap.md` → \"Cost-report digest\").",
+        '(`docs/roadmap.md` → "Cost-report digest").',
         delta_line,
         "",
         *sections,
@@ -272,11 +276,13 @@ def main() -> int:
     print("\n".join(out))
 
     # Persist baseline for next week's comparison.
-    _save_baseline({
-        "timestamp": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
-        "total_weekly_usd": total,
-        "by_source": totals,
-    })
+    _save_baseline(
+        {
+            "timestamp": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "total_weekly_usd": total,
+            "by_source": totals,
+        }
+    )
 
     return 0
 

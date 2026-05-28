@@ -17,6 +17,7 @@ that maps unique_key → lead.
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise.
 """
+
 import asyncio
 import json
 import os
@@ -71,7 +72,14 @@ def _golden_leads() -> list[dict]:
             "company_name": "Acme Dental Clinic",
             "business_details": "Family dentistry practice in Mostar offering cleanings, fillings, whitening, and braces consultations.",
             "target_clients": "Local families, working professionals, parents booking pediatric checkups.",
-            "offering_keywords": ["dental", "dentist", "cleaning", "whitening", "braces", "family practice"],
+            "offering_keywords": [
+                "dental",
+                "dentist",
+                "cleaning",
+                "whitening",
+                "braces",
+                "family practice",
+            ],
         },
         {
             "unique_key": "g2",
@@ -80,7 +88,13 @@ def _golden_leads() -> list[dict]:
             "company_name": "BlueWave Plumbing",
             "business_details": "24/7 emergency plumbing service for residential and small commercial properties in Sarajevo.",
             "target_clients": "Homeowners, property managers, small business operators.",
-            "offering_keywords": ["plumbing", "plumber", "emergency", "residential", "commercial"],
+            "offering_keywords": [
+                "plumbing",
+                "plumber",
+                "emergency",
+                "residential",
+                "commercial",
+            ],
         },
         {
             "unique_key": "g3",
@@ -89,7 +103,14 @@ def _golden_leads() -> list[dict]:
             "company_name": "Studio Vesta Architects",
             "business_details": "Boutique architecture studio focused on adaptive reuse of stone houses on the Herzegovina coast.",
             "target_clients": "Heritage-property owners, boutique hotel developers.",
-            "offering_keywords": ["architecture", "architect", "design", "stone houses", "adaptive reuse", "heritage"],
+            "offering_keywords": [
+                "architecture",
+                "architect",
+                "design",
+                "stone houses",
+                "adaptive reuse",
+                "heritage",
+            ],
         },
         {
             "unique_key": "g4",
@@ -98,7 +119,14 @@ def _golden_leads() -> list[dict]:
             "company_name": "NorthStar Logistics",
             "business_details": "Regional freight forwarding company serving the Western Balkans. Specializes in cross-border customs handling.",
             "target_clients": "Mid-size manufacturers, e-commerce sellers shipping cross-border.",
-            "offering_keywords": ["freight", "logistics", "shipping", "customs", "cross-border", "forwarding"],
+            "offering_keywords": [
+                "freight",
+                "logistics",
+                "shipping",
+                "customs",
+                "cross-border",
+                "forwarding",
+            ],
         },
         {
             "unique_key": "g5",
@@ -107,7 +135,14 @@ def _golden_leads() -> list[dict]:
             "company_name": "Petit Café Mostar",
             "business_details": "Independent specialty coffee shop in Old Town Mostar that roasts its own beans on-site.",
             "target_clients": "Tourists, local coffee enthusiasts, remote workers.",
-            "offering_keywords": ["coffee", "café", "specialty", "roasting", "espresso", "old town"],
+            "offering_keywords": [
+                "coffee",
+                "café",
+                "specialty",
+                "roasting",
+                "espresso",
+                "old town",
+            ],
         },
         {
             "unique_key": "g6",
@@ -116,7 +151,14 @@ def _golden_leads() -> list[dict]:
             "company_name": "Vrelo Software",
             "business_details": "Custom software development shop building Laravel + Vue.js apps for SMBs in Slovenia and Croatia.",
             "target_clients": "SMBs needing internal tools, CRM integrations, custom dashboards.",
-            "offering_keywords": ["software", "development", "laravel", "vue", "smb", "custom"],
+            "offering_keywords": [
+                "software",
+                "development",
+                "laravel",
+                "vue",
+                "smb",
+                "custom",
+            ],
         },
         {
             "unique_key": "g7",
@@ -125,7 +167,14 @@ def _golden_leads() -> list[dict]:
             "company_name": "Velebit Veterinary Clinic",
             "business_details": "Small-animal veterinary clinic in Banja Luka with emergency services and pet boarding.",
             "target_clients": "Pet owners, dog walkers, local breeders.",
-            "offering_keywords": ["veterinary", "vet", "animal", "pet", "boarding", "emergency"],
+            "offering_keywords": [
+                "veterinary",
+                "vet",
+                "animal",
+                "pet",
+                "boarding",
+                "emergency",
+            ],
         },
         {
             "unique_key": "g8",
@@ -134,7 +183,14 @@ def _golden_leads() -> list[dict]:
             "company_name": "Aurora Fitness Studio",
             "business_details": "Boutique fitness studio offering small-group HIIT, mobility, and personal training.",
             "target_clients": "Working professionals, weekend athletes, beginners on referral.",
-            "offering_keywords": ["fitness", "training", "hiit", "mobility", "personal training", "studio"],
+            "offering_keywords": [
+                "fitness",
+                "training",
+                "hiit",
+                "mobility",
+                "personal training",
+                "studio",
+            ],
         },
         {
             "unique_key": "g9",
@@ -143,7 +199,15 @@ def _golden_leads() -> list[dict]:
             "company_name": "Drina River Tours",
             "business_details": "Adventure tourism operator running rafting and kayaking trips on the Drina canyon.",
             "target_clients": "Group travel bookers, corporate retreat planners, weekend adventurers.",
-            "offering_keywords": ["rafting", "kayaking", "tour", "adventure", "tourism", "canyon", "drina"],
+            "offering_keywords": [
+                "rafting",
+                "kayaking",
+                "tour",
+                "adventure",
+                "tourism",
+                "canyon",
+                "drina",
+            ],
         },
         {
             "unique_key": "g10",
@@ -152,12 +216,20 @@ def _golden_leads() -> list[dict]:
             "company_name": "Lavanda Skincare",
             "business_details": "Handmade organic skincare brand using lavender from a family farm. Sells via Instagram and boutique stores.",
             "target_clients": "Boutique retailers, eco-conscious consumers, Instagram followers.",
-            "offering_keywords": ["skincare", "lavender", "organic", "handmade", "cosmetic", "boutique"],
+            "offering_keywords": [
+                "skincare",
+                "lavender",
+                "organic",
+                "handmade",
+                "cosmetic",
+                "boutique",
+            ],
         },
     ]
 
 
 # ---- Fake Supabase client ----------------------------------------------------
+
 
 class _FakeExecResult:
     def __init__(self, rows):
@@ -166,6 +238,7 @@ class _FakeExecResult:
 
 class _FakeQuery:
     """Records the eq() filter and returns the matching lead at execute()."""
+
     def __init__(self, leads_by_key: dict):
         self._lbk = leads_by_key
         self._eq_filter = None
@@ -198,6 +271,7 @@ class _FakeSupabaseClient:
 
 # ---- Helpers -----------------------------------------------------------------
 
+
 def _contains_any(text: str, needles: list[str]) -> bool:
     lower = text.lower()
     return any(n.lower() in lower for n in needles)
@@ -220,14 +294,16 @@ def _build_judge_prompt(graded: list[dict]) -> str:
     """Single batched judge call — 'would a human send this?' 1-10."""
     items = []
     for i, g in enumerate(graded, start=1):
-        items.append({
-            "id": i,
-            "person": g["lead"]["leadership_team"],
-            "company_name": g["lead"]["company_name"],
-            "business_details": g["lead"]["business_details"],
-            "target_clients": g["lead"]["target_clients"],
-            "draft": g["draft"].get("draft", ""),
-        })
+        items.append(
+            {
+                "id": i,
+                "person": g["lead"]["leadership_team"],
+                "company_name": g["lead"]["company_name"],
+                "business_details": g["lead"]["business_details"],
+                "target_clients": g["lead"]["target_clients"],
+                "draft": g["draft"].get("draft", ""),
+            }
+        )
     return (
         "You are grading LinkedIn connection-request messages on a single\n"
         "question: 'Would a real human send this message as-is?'\n"
@@ -255,15 +331,19 @@ def _parse_judge_scores(raw: str) -> list[int]:
 
 # ---- Test --------------------------------------------------------------------
 
+
 @pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
     """Live golden-set quality bar for /draft-linkedin."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+            },
+        )
         self.env_patcher.start()
 
         self.leads = _golden_leads()
@@ -274,6 +354,7 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
         sb_mock.return_value.client = _FakeSupabaseClient(leads_by_key)
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
         self.assertIsNotNone(self.router.client, "Gemini client must initialize")
 
@@ -294,7 +375,9 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
                 failures.append(f"{g['lead']['unique_key']}: {d['error']}")
             elif not (d.get("draft") or "").strip():
                 failures.append(f"{g['lead']['unique_key']}: empty draft")
-        self.assertFalse(failures, "Generator errors / empty drafts:\n" + "\n".join(failures))
+        self.assertFalse(
+            failures, "Generator errors / empty drafts:\n" + "\n".join(failures)
+        )
 
     def test_character_count_within_band(self):
         """50-300 chars. Upper bound is LinkedIn's hard limit; lower bound is
@@ -318,9 +401,13 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
             d = g["draft"]
             body = d.get("draft", "")
             if re.match(r"^\s*subject\s*:", body, flags=re.IGNORECASE):
-                failures.append(f"{g['lead']['unique_key']}: body starts with 'Subject:'")
+                failures.append(
+                    f"{g['lead']['unique_key']}: body starts with 'Subject:'"
+                )
             if d.get("subject"):
-                failures.append(f"{g['lead']['unique_key']}: return has subject={d['subject']!r}")
+                failures.append(
+                    f"{g['lead']['unique_key']}: return has subject={d['subject']!r}"
+                )
         self.assertFalse(failures, "Subject-line leakage:\n" + "\n".join(failures))
 
     def test_first_line_is_hook_not_dear(self):
@@ -347,7 +434,9 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
                     f"{lead['unique_key']}: neither company {lead['company_name']!r} "
                     f"nor offering keywords {lead['offering_keywords']} present"
                 )
-        self.assertFalse(failures, "No company/offering anchor:\n" + "\n".join(failures))
+        self.assertFalse(
+            failures, "No company/offering anchor:\n" + "\n".join(failures)
+        )
 
     def test_no_urls(self):
         """LinkedIn flags messages with links. Reject any URL-shaped substring."""
@@ -356,7 +445,9 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
             body = g["draft"].get("draft", "")
             hits = _matches_any(body, URL_PATTERNS)
             if hits:
-                failures.append(f"{g['lead']['unique_key']}: URL patterns matched {hits}")
+                failures.append(
+                    f"{g['lead']['unique_key']}: URL patterns matched {hits}"
+                )
         self.assertFalse(failures, "URL leakage:\n" + "\n".join(failures))
 
     def test_no_ai_disclaimers(self):
@@ -365,13 +456,16 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
             body = g["draft"].get("draft", "")
             hits = _matches_any(body, DISCLAIMER_PATTERNS)
             if hits:
-                failures.append(f"{g['lead']['unique_key']}: disclaimers matched {hits}")
+                failures.append(
+                    f"{g['lead']['unique_key']}: disclaimers matched {hits}"
+                )
         self.assertFalse(failures, "AI disclaimer leakage:\n" + "\n".join(failures))
 
     def test_judge_average_at_least_7_5(self):
         """Second Gemini call: 'would a human send this?' 1-10, avg >= 7.5."""
         prompt = _build_judge_prompt(self.graded)
         from google.genai import types as genai_types
+
         resp = self.router.client.models.generate_content(
             model="gemini-flash-latest",
             contents=prompt,
@@ -389,8 +483,9 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
             self.fail(f"Judge JSON parse failed: {e}\nRaw: {raw[:500]}")
 
         self.assertEqual(
-            len(scores), len(self.graded),
-            f"Judge returned {len(scores)} scores for {len(self.graded)} drafts"
+            len(scores),
+            len(self.graded),
+            f"Judge returned {len(scores)} scores for {len(self.graded)} drafts",
         )
         for s in scores:
             self.assertGreaterEqual(s, 1)
@@ -400,8 +495,7 @@ class TestLinkedInGoldenSet(unittest.IsolatedAsyncioTestCase):
             f"{g['lead']['unique_key']}={s}" for g, s in zip(self.graded, scores)
         )
         self.assertGreaterEqual(
-            avg, 7.5,
-            f"Judge average {avg:.2f} below 7.5. Per-draft: {breakdown}"
+            avg, 7.5, f"Judge average {avg:.2f} below 7.5. Per-draft: {breakdown}"
         )
 
 

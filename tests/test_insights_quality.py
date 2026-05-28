@@ -27,6 +27,7 @@ model actually sees" — audit_status or lead_source.
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise.
 """
+
 import asyncio
 import json
 import os
@@ -48,14 +49,48 @@ MIN_ACTIONABLE = 2
 # Verbs we accept as action-led recommendation openers. Lowercase match,
 # first-token-of-insight. Mirrors typical CRM-action vocabulary.
 ACTION_VERBS = {
-    "prioritize", "prioritise",
-    "audit", "review", "investigate", "check", "verify", "validate",
-    "target", "focus", "contact", "outreach", "engage", "reach",
-    "remove", "delete", "archive", "filter", "exclude",
-    "enrich", "schedule", "draft", "send", "follow", "respond",
-    "fix", "address", "resolve", "update", "improve", "optimize",
-    "segment", "tag", "label", "categorise", "categorize",
-    "consider", "use", "leverage", "build", "create", "expand",
+    "prioritize",
+    "prioritise",
+    "audit",
+    "review",
+    "investigate",
+    "check",
+    "verify",
+    "validate",
+    "target",
+    "focus",
+    "contact",
+    "outreach",
+    "engage",
+    "reach",
+    "remove",
+    "delete",
+    "archive",
+    "filter",
+    "exclude",
+    "enrich",
+    "schedule",
+    "draft",
+    "send",
+    "follow",
+    "respond",
+    "fix",
+    "address",
+    "resolve",
+    "update",
+    "improve",
+    "optimize",
+    "segment",
+    "tag",
+    "label",
+    "categorise",
+    "categorize",
+    "consider",
+    "use",
+    "leverage",
+    "build",
+    "create",
+    "expand",
 }
 
 
@@ -70,33 +105,45 @@ def _fixture_leads() -> list[dict]:
 
     # 30 Completed leads
     for i in range(30):
-        leads.append({
-            "name": f"Completed Co {i + 1}",
-            "company_name": f"Completed Co {i + 1}",
-            "audit_status": "Completed",
-            "seo_score": 30 + (i * 2) % 60,  # spreads 30-88
-            "lead_source": "google_maps" if i < 20 else ("csv" if i < 27 else "facebook"),
-        })
+        leads.append(
+            {
+                "name": f"Completed Co {i + 1}",
+                "company_name": f"Completed Co {i + 1}",
+                "audit_status": "Completed",
+                "seo_score": 30 + (i * 2) % 60,  # spreads 30-88
+                "lead_source": "google_maps"
+                if i < 20
+                else ("csv" if i < 27 else "facebook"),
+            }
+        )
 
     # 10 Failed leads — low seo_scores
     for i in range(10):
-        leads.append({
-            "name": f"Failed Biz {i + 1}",
-            "company_name": f"Failed Biz {i + 1}",
-            "audit_status": "Failed",
-            "seo_score": 10 + i,  # 10..19
-            "lead_source": "google_maps" if i < 6 else ("csv" if i < 9 else "facebook"),
-        })
+        leads.append(
+            {
+                "name": f"Failed Biz {i + 1}",
+                "company_name": f"Failed Biz {i + 1}",
+                "audit_status": "Failed",
+                "seo_score": 10 + i,  # 10..19
+                "lead_source": "google_maps"
+                if i < 6
+                else ("csv" if i < 9 else "facebook"),
+            }
+        )
 
     # 10 Pending leads — no score yet (use 0)
     for i in range(10):
-        leads.append({
-            "name": f"Pending Inc {i + 1}",
-            "company_name": f"Pending Inc {i + 1}",
-            "audit_status": "Pending",
-            "seo_score": 0,
-            "lead_source": "google_maps" if i < 4 else ("csv" if i < 9 else "facebook"),
-        })
+        leads.append(
+            {
+                "name": f"Pending Inc {i + 1}",
+                "company_name": f"Pending Inc {i + 1}",
+                "audit_status": "Pending",
+                "seo_score": 0,
+                "lead_source": "google_maps"
+                if i < 4
+                else ("csv" if i < 9 else "facebook"),
+            }
+        )
 
     assert len(leads) == 50, len(leads)
     return leads
@@ -131,8 +178,10 @@ def _allowed_numbers(gt: dict) -> set[int]:
         gt["total"],
         *gt["by_audit_status"].values(),
         *gt["by_lead_source"].values(),
-        gt["min_score_completed"], gt["max_score_completed"],
-        gt["low_score_count"], gt["high_score_count"],
+        gt["min_score_completed"],
+        gt["max_score_completed"],
+        gt["low_score_count"],
+        gt["high_score_count"],
         int(gt["avg_score_completed"]),
         round(gt["avg_score_completed"]),
         100,  # 100% of pipeline — common phrasing
@@ -166,29 +215,47 @@ def _is_action_led(insight: str) -> bool:
 
 # ---- Fake Supabase ---------------------------------------------------------
 
+
 class _FakeExec:
-    def __init__(self, rows): self.data = rows
+    def __init__(self, rows):
+        self.data = rows
 
 
 class _FakeQuery:
-    def __init__(self, leads): self._leads = leads
-    def select(self, *_a, **_k): return self
-    def eq(self, _col, _val): return self
-    def limit(self, n): return _Limited(self._leads[:n])
-    def execute(self): return _FakeExec(self._leads)
+    def __init__(self, leads):
+        self._leads = leads
+
+    def select(self, *_a, **_k):
+        return self
+
+    def eq(self, _col, _val):
+        return self
+
+    def limit(self, n):
+        return _Limited(self._leads[:n])
+
+    def execute(self):
+        return _FakeExec(self._leads)
 
 
 class _Limited:
-    def __init__(self, rows): self._rows = rows
-    def execute(self): return _FakeExec(self._rows)
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self):
+        return _FakeExec(self._rows)
 
 
 class _FakeSB:
-    def __init__(self, leads): self._leads = leads
-    def table(self, _name): return _FakeQuery(self._leads)
+    def __init__(self, leads):
+        self._leads = leads
+
+    def table(self, _name):
+        return _FakeQuery(self._leads)
 
 
 # ---- Judge -----------------------------------------------------------------
+
 
 def _judge_prompt(ground_truth: dict, output: dict) -> str:
     return (
@@ -219,15 +286,19 @@ def _parse_judge(raw: str) -> tuple[int, str]:
 
 # ---- Test class ------------------------------------------------------------
 
+
 @pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
 class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
     """50-lead seeded DB, 5 /insights runs, ground-truth judge."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+            },
+        )
         self.env_patcher.start()
 
         self.leads = _fixture_leads()
@@ -239,6 +310,7 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
         sb_mock.return_value.client = _FakeSB(self.leads)
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
         self.assertIsNotNone(self.router.client, "Gemini client must initialize")
 
@@ -250,7 +322,9 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
             async with sem:
                 return await self.router._get_strategic_insights()
 
-        self.outputs: list[dict] = await asyncio.gather(*(_one() for _ in range(N_RUNS)))
+        self.outputs: list[dict] = await asyncio.gather(
+            *(_one() for _ in range(N_RUNS))
+        )
 
     async def asyncTearDown(self):
         self.sb_patcher.stop()
@@ -290,7 +364,7 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(
             fallbacks,
             "Insights returned a fallback shape — JSON parse failed upstream:\n"
-            + "\n".join(fallbacks)
+            + "\n".join(fallbacks),
         )
 
     def test_output_structure(self):
@@ -305,7 +379,9 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
             if "insights" in o and not isinstance(o["insights"], list):
                 failures.append(f"run {i}: insights is {type(o['insights']).__name__}")
             if "top_priorities" in o and not isinstance(o["top_priorities"], list):
-                failures.append(f"run {i}: top_priorities is {type(o['top_priorities']).__name__}")
+                failures.append(
+                    f"run {i}: top_priorities is {type(o['top_priorities']).__name__}"
+                )
         self.assertFalse(failures, "Structure violations:\n" + "\n".join(failures))
 
     def test_no_invented_numbers(self):
@@ -340,7 +416,8 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
         for i, o in enumerate(self.outputs):
             insights = [s for s in (o.get("insights") or []) if isinstance(s, str)]
             tp_reasons = [
-                tp.get("reason", "") for tp in (o.get("top_priorities") or [])
+                tp.get("reason", "")
+                for tp in (o.get("top_priorities") or [])
                 if isinstance(tp, dict)
             ]
             candidates = insights + tp_reasons
@@ -350,7 +427,9 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
                     f"run {i}: {len(actionable)} action-led recommendations "
                     f"(need >= {MIN_ACTIONABLE}). Candidates: {candidates}"
                 )
-        self.assertFalse(failures, "Not enough actionable recommendations:\n" + "\n".join(failures))
+        self.assertFalse(
+            failures, "Not enough actionable recommendations:\n" + "\n".join(failures)
+        )
 
     def test_dominant_data_fact_mentioned(self):
         """
@@ -370,11 +449,13 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
                 str(self.gt["by_lead_source"][self.gt["dominant_source"]]),
             ]
             if not any(s in blob for s in signals):
-                failures.append(f"run {i}: no dominant signal mentioned. tried={signals}")
+                failures.append(
+                    f"run {i}: no dominant signal mentioned. tried={signals}"
+                )
         self.assertFalse(
             failures,
             "Dominant data-fact missing (must mention dominant audit_status or lead_source):\n"
-            + "\n".join(failures)
+            + "\n".join(failures),
         )
 
     async def test_judge_average_at_least_8(self):
@@ -405,7 +486,7 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
         parse_errors = [(i, r) for i, (s, r) in enumerate(results) if s < 0]
         self.assertFalse(
             parse_errors,
-            "Judge JSON parse failures:\n" + "\n".join(str(e) for e in parse_errors)
+            "Judge JSON parse failures:\n" + "\n".join(str(e) for e in parse_errors),
         )
 
         scores = [s for s, _ in results]
@@ -413,11 +494,14 @@ class TestInsightsQuality(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(s, 1)
             self.assertLessEqual(s, 10)
         avg = sum(scores) / len(scores)
-        breakdown = ", ".join(f"run{i}={s} ({r[:40]!r})" for i, (s, r) in enumerate(results))
+        breakdown = ", ".join(
+            f"run{i}={s} ({r[:40]!r})" for i, (s, r) in enumerate(results)
+        )
         self.assertGreaterEqual(
-            avg, JUDGE_THRESHOLD,
+            avg,
+            JUDGE_THRESHOLD,
             f"Judge average {avg:.2f} below threshold {JUDGE_THRESHOLD}. "
-            f"Per-run: {breakdown}"
+            f"Per-run: {breakdown}",
         )
 
 

@@ -1,7 +1,18 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { offlineQueue } from '@/utils/offlineQueue';
+
+function subscribeOnline(cb: () => void) {
+  window.addEventListener('online', cb);
+  window.addEventListener('offline', cb);
+  return () => {
+    window.removeEventListener('online', cb);
+    window.removeEventListener('offline', cb);
+  };
+}
+const getOnlineSnapshot = () => navigator.onLine;
+const getOnlineServerSnapshot = () => true;
 
 /**
  * Sticky offline banner. Mounts once at the layout level so it shows on
@@ -13,7 +24,11 @@ import { offlineQueue } from '@/utils/offlineQueue';
  * banner just reflects the count.
  */
 export default function OfflineBanner() {
-  const [isOnline, setIsOnline] = useState(true);
+  const isOnline = useSyncExternalStore(
+    subscribeOnline,
+    getOnlineSnapshot,
+    getOnlineServerSnapshot,
+  );
   const queuedCount = useSyncExternalStore(
     (cb) => offlineQueue.subscribe(cb),
     () => offlineQueue.size(),
@@ -21,17 +36,7 @@ export default function OfflineBanner() {
   );
 
   useEffect(() => {
-    // SSR safety — navigator only exists in the browser.
-    if (typeof navigator !== 'undefined') setIsOnline(navigator.onLine);
     offlineQueue.install();
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    return () => {
-      window.removeEventListener('online', on);
-      window.removeEventListener('offline', off);
-    };
   }, []);
 
   if (isOnline && queuedCount === 0) return null;

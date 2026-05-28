@@ -36,6 +36,7 @@ Exit codes:
     2 — Supabase client could not be configured
     3 — upsert raised
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,7 +51,9 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _audit_results(score: int, *, is_up: bool = True, red_flags: list[str] | None = None) -> dict[str, Any]:
+def _audit_results(
+    score: int, *, is_up: bool = True, red_flags: list[str] | None = None
+) -> dict[str, Any]:
     """Build a JSONB payload matching the shape gate in
     ``src/scripts/check_jsonb_shapes.py`` (required keys: ``score``,
     ``is_up``, ``tech_flags``, ``red_flags``).
@@ -179,7 +182,9 @@ _DEMO_LEADS: list[dict[str, Any]] = [
         "key_offerings": "Fresh seafood, daily catch, sunset views",
         "pain_points": "No mobile responsive design; broken contact form",
         "high_risk_flag": True,
-        "audit_results": _audit_results(42, red_flags=["no_mobile_viewport", "broken_form"]),
+        "audit_results": _audit_results(
+            42, red_flags=["no_mobile_viewport", "broken_form"]
+        ),
     },
     {
         "unique_key": "_demo_007",
@@ -459,7 +464,9 @@ def _enrich_row(row: dict[str, Any]) -> dict[str, Any]:
         **row,
         "lead_source": "_demo_",
         "is_demo": True,
-        "enrichment_status": "COMPLETED" if row["audit_status"] == "Completed" else "PENDING",
+        "enrichment_status": "COMPLETED"
+        if row["audit_status"] == "Completed"
+        else "PENDING",
         "needs_manual_review": False,
         "retry_count": 0,
         "created_at": now_iso,
@@ -470,7 +477,9 @@ def _enrich_row(row: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     db = SupabaseHelper()
     if not db.client:
-        logger.error("Supabase client not configured — set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY")
+        logger.error(
+            "Supabase client not configured — set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY"
+        )
         return 2
 
     rows = [_enrich_row(r) for r in _DEMO_LEADS]
