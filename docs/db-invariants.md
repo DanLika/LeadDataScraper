@@ -91,6 +91,20 @@ Extracted from `CLAUDE.md` (2026-05-26 shrink; original ~164k chars). Restored t
   > default. Recovered as PR #366 + audit-trail migration
   > `scripts/migrations/2026-05-27_apostrophe-fix-and-leads-last-name.sql`.
 
+  - **Post-apply verifier (`make verify-prod-constraints`).**
+    `schema_drift_check.py` covers the "does this constraint name
+    exist" axis but not "does the stored predicate match what the
+    source migration wrote." After PR #366
+    (`bug_constraint_apostrophe_double_escape_2026-05-27`), where the
+    Management API apply path silently doubled `'` inside regex /
+    IN-list literals and stranded the dispatcher pipeline, every
+    migration that lands a literal-bearing CHECK MUST be followed by
+    `scripts/migrations/_verify_constraints.py` — two layers
+    (`pg_get_constraintdef` text inspection + INSERT probe via
+    `DO $$ ... RAISE EXCEPTION` rollback). Wired into
+    `docs/runbooks/apply-phase-14-15-migrations.md` as a mandatory
+    post-apply step.
+
   10 constraints currently locked in (pre-Phase-14/15; the seven
   Phase 14/15 hardening additions live in the `EXPECTED_CHECK_CONSTRAINTS`
   dict but are not enumerated here — see the dict for the canonical
