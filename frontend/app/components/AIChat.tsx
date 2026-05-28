@@ -373,17 +373,17 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
         display: 'flex', 
         gap: '0.5rem' 
       }}>
-         <button 
+         <button
            onClick={() => setMessages([])}
            aria-label="Clear chat"
-           style={{ background: 'var(--surface-muted)', border: 'none', borderRadius: '20px', padding: '0.4rem 0.75rem', minHeight: '32px', color: 'var(--text-muted)', fontSize: '0.7rem', cursor: 'pointer' }}
+           style={{ background: 'var(--surface-muted)', border: 'none', borderRadius: '20px', padding: '0.5rem 1rem', minHeight: '44px', color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer' }}
          >
            Clear Chat
          </button>
-         <button 
+         <button
            onClick={() => setIsMinimized(true)}
            aria-label="Minimize AI chat"
-           style={{ background: 'var(--surface-muted)', border: 'none', borderRadius: '20px', padding: '0.4rem 0.75rem', minHeight: '32px', color: 'var(--text-muted)', fontSize: '0.7rem', cursor: 'pointer' }}
+           style={{ background: 'var(--surface-muted)', border: 'none', borderRadius: '20px', padding: '0.5rem 1rem', minHeight: '44px', color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer' }}
          >
            Minimize
          </button>
