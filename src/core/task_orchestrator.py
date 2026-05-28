@@ -145,7 +145,16 @@ class TaskOrchestrator:
                 "total_count": len(lead_ids) if lead_ids else 0,
                 "processed_count": 0,
                 "current_phase": "initialization",
-                "filters": filters
+                # Defensive normalize: the JSONB shape gate
+                # (check_jsonb_shapes.py) requires `filters` to be NULL
+                # OR match {type:str} OR {query:str, location:str}.
+                # Empty `{}` matches neither — would land as a future
+                # orphan row that fails the daily gate. Callers
+                # passing None / {} / [] / falsy-empty collapse to
+                # NULL (accepted by the gate's NULL-tolerant branch).
+                # Genuine pipeline / discovery callers still pass
+                # their populated dict and remain unchanged.
+                "filters": filters if filters else None,
             }
             await self.db.insert_orchestration_job(job_data)
 

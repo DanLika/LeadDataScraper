@@ -85,14 +85,19 @@ def main() -> int:
             return 2
 
         # --- Section 1: top by total_exec_time ---
+        # LIKE patterns bound as parameters — inline `%` in 'EXPLAIN%' /
+        # '%pg_stat_statements%' collides with psycopg's placeholder
+        # parser (only %s/%b/%t allowed), which is how this gate has
+        # been failing silently since it landed. Param binding side-
+        # steps the parser entirely.
         cur = conn.execute(
             "SELECT calls, total_exec_time, mean_exec_time, query "
             "FROM pg_stat_statements "
-            "WHERE query NOT ILIKE 'EXPLAIN%' "
-            "  AND query NOT ILIKE '%pg_stat_statements%' "
+            "WHERE query NOT ILIKE %s "
+            "  AND query NOT ILIKE %s "
             "ORDER BY total_exec_time DESC "
             "LIMIT %s",
-            (TOP_N,),
+            ("EXPLAIN%", "%pg_stat_statements%", TOP_N),
         )
         report.append("")
         report.append(f"  Top {TOP_N} by total_exec_time:")
@@ -108,10 +113,10 @@ def main() -> int:
             "SELECT calls, mean_exec_time, query "
             "FROM pg_stat_statements "
             "WHERE mean_exec_time > %s "
-            "  AND query NOT ILIKE 'EXPLAIN%' "
-            "  AND query NOT ILIKE '%pg_stat_statements%' "
+            "  AND query NOT ILIKE %s "
+            "  AND query NOT ILIKE %s "
             "ORDER BY mean_exec_time DESC",
-            (MEAN_EXEC_SLOW_MS,),
+            (MEAN_EXEC_SLOW_MS, "EXPLAIN%", "%pg_stat_statements%"),
         )
         slow_rows = cur.fetchall()
         report.append("")
@@ -135,9 +140,9 @@ def main() -> int:
             "FROM pg_stat_statements "
             "WHERE calls >= %s "
             "  AND (shared_blks_hit + shared_blks_read) > 0 "
-            "  AND query NOT ILIKE 'EXPLAIN%' "
-            "  AND query NOT ILIKE '%pg_stat_statements%'",
-            (HOT_QUERY_MIN_CALLS,),
+            "  AND query NOT ILIKE %s "
+            "  AND query NOT ILIKE %s",
+            (HOT_QUERY_MIN_CALLS, "EXPLAIN%", "%pg_stat_statements%"),
         )
         cold_rows: list[tuple[float, int, float, str]] = []
         for calls, mean_ms, hit, read, qtext in cur.fetchall():
