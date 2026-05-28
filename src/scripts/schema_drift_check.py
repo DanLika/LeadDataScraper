@@ -78,6 +78,11 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     "campaign_messages": {
         "campaign_messages_channel_allowed",
         "campaign_messages_status_allowed",
+        # Phase 14/15 — bounce_reason length cap (≤200 chars) applied via
+        # Management API 2026-05-27 along with the rest of the Phase 14/15
+        # hardening stack. Declared in supabase_schema.sql via
+        # `ALTER TABLE … ADD CONSTRAINT … CHECK …` (line 424).
+        "campaign_messages_bounce_reason_size",
     },
     "suppressions": {
         "suppressions_identifier_type_allowed",
@@ -90,6 +95,10 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     },
     "webhook_events": {
         "webhook_events_provider_allowed",
+        # Phase 14/15 — event_id length cap (1..256 chars) applied via
+        # Management API 2026-05-27. Declared in supabase_schema.sql
+        # via `ALTER TABLE … ADD CONSTRAINT … CHECK …` (line 783).
+        "webhook_events_event_id_size",
     },
     "sequences": {
         "sequences_status_allowed",
@@ -98,10 +107,25 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
         "sequence_steps_channel_allowed",
         "sequence_steps_branch_allowed",
         "sequence_steps_delay_nonneg",
+        # Phase 14/15 — window_start < window_end + send_days regex
+        # allowlist. Applied via Management API 2026-05-27. Declared
+        # in supabase_schema.sql via `ALTER TABLE … ADD CONSTRAINT
+        # … CHECK …` (lines 925, 934). send_days_format regex was
+        # re-applied in PR #366 (E''-prefix migration) after the
+        # initial apply baked in a literal apostrophe.
+        "sequence_steps_window_ordered",
+        "sequence_steps_send_days_format",
     },
     "sequence_variants": {
         "sequence_variants_weight_positive",
         "sequence_variants_label_format",
+        # Phase 14/15 — body length ≤16384 + subject ≤998 + content_type
+        # IN ('text','html'). Applied via Management API 2026-05-27.
+        # Declared in supabase_schema.sql via `ALTER TABLE … ADD
+        # CONSTRAINT … CHECK …` (lines 996, 1006). content_type_allowed
+        # was re-applied in PR #366 after apostrophe-escape munge.
+        "sequence_variants_body_size",
+        "sequence_variants_content_type_allowed",
     },
 }
 

@@ -2,8 +2,13 @@
 -- Run this in your Supabase SQL Editor
 
 CREATE TABLE IF NOT EXISTS leads (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    unique_key TEXT UNIQUE NOT NULL,
+    -- 2026-05-28: removed vestigial `id UUID PRIMARY KEY` declaration.
+    -- The live DB (introspected via schema-drift CI gate on PR #373)
+    -- never had an `id` column — `unique_key` has always been the PK,
+    -- which is what every call site uses (`.eq("unique_key", …)`).
+    -- See check_query_plans.py: "leads by unique_key (PK lookup)"
+    -- and CLAUDE.md cursor-pagination section. Issue #363 bucket #5.
+    unique_key TEXT PRIMARY KEY,
     name TEXT,
     website TEXT,
     email TEXT,
