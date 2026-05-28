@@ -52,9 +52,13 @@ def _load_env() -> dict[str, str]:
                 if v and k not in merged:
                     merged[k] = v
     for k in (
-        "RUN_CONCURRENCY_E2E", "ALLOW_DESTRUCTIVE_LEADS_CLEAR",
-        "BACKEND_URL", "API_SECRET_KEY", "ADMIN_TOKEN",
-        "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
+        "RUN_CONCURRENCY_E2E",
+        "ALLOW_DESTRUCTIVE_LEADS_CLEAR",
+        "BACKEND_URL",
+        "API_SECRET_KEY",
+        "ADMIN_TOKEN",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
         "NEXT_PUBLIC_SUPABASE_URL",
     ):
         v = os.environ.get(k)
@@ -86,6 +90,7 @@ pytestmark = [
 # Helpers.
 # ---------------------------------------------------------------------------
 
+
 def _service_role_client():
     url = ENV.get("SUPABASE_URL") or ENV.get("NEXT_PUBLIC_SUPABASE_URL")
     key = ENV.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -93,6 +98,7 @@ def _service_role_client():
         return None
     try:
         from supabase import create_client
+
         return create_client(url, key)
     except Exception:
         return None
@@ -125,8 +131,11 @@ async def _post(
 ) -> tuple[int, str]:
     url = f"{BACKEND_URL}/{path.lstrip('/')}"
     async with session.request(
-        method, url, headers=_auth_headers(extra_headers),
-        json=json_body, timeout=aiohttp.ClientTimeout(total=30),
+        method,
+        url,
+        headers=_auth_headers(extra_headers),
+        json=json_body,
+        timeout=aiohttp.ClientTimeout(total=30),
     ) as r:
         text = await r.text()
         return r.status, text
@@ -144,16 +153,22 @@ def _classify(statuses: list[int]) -> tuple[int, int, int]:
 # 1) /orchestrator/start — 3/minute, burst 20
 # ---------------------------------------------------------------------------
 
+
 async def test_orchestrator_start_burst_respects_rate_limit():
     svc = _service_role_client()
     before = _table_count(svc, "orchestration_jobs")
 
     async with aiohttp.ClientSession() as session:
-        results = await asyncio.gather(*[
-            _post(session, "orchestrator/start",
-                  json_body={"task": "audit", "filters": "all"})
-            for _ in range(20)
-        ])
+        results = await asyncio.gather(
+            *[
+                _post(
+                    session,
+                    "orchestrator/start",
+                    json_body={"task": "audit", "filters": "all"},
+                )
+                for _ in range(20)
+            ]
+        )
 
     statuses = [s for s, _ in results]
     ok, limited, other = _classify(statuses)
@@ -161,15 +176,10 @@ async def test_orchestrator_start_burst_respects_rate_limit():
     # Limit is 3/minute. Allow exactly the limit window — anything beyond is
     # a regression (or an attempt that landed past `verify_api_key` raising).
     assert ok <= 3, (
-        f"orchestrator/start: {ok} succeeded but limit is 3/min. "
-        f"Statuses: {statuses}"
+        f"orchestrator/start: {ok} succeeded but limit is 3/min. Statuses: {statuses}"
     )
-    assert limited >= 17, (
-        f"Expected ≥17 429s, got {limited}. Statuses: {statuses}"
-    )
-    assert other == 0, (
-        f"Unexpected non-2xx/non-429 responses: {statuses}"
-    )
+    assert limited >= 17, f"Expected ≥17 429s, got {limited}. Statuses: {statuses}"
+    assert other == 0, f"Unexpected non-2xx/non-429 responses: {statuses}"
 
     # No DB corruption: job count rose by ≤ ok (each successful start
     # inserts at most one job row). The exact count may be < ok if the
@@ -189,50 +199,48 @@ async def test_orchestrator_start_burst_respects_rate_limit():
 # 2) /campaigns/{id}/start — 10/minute, burst 20, idempotent
 # ---------------------------------------------------------------------------
 
+
 async def test_campaign_start_burst_idempotent():
     svc = _service_role_client()
     if svc is None:
-        pytest.skip(
-            "service-role client required to create + verify the campaign row"
-        )
+        pytest.skip("service-role client required to create + verify the campaign row")
 
     # Create a throw-away campaign directly via service-role.
     campaign_id = str(uuid.uuid4())
-    svc.table("campaigns").insert({
-        "id": campaign_id,
-        "name": f"concurrency-test-{campaign_id[:8]}",
-        "segment": "all",
-        "status": "draft",
-    }).execute()
+    svc.table("campaigns").insert(
+        {
+            "id": campaign_id,
+            "name": f"concurrency-test-{campaign_id[:8]}",
+            "segment": "all",
+            "status": "draft",
+        }
+    ).execute()
 
     try:
         async with aiohttp.ClientSession() as session:
-            results = await asyncio.gather(*[
-                _post(session, f"campaigns/{campaign_id}/start")
-                for _ in range(20)
-            ])
+            results = await asyncio.gather(
+                *[_post(session, f"campaigns/{campaign_id}/start") for _ in range(20)]
+            )
 
         statuses = [s for s, _ in results]
         ok, limited, other = _classify(statuses)
 
         assert ok <= 10, (
-            f"campaigns/start: {ok} succeeded but limit is 10/min. "
-            f"Statuses: {statuses}"
+            f"campaigns/start: {ok} succeeded but limit is 10/min. Statuses: {statuses}"
         )
-        assert limited >= 10, (
-            f"Expected ≥10 429s, got {limited}. Statuses: {statuses}"
-        )
-        assert other == 0, (
-            f"Unexpected non-2xx/non-429 responses: {statuses}"
-        )
+        assert limited >= 10, f"Expected ≥10 429s, got {limited}. Statuses: {statuses}"
+        assert other == 0, f"Unexpected non-2xx/non-429 responses: {statuses}"
 
         # Idempotency: still exactly one row, still active.
-        rows = svc.table("campaigns").select("id,status").eq(
-            "id", campaign_id
-        ).execute().data or []
-        assert len(rows) == 1, (
-            f"Campaign row duplicated under race: {len(rows)} rows"
+        rows = (
+            svc.table("campaigns")
+            .select("id,status")
+            .eq("id", campaign_id)
+            .execute()
+            .data
+            or []
         )
+        assert len(rows) == 1, f"Campaign row duplicated under race: {len(rows)} rows"
         assert rows[0]["status"] == "active", (
             f"Campaign status race-corrupted: {rows[0]['status']!r}"
         )
@@ -245,21 +253,22 @@ async def test_campaign_start_burst_idempotent():
 # 3) /audit/stop — clean stop, no zombie running jobs
 # ---------------------------------------------------------------------------
 
+
 async def test_audit_stop_leaves_no_running_jobs():
     svc = _service_role_client()
     if svc is None:
-        pytest.skip(
-            "service-role client required to seed + verify orchestration_jobs"
-        )
+        pytest.skip("service-role client required to seed + verify orchestration_jobs")
 
     # Seed at least one 'running' job so /audit/stop has something to stop.
     seeded_job_id = str(uuid.uuid4())
-    svc.table("orchestration_jobs").insert({
-        "id": seeded_job_id,
-        "task_type": "audit",
-        "status": "running",
-        "current_phase": "Concurrency e2e seed",
-    }).execute()
+    svc.table("orchestration_jobs").insert(
+        {
+            "id": seeded_job_id,
+            "task_type": "audit",
+            "status": "running",
+            "current_phase": "Concurrency e2e seed",
+        }
+    ).execute()
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -271,32 +280,41 @@ async def test_audit_stop_leaves_no_running_jobs():
 
         # No 'running' rows must remain — the handler `.update(status='stopped')
         # .eq('status','running')` zeroes them all.
-        running = svc.table("orchestration_jobs").select("id").eq(
-            "status", "running"
-        ).execute().data or []
+        running = (
+            svc.table("orchestration_jobs")
+            .select("id")
+            .eq("status", "running")
+            .execute()
+            .data
+            or []
+        )
         assert running == [], (
             f"audit/stop left {len(running)} zombie running job(s): "
             f"{[r['id'] for r in running[:5]]}"
         )
 
         # The seeded job specifically must be marked 'stopped' (not deleted).
-        row = svc.table("orchestration_jobs").select("status").eq(
-            "id", seeded_job_id
-        ).maybe_single().execute().data
+        row = (
+            svc.table("orchestration_jobs")
+            .select("status")
+            .eq("id", seeded_job_id)
+            .maybe_single()
+            .execute()
+            .data
+        )
         assert row is not None, "Seeded job was deleted, not stopped"
         assert row["status"] == "stopped", (
             f"Seeded job status race-corrupted: {row['status']!r}"
         )
 
     finally:
-        svc.table("orchestration_jobs").delete().eq(
-            "id", seeded_job_id
-        ).execute()
+        svc.table("orchestration_jobs").delete().eq("id", seeded_job_id).execute()
 
 
 # ---------------------------------------------------------------------------
 # 4) DELETE /leads/clear — destructive, 3/hour. Burst 10 → ≥ 7 rate-limited.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(
     ENV.get("ALLOW_DESTRUCTIVE_LEADS_CLEAR", "").strip() not in ("1", "true", "yes"),
@@ -311,14 +329,17 @@ async def test_leads_clear_burst_only_first_three_succeed():
         pytest.skip("ADMIN_TOKEN required for /leads/clear")
 
     async with aiohttp.ClientSession() as session:
-        results = await asyncio.gather(*[
-            _post(
-                session, "leads/clear",
-                method="DELETE",
-                extra_headers={"X-Admin-Token": ADMIN_TOKEN},
-            )
-            for _ in range(10)
-        ])
+        results = await asyncio.gather(
+            *[
+                _post(
+                    session,
+                    "leads/clear",
+                    method="DELETE",
+                    extra_headers={"X-Admin-Token": ADMIN_TOKEN},
+                )
+                for _ in range(10)
+            ]
+        )
 
     statuses = [s for s, _ in results]
     ok, limited, other = _classify(statuses)
@@ -329,6 +350,5 @@ async def test_leads_clear_burst_only_first_three_succeed():
         f"leads/clear: {ok} succeeded but limit is 3/hour. Statuses: {statuses}"
     )
     assert limited >= 7, (
-        f"Expected ≥7 429s on the burst of 10, got {limited}. "
-        f"Statuses: {statuses}"
+        f"Expected ≥7 429s on the burst of 10, got {limited}. Statuses: {statuses}"
     )

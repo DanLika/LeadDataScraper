@@ -41,16 +41,16 @@ EVIL_ORIGIN = "https://evil.com"
 # (method, path, body) — body is intentionally minimal: the Origin gate
 # fires BEFORE Pydantic validation, so a `{}` body must still get 403'd.
 STATE_CHANGING_ENDPOINTS = [
-    ("POST",   "process-all",              {}),
-    ("POST",   "ask",                      {"instruction": "hello"}),
-    ("POST",   "draft-outreach",           {"unique_key": "nonexistent"}),
-    ("POST",   "draft-linkedin",           {"unique_key": "nonexistent"}),
-    ("POST",   "execute",                  {"task": "STATUS_CHECK", "params": {}}),
-    ("POST",   "hunt-all",                 {}),
-    ("POST",   "discovery/start",          {"query": "x", "location": "y"}),
-    ("POST",   "orchestrator/start",       {"task": "audit", "filters": "all"}),
-    ("POST",   "campaigns",                {"name": "x", "segment": "all"}),
-    ("DELETE", "leads/clear",              {}),
+    ("POST", "process-all", {}),
+    ("POST", "ask", {"instruction": "hello"}),
+    ("POST", "draft-outreach", {"unique_key": "nonexistent"}),
+    ("POST", "draft-linkedin", {"unique_key": "nonexistent"}),
+    ("POST", "execute", {"task": "STATUS_CHECK", "params": {}}),
+    ("POST", "hunt-all", {}),
+    ("POST", "discovery/start", {"query": "x", "location": "y"}),
+    ("POST", "orchestrator/start", {"task": "audit", "filters": "all"}),
+    ("POST", "campaigns", {"name": "x", "segment": "all"}),
+    ("DELETE", "leads/clear", {}),
 ]
 
 
@@ -63,9 +63,12 @@ def _load_test_env() -> dict[str, str]:
                 if v and k not in merged:
                     merged[k] = v
     for k in (
-        "RUN_PROXY_ORIGIN_E2E", "FRONTEND_URL",
-        "TEST_USER_EMAIL", "TEST_USER_PASSWORD",
-        "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
+        "RUN_PROXY_ORIGIN_E2E",
+        "FRONTEND_URL",
+        "TEST_USER_EMAIL",
+        "TEST_USER_PASSWORD",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
         "NEXT_PUBLIC_SUPABASE_URL",
     ):
         v = os.environ.get(k)
@@ -96,6 +99,7 @@ pytestmark = pytest.mark.skipif(
 # state-change assertion is skipped but the 403 assertions still run.
 # ---------------------------------------------------------------------------
 
+
 def _service_role_client():
     url = ENV.get("SUPABASE_URL") or ENV.get("NEXT_PUBLIC_SUPABASE_URL")
     key = ENV.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -103,6 +107,7 @@ def _service_role_client():
         return None
     try:
         from supabase import create_client
+
         return create_client(url, key)
     except Exception:
         return None
@@ -124,6 +129,7 @@ def _snapshot_counts(client) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 # Login + e2e test.
 # ---------------------------------------------------------------------------
+
 
 def _login(page, frontend_url: str, email: str, password: str) -> None:
     """Drive the real login form. Bails if we don't end up on `/`."""
@@ -153,9 +159,7 @@ def test_proxy_origin_gate_blocks_cross_origin_state_change():
             _login(page, FRONTEND_URL, TEST_USER_EMAIL, TEST_USER_PASSWORD)
         except Exception as e:
             browser.close()
-            pytest.fail(
-                f"Login flow failed — cannot exercise origin gate. {e!r}"
-            )
+            pytest.fail(f"Login flow failed — cannot exercise origin gate. {e!r}")
 
         # `context.request` carries the browser context's cookies (Supabase
         # session) — but accepts arbitrary Origin overrides. That's exactly
@@ -177,8 +181,7 @@ def test_proxy_origin_gate_blocks_cross_origin_state_change():
             )
             if resp.status != 403:
                 failures.append(
-                    f"[foreign-origin] {method} {path} → {resp.status} "
-                    f"(expected 403)"
+                    f"[foreign-origin] {method} {path} → {resp.status} (expected 403)"
                 )
                 if resp.status < 400:
                     successes_through_gate.append(f"{method} {path}")
@@ -192,8 +195,7 @@ def test_proxy_origin_gate_blocks_cross_origin_state_change():
             )
             if resp_b.status != 403:
                 failures.append(
-                    f"[missing-origin] {method} {path} → {resp_b.status} "
-                    f"(expected 403)"
+                    f"[missing-origin] {method} {path} → {resp_b.status} (expected 403)"
                 )
                 if resp_b.status < 400:
                     successes_through_gate.append(f"{method} {path}")
@@ -209,7 +211,8 @@ def test_proxy_origin_gate_blocks_cross_origin_state_change():
         + (
             "\n\nDESTRUCTIVE: the following landed past the gate: "
             + ", ".join(successes_through_gate)
-            if successes_through_gate else ""
+            if successes_through_gate
+            else ""
         )
     )
 

@@ -27,6 +27,7 @@ import unittest
 import uuid
 from typing import Any, Dict, List, Optional
 
+import pytest
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,17 +35,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from supabase import create_client  # noqa: E402  (path insertion needed first)
 
 
-BACKEND_BASE_URL = (os.environ.get("BACKEND_BASE_URL") or "http://127.0.0.1:8000").rstrip("/")
+BACKEND_BASE_URL = (
+    os.environ.get("BACKEND_BASE_URL") or "http://127.0.0.1:8000"
+).rstrip("/")
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY") or ""
 SUPABASE_URL = os.environ.get("SUPABASE_URL") or ""
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
 
 MISSING_ENV = [
-    name for name, val in (
+    name
+    for name, val in (
         ("API_SECRET_KEY", API_SECRET_KEY),
         ("SUPABASE_URL", SUPABASE_URL),
         ("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY),
-    ) if not val
+    )
+    if not val
 ]
 
 LEAD_COUNT = 50
@@ -65,11 +70,16 @@ JOB_OVERALL_TIMEOUT_SEC = 10 * 60
 # these is non-null on a row whose audit_status is still the seeded
 # "Pending", we have a torn write.
 AUDIT_OUTPUT_COLS = (
-    "audit_results", "seo_score", "high_risk_flag",
-    "pain_points", "linkedin_hook", "email_hook",
+    "audit_results",
+    "seo_score",
+    "high_risk_flag",
+    "pain_points",
+    "linkedin_hook",
+    "email_hook",
 )
 
 
+@pytest.mark.live
 @unittest.skipIf(MISSING_ENV, f"Missing live-env: {', '.join(MISSING_ENV)}")
 class TestOrchestratorCooperativeCancel(unittest.TestCase):
     """One test. Long-running. Pre-conditions all live."""
@@ -78,7 +88,9 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.db = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
         cls.session = requests.Session()
-        cls.session.headers.update({"X-API-Key": API_SECRET_KEY, "Content-Type": "application/json"})
+        cls.session.headers.update(
+            {"X-API-Key": API_SECRET_KEY, "Content-Type": "application/json"}
+        )
         cls.fixture_keys: List[str] = []
         cls.job_id: Optional[str] = None
 
@@ -88,9 +100,13 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
         # midway. We seeded them, we own them.
         if cls.fixture_keys:
             try:
-                cls.db.table("leads").delete().in_("unique_key", cls.fixture_keys).execute()
+                cls.db.table("leads").delete().in_(
+                    "unique_key", cls.fixture_keys
+                ).execute()
             except Exception as exc:  # noqa: BLE001 — cleanup must not raise
-                sys.stderr.write(f"cleanup of {len(cls.fixture_keys)} fixture leads failed: {exc}\n")
+                sys.stderr.write(
+                    f"cleanup of {len(cls.fixture_keys)} fixture leads failed: {exc}\n"
+                )
         cls.session.close()
 
     # ------------------------------------------------------------------ helpers
@@ -112,14 +128,20 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
         ]
         # upsert (not insert) so a re-run after a partial earlier seed is idempotent.
         res = self.db.table("leads").upsert(rows, on_conflict="unique_key").execute()
-        self.assertEqual(len(res.data or []), LEAD_COUNT, "seed insert must return all rows")
+        self.assertEqual(
+            len(res.data or []), LEAD_COUNT, "seed insert must return all rows"
+        )
         type(self).fixture_keys = [r["unique_key"] for r in rows]
         return rows
 
     def _start_job(self) -> str:
         payload = {"lead_ids": type(self).fixture_keys, "tasks": ["audit"]}
-        resp = self.session.post(f"{BACKEND_BASE_URL}/orchestrator/start", json=payload, timeout=30)
-        self.assertEqual(resp.status_code, 200, f"start returned {resp.status_code}: {resp.text}")
+        resp = self.session.post(
+            f"{BACKEND_BASE_URL}/orchestrator/start", json=payload, timeout=30
+        )
+        self.assertEqual(
+            resp.status_code, 200, f"start returned {resp.status_code}: {resp.text}"
+        )
         body = resp.json()
         self.assertEqual(body.get("status"), "job_started", body)
         job_id = body.get("job_id")
@@ -127,13 +149,19 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
         return job_id
 
     def _stop_job(self, job_id: str) -> None:
-        resp = self.session.post(f"{BACKEND_BASE_URL}/orchestrator/stop/{job_id}", timeout=30)
-        self.assertEqual(resp.status_code, 200, f"stop returned {resp.status_code}: {resp.text}")
+        resp = self.session.post(
+            f"{BACKEND_BASE_URL}/orchestrator/stop/{job_id}", timeout=30
+        )
+        self.assertEqual(
+            resp.status_code, 200, f"stop returned {resp.status_code}: {resp.text}"
+        )
         body = resp.json()
         self.assertIn(body.get("status"), {"stopping", "not_found"}, body)
 
     def _poll_job_status(self, job_id: str) -> Dict[str, Any]:
-        resp = self.session.get(f"{BACKEND_BASE_URL}/orchestrator/status/{job_id}", timeout=30)
+        resp = self.session.get(
+            f"{BACKEND_BASE_URL}/orchestrator/status/{job_id}", timeout=30
+        )
         self.assertEqual(resp.status_code, 200, resp.text)
         return resp.json()
 
@@ -157,7 +185,7 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
                 .in_("unique_key", slice_keys)
                 .execute()
             )
-            for r in (res.data or []):
+            for r in res.data or []:
                 if r.get("last_processed_at"):
                     touched += 1
         return touched
@@ -190,14 +218,21 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
                     stable_streak = 0
                     last_non_pending = touched
             time.sleep(STOP_POLL_INTERVAL_SEC)
-        self.fail(f"job {job_id} did not drain within {STOP_POLL_TIMEOUT_SEC}s (last status={last_status})")
+        self.fail(
+            f"job {job_id} did not drain within {STOP_POLL_TIMEOUT_SEC}s (last status={last_status})"
+        )
 
     def _fetch_all_fixture_rows(self) -> List[Dict[str, Any]]:
         # Paginate defensively in case PostgREST default limit < 50.
         rows: List[Dict[str, Any]] = []
         for chunk_start in range(0, len(type(self).fixture_keys), 25):
             slice_keys = type(self).fixture_keys[chunk_start : chunk_start + 25]
-            res = self.db.table("leads").select("*").in_("unique_key", slice_keys).execute()
+            res = (
+                self.db.table("leads")
+                .select("*")
+                .in_("unique_key", slice_keys)
+                .execute()
+            )
             rows.extend(res.data or [])
         return rows
 
@@ -254,7 +289,9 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
         #   C) Failed:    audit_status == 'Failed' AND last_error NOT NULL.
         # Any other shape is a torn write.
         post_rows = self._fetch_all_fixture_rows()
-        self.assertEqual(len(post_rows), LEAD_COUNT, "all fixture rows must still exist")
+        self.assertEqual(
+            len(post_rows), LEAD_COUNT, "all fixture rows must still exist"
+        )
         post_by_key = {r["unique_key"]: r for r in post_rows}
 
         untouched = completed = failed = 0
@@ -267,7 +304,9 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
             seo_score = row.get("seo_score")
             last_error = row.get("last_error")
 
-            outputs_all_null = all(row.get(col) in (None, [], {}) for col in AUDIT_OUTPUT_COLS)
+            outputs_all_null = all(
+                row.get(col) in (None, [], {}) for col in AUDIT_OUTPUT_COLS
+            )
 
             if audit_status == pre.get("audit_status") and outputs_all_null:
                 # State A — untouched.
@@ -277,10 +316,14 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
             if audit_status == "Completed":
                 # State B — full audit. ALL the load-bearing outputs must be set.
                 if audit_results is None:
-                    violations.append(f"{key}: Completed but audit_results IS NULL (torn write)")
+                    violations.append(
+                        f"{key}: Completed but audit_results IS NULL (torn write)"
+                    )
                     continue
                 if seo_score is None:
-                    violations.append(f"{key}: Completed but seo_score IS NULL (torn write)")
+                    violations.append(
+                        f"{key}: Completed but seo_score IS NULL (torn write)"
+                    )
                     continue
                 try:
                     score = float(seo_score)
@@ -299,7 +342,9 @@ class TestOrchestratorCooperativeCancel(unittest.TestCase):
                 # Failed status was set by some other code path that didn't
                 # follow the contract.
                 if not last_error:
-                    violations.append(f"{key}: Failed but last_error is empty — non-atomic Failed write")
+                    violations.append(
+                        f"{key}: Failed but last_error is empty — non-atomic Failed write"
+                    )
                     continue
                 failed += 1
                 continue

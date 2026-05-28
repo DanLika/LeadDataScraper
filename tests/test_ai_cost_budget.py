@@ -26,6 +26,7 @@ https://ai.google.dev/pricing (gemini-flash-latest as of model release).
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise. Supabase mocked.
 """
+
 import asyncio
 import json
 import os
@@ -57,6 +58,7 @@ BUDGET_TOTAL_COST_USD = 0.50
 
 # ---- Usage capture -----------------------------------------------------------
 
+
 class UsageTracker:
     """
     Wraps client.models.generate_content (sync) and client.aio.models
@@ -64,6 +66,7 @@ class UsageTracker:
     output_tokens). The current `label` is mutable so a single client can
     cover multiple pipeline stages.
     """
+
     def __init__(self):
         self.records: list[tuple[str, int, int]] = []
         self._label = "unlabelled"
@@ -92,6 +95,7 @@ class UsageTracker:
             ti, to = outer._extract_usage(resp)
             outer.records.append((outer._label, ti, to))
             return resp
+
         self._target_sync.generate_content = _wrap_sync
 
         if has_aio:
@@ -103,6 +107,7 @@ class UsageTracker:
                 ti, to = outer._extract_usage(resp)
                 outer.records.append((outer._label, ti, to))
                 return resp
+
             self._target_async.generate_content = _wrap_async
 
     def restore(self):
@@ -116,6 +121,7 @@ class UsageTracker:
 
 
 # ---- Pipeline fixture --------------------------------------------------------
+
 
 def _fixture_leads() -> list[dict]:
     """20 leads spanning industries — diversity widens token-distribution coverage."""
@@ -134,58 +140,68 @@ def _fixture_leads() -> list[dict]:
     leads = []
     for i in range(N_LEADS):
         industry, blurb = industries[i % len(industries)]
-        leads.append({
-            "unique_key": f"budget_{i:02d}",
-            "name": f"Test {industry} #{i + 1}",
-            "company_name": f"Test {industry} #{i + 1}",
-            "website": f"https://lead-{i:02d}.example",
-            "email": f"contact{i}@lead-{i:02d}.example",
-            "business_details": blurb,
-            "leadership_team": f"Owner-Manager {i + 1}",
-            "target_clients": "Local SMBs and residential customers.",
-            "audit_results": {
-                "score": 25 + (i * 3) % 50,
-                "no_h1": (i % 3 == 0),
-                "missing_description": (i % 4 == 0),
-                "ssl_valid": (i % 2 == 0),
-                "pain_points": f"Common SEO and tracking gaps observed on site {i}.",
-                "tech_flags": {
-                    "has_viewport": True,
-                    "has_google_analytics": False,
-                    "has_facebook_pixel": False,
-                    "has_robots_txt": True,
-                    "has_sitemap": True,
+        leads.append(
+            {
+                "unique_key": f"budget_{i:02d}",
+                "name": f"Test {industry} #{i + 1}",
+                "company_name": f"Test {industry} #{i + 1}",
+                "website": f"https://lead-{i:02d}.example",
+                "email": f"contact{i}@lead-{i:02d}.example",
+                "business_details": blurb,
+                "leadership_team": f"Owner-Manager {i + 1}",
+                "target_clients": "Local SMBs and residential customers.",
+                "audit_results": {
+                    "score": 25 + (i * 3) % 50,
+                    "no_h1": (i % 3 == 0),
+                    "missing_description": (i % 4 == 0),
+                    "ssl_valid": (i % 2 == 0),
+                    "pain_points": f"Common SEO and tracking gaps observed on site {i}.",
+                    "tech_flags": {
+                        "has_viewport": True,
+                        "has_google_analytics": False,
+                        "has_facebook_pixel": False,
+                        "has_robots_txt": True,
+                        "has_sitemap": True,
+                    },
+                    "red_flags": [],
+                    "response_time": 1.5,
+                    "cms": "WordPress" if i % 2 else None,
                 },
-                "red_flags": [],
-                "response_time": 1.5,
-                "cms": "WordPress" if i % 2 else None,
-            },
-            "page_text": (
-                f"{industry} #{i + 1} is a small business in our region. {blurb} "
-                "Founded by a local owner. Operates from a primary location with "
-                "online presence growing year over year. Common services include "
-                "consultations, regular maintenance, and seasonal promotions."
-            ),
-        })
+                "page_text": (
+                    f"{industry} #{i + 1} is a small business in our region. {blurb} "
+                    "Founded by a local owner. Operates from a primary location with "
+                    "online presence growing year over year. Common services include "
+                    "consultations, regular maintenance, and seasonal promotions."
+                ),
+            }
+        )
     return leads
 
 
 # ---- Fake Supabase (LinkedIn draft needs DB; route_instruction lead_index) ---
 
+
 class _FakeExec:
-    def __init__(self, rows): self.data = rows
+    def __init__(self, rows):
+        self.data = rows
 
 
 class _FakeQuery:
     def __init__(self, leads_by_key):
         self._lbk = leads_by_key
         self._eq = None
-    def select(self, *_a, **_k): return self
+
+    def select(self, *_a, **_k):
+        return self
+
     def eq(self, col, val):
         if col == "unique_key":
             self._eq = val
         return self
-    def limit(self, _n): return self
+
+    def limit(self, _n):
+        return self
+
     def execute(self):
         if self._eq is not None:
             lead = self._lbk.get(self._eq)
@@ -194,11 +210,15 @@ class _FakeQuery:
 
 
 class _FakeSB:
-    def __init__(self, leads_by_key): self._lbk = leads_by_key
-    def table(self, _name): return _FakeQuery(self._lbk)
+    def __init__(self, leads_by_key):
+        self._lbk = leads_by_key
+
+    def table(self, _name):
+        return _FakeQuery(self._lbk)
 
 
 # ---- Test --------------------------------------------------------------------
+
 
 @pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
@@ -206,9 +226,12 @@ class TestAICostBudget(unittest.IsolatedAsyncioTestCase):
     """End-to-end token/cost budget over 20 fixture leads."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+            },
+        )
         self.env_patcher.start()
 
         self.leads = _fixture_leads()
@@ -223,8 +246,7 @@ class TestAICostBudget(unittest.IsolatedAsyncioTestCase):
 
         self.hunter = LeadHunter()
         self.router = AgenticRouter()
-        for name, c in (("hunter", self.hunter.client),
-                        ("router", self.router.client)):
+        for name, c in (("hunter", self.hunter.client), ("router", self.router.client)):
             self.assertIsNotNone(c, f"{name} Gemini client must initialize")
 
         self.tracker_hunter = UsageTracker()
@@ -240,45 +262,73 @@ class TestAICostBudget(unittest.IsolatedAsyncioTestCase):
 
         # --- pain_points (async) ---
         self.tracker_hunter.set_label("pain_points")
-        await asyncio.gather(*[
-            _gated(lambda l=l: self.hunter.analyze_pain_points_async(
-                l["page_text"], l["name"], l["audit_results"]))
-            for l in self.leads
-        ])
+        await asyncio.gather(
+            *[
+                _gated(
+                    lambda l=l: self.hunter.analyze_pain_points_async(
+                        l["page_text"], l["name"], l["audit_results"]
+                    )
+                )
+                for l in self.leads
+            ]
+        )
 
         # --- hooks (async) ---
         self.tracker_hunter.set_label("hooks")
-        await asyncio.gather(*[
-            _gated(lambda l=l: self.hunter.generate_outreach_hooks_async(
-                l["audit_results"]["pain_points"], l["name"], l["audit_results"]))
-            for l in self.leads
-        ])
+        await asyncio.gather(
+            *[
+                _gated(
+                    lambda l=l: self.hunter.generate_outreach_hooks_async(
+                        l["audit_results"]["pain_points"], l["name"], l["audit_results"]
+                    )
+                )
+                for l in self.leads
+            ]
+        )
 
         # --- enrich (async) ---
         self.tracker_hunter.set_label("enrich")
-        await asyncio.gather(*[
-            _gated(lambda l=l: self.hunter.enrich_business_data_async(
-                l["page_text"], l["name"]))
-            for l in self.leads
-        ])
+        await asyncio.gather(
+            *[
+                _gated(
+                    lambda l=l: self.hunter.enrich_business_data_async(
+                        l["page_text"], l["name"]
+                    )
+                )
+                for l in self.leads
+            ]
+        )
 
         # --- outreach (sync inside router; bridge via to_thread for parallelism) ---
         self.tracker_router.set_label("outreach")
-        await asyncio.gather(*[
-            _gated(lambda l=l: self.router._generate_outreach_draft({
-                "unique_key": l["unique_key"], "lead_data": l,
-            }))
-            for l in self.leads
-        ])
+        await asyncio.gather(
+            *[
+                _gated(
+                    lambda l=l: self.router._generate_outreach_draft(
+                        {
+                            "unique_key": l["unique_key"],
+                            "lead_data": l,
+                        }
+                    )
+                )
+                for l in self.leads
+            ]
+        )
 
         # --- linkedin (sync inside router; fake DB lookup wired in asyncSetUp) ---
         self.tracker_router.set_label("linkedin")
-        await asyncio.gather(*[
-            _gated(lambda l=l: self.router._generate_linkedin_draft({
-                "unique_key": l["unique_key"],
-            }))
-            for l in self.leads
-        ])
+        await asyncio.gather(
+            *[
+                _gated(
+                    lambda l=l: self.router._generate_linkedin_draft(
+                        {
+                            "unique_key": l["unique_key"],
+                        }
+                    )
+                )
+                for l in self.leads
+            ]
+        )
 
         # Combined record list for downstream assertions
         self.records: list[tuple[str, int, int]] = (
@@ -316,8 +366,9 @@ class TestAICostBudget(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _cost_usd(input_tok: int, output_tok: int) -> float:
-        return (input_tok / 1_000_000) * PRICE_INPUT_PER_MTOK + \
-               (output_tok / 1_000_000) * PRICE_OUTPUT_PER_MTOK
+        return (input_tok / 1_000_000) * PRICE_INPUT_PER_MTOK + (
+            output_tok / 1_000_000
+        ) * PRICE_OUTPUT_PER_MTOK
 
     def _print_breakdown(self):
         """Always print — surfaces telemetry on success AND failure."""
@@ -356,17 +407,19 @@ class TestAICostBudget(unittest.IsolatedAsyncioTestCase):
     def test_total_input_tokens_under_budget(self):
         total_in, _ = self._totals()
         self.assertLess(
-            total_in, BUDGET_TOTAL_INPUT,
+            total_in,
+            BUDGET_TOTAL_INPUT,
             f"Total input tokens {total_in:,} >= budget {BUDGET_TOTAL_INPUT:,}. "
-            f"Inspect prompt bloat (likely culprit: large fenced_json payloads)."
+            f"Inspect prompt bloat (likely culprit: large fenced_json payloads).",
         )
 
     def test_total_output_tokens_under_budget(self):
         _, total_out = self._totals()
         self.assertLess(
-            total_out, BUDGET_TOTAL_OUTPUT,
+            total_out,
+            BUDGET_TOTAL_OUTPUT,
             f"Total output tokens {total_out:,} >= budget {BUDGET_TOTAL_OUTPUT:,}. "
-            f"A draft or insights call may be returning much longer text than spec."
+            f"A draft or insights call may be returning much longer text than spec.",
         )
 
     def test_no_single_call_exceeds_input_cap(self):
@@ -392,21 +445,25 @@ class TestAICostBudget(unittest.IsolatedAsyncioTestCase):
         total_in, total_out = self._totals()
         cost = self._cost_usd(total_in, total_out)
         self.assertLess(
-            cost, BUDGET_TOTAL_COST_USD,
+            cost,
+            BUDGET_TOTAL_COST_USD,
             f"Pipeline cost ${cost:.4f} >= budget ${BUDGET_TOTAL_COST_USD}. "
-            f"Input={total_in:,} Output={total_out:,}. Check breakdown above."
+            f"Input={total_in:,} Output={total_out:,}. Check breakdown above.",
         )
 
     def test_every_pipeline_stage_emitted_calls(self):
         """Guards against silent partial-failure: e.g. enrich returns early and
         never hits Gemini, hiding token usage from this budget check."""
         agg = self._per_label_totals()
-        missing = [lbl for lbl in ("pain_points", "hooks", "enrich", "outreach", "linkedin")
-                   if agg.get(lbl, {}).get("calls", 0) == 0]
+        missing = [
+            lbl
+            for lbl in ("pain_points", "hooks", "enrich", "outreach", "linkedin")
+            if agg.get(lbl, {}).get("calls", 0) == 0
+        ]
         self.assertFalse(
             missing,
             f"No Gemini calls captured for stages: {missing}. "
-            f"Either the stage short-circuited or the tracker missed them."
+            f"Either the stage short-circuited or the tracker missed them.",
         )
 
 

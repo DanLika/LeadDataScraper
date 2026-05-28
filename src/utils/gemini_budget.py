@@ -150,7 +150,9 @@ def _next_midnight_utc_iso() -> str:
     now = datetime.now(timezone.utc)
     tomorrow = (now + timedelta(days=1)).date()
     midnight = datetime(
-        tomorrow.year, tomorrow.month, tomorrow.day,
+        tomorrow.year,
+        tomorrow.month,
+        tomorrow.day,
         tzinfo=timezone.utc,
     )
     # Use the same ISO format as the GDPR audit row writer: trailing Z.

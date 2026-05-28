@@ -5,13 +5,14 @@ from unittest.mock import MagicMock, AsyncMock, patch, sys
 from datetime import datetime
 from src.core.task_orchestrator import TaskOrchestrator
 
+
 class TestRobustness(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.orchestrator = TaskOrchestrator(max_concurrent=2)
         self.orchestrator.db = MagicMock()
         self.orchestrator.db.client.table.return_value.update.return_value.eq.return_value.execute = MagicMock()
         self.orchestrator._update_job_status = AsyncMock()
-        self.sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self.sleep_patcher = patch("asyncio.sleep", new_callable=AsyncMock)
         self.mock_sleep = self.sleep_patcher.start()
 
     def tearDown(self):
@@ -21,35 +22,39 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
         """Verify that retry_count increments on failure."""
         lead = {"unique_key": "test_lead", "retry_count": 0, "audit_status": "Pending"}
         auditor = MagicMock()
-        auditor.audit_single_lead = AsyncMock(side_effect=Exception("Simulated Failure"))
+        auditor.audit_single_lead = AsyncMock(
+            side_effect=Exception("Simulated Failure")
+        )
         enricher = MagicMock()
 
         result = await self.orchestrator._process_single_lead(lead, auditor, enricher)
-        
+
         # Check if the returned dictionary has retry_count=1, as the actual DB update
         # happens in batch later, not inside _process_single_lead
         self.assertIsInstance(result, dict)
         self.assertEqual(result.get("retry_count"), 1)
         self.assertEqual(result.get("audit_status"), "Pending")
 
-
     async def test_fail_fast(self):
         """Verify that orchestrator fails fast after consecutive batch failures."""
         job_id = "test_job"
-        
-        # Mock getting job status
-        self.orchestrator.get_job_status = AsyncMock(return_value={"status": "starting", "processed_count": 0})
 
+        # Mock getting job status
+        self.orchestrator.get_job_status = AsyncMock(
+            return_value={"status": "starting", "processed_count": 0}
+        )
 
         # Mock chunk fetch to return 1 lead
         self.orchestrator.db.client.table.return_value.select.return_value.or_.return_value.lt.return_value.order.return_value.limit.return_value.execute = MagicMock(
             return_value=MagicMock(data=[{"unique_key": "fail_lead", "retry_count": 0}])
         )
-        
+
         # Mock total count
         count_mock = MagicMock()
         count_mock.count = 10
-        self.orchestrator.db.client.table.return_value.select.return_value.or_.return_value.lt.return_value.execute = MagicMock(return_value=count_mock)
+        self.orchestrator.db.client.table.return_value.select.return_value.or_.return_value.lt.return_value.execute = MagicMock(
+            return_value=count_mock
+        )
 
         # Mock single lead process to always fail
         self.orchestrator._process_single_lead = AsyncMock(return_value=False)
@@ -67,7 +72,7 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
             MagicMock(data=[{"unique_key": "f3"}]),
             MagicMock(data=[{"unique_key": "f4"}]),
             MagicMock(data=[{"unique_key": "f5"}]),
-            MagicMock(data=[]) # Stop loop
+            MagicMock(data=[]),  # Stop loop
         ]
         self.orchestrator.db.client.table.return_value.select.return_value.or_.return_value.lt.return_value.order.return_value.limit.return_value.execute.side_effect = side_effect_data
 

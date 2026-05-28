@@ -127,6 +127,8 @@ export default function LeadTable(props: LeadTableProps) {
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // @tanstack/react-virtual lacks React Compiler annotations; skip is harmless.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: leads.length,
     getScrollElement: () => scrollRef.current,

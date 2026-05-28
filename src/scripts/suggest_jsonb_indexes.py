@@ -32,6 +32,7 @@ Exit codes:
         recommendations — this is advisory only, never gating)
     2 = misconfigured run or extension missing
 """
+
 from __future__ import annotations
 
 import os
@@ -131,9 +132,7 @@ def main() -> int:
                 for op_pat in GIN_PREDICATES:
                     if re.search(rf"{column}\s*{op_pat}", qtext):
                         if float(mean_ms) >= SLOW_MEAN_MS:
-                            gin_hits.append(
-                                (int(calls), float(mean_ms), qtext)
-                            )
+                            gin_hits.append((int(calls), float(mean_ms), qtext))
                         break  # one hit per query is enough
                 # Expression-index opportunities
                 for m in KEY_EXTRACT_RE.finditer(qtext):
@@ -150,16 +149,17 @@ def main() -> int:
                 for calls, mean_ms, qtext in gin_hits[:3]:
                     snippet = " ".join(qtext.split())[:120]
                     print(
-                        f"    calls={calls:>6}  mean={mean_ms:>6.1f}ms  "
-                        f"e.g. {snippet}…"
+                        f"    calls={calls:>6}  mean={mean_ms:>6.1f}ms  e.g. {snippet}…"
                     )
                 print(
                     f"  --> Suggest: CREATE INDEX ON public.{table} "
                     f"USING gin ({column});"
                 )
             else:
-                print(f"  No GIN-worthy traffic on {column} in last "
-                      f"pg_stat_statements window.")
+                print(
+                    f"  No GIN-worthy traffic on {column} in last "
+                    f"pg_stat_statements window."
+                )
 
             if key_extract_hits:
                 print(f"  Expression-index candidates on {column}:")

@@ -18,6 +18,7 @@ findings. Two-layer detection:
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise.
 """
+
 import asyncio
 import json
 import os
@@ -47,14 +48,49 @@ NUMBER_CLAIM_PATTERNS = [
 # Tech tokens the writer should never name. lead_data given to the prompt has
 # no tech_stack field at all; any mention is fabricated.
 TECH_TOKENS = [
-    "react", "vue", "angular", "svelte", "next.js", "nextjs",
-    "wordpress", "shopify", "squarespace", "webflow", "wix", "ghost",
-    "laravel", "django", "rails", "ruby on rails", "node.js", "nodejs",
-    "stripe", "hubspot", "salesforce", "mailchimp", "intercom", "zendesk",
-    "google analytics", "ga4", "segment", "mixpanel", "amplitude",
-    "aws", "gcp", "azure", "cloudflare", "vercel", "netlify",
-    "mongodb", "postgresql", "mysql", "redis", "elasticsearch",
-    "tailwind", "bootstrap", "material ui",
+    "react",
+    "vue",
+    "angular",
+    "svelte",
+    "next.js",
+    "nextjs",
+    "wordpress",
+    "shopify",
+    "squarespace",
+    "webflow",
+    "wix",
+    "ghost",
+    "laravel",
+    "django",
+    "rails",
+    "ruby on rails",
+    "node.js",
+    "nodejs",
+    "stripe",
+    "hubspot",
+    "salesforce",
+    "mailchimp",
+    "intercom",
+    "zendesk",
+    "google analytics",
+    "ga4",
+    "segment",
+    "mixpanel",
+    "amplitude",
+    "aws",
+    "gcp",
+    "azure",
+    "cloudflare",
+    "vercel",
+    "netlify",
+    "mongodb",
+    "postgresql",
+    "mysql",
+    "redis",
+    "elasticsearch",
+    "tailwind",
+    "bootstrap",
+    "material ui",
 ]
 
 # Title claims that imply named-person knowledge the writer doesn't have.
@@ -141,10 +177,12 @@ def _tech_hits(text: str) -> list[str]:
 
 
 async def _generate_one(router, lead: dict) -> dict:
-    return await router._generate_outreach_draft({
-        "unique_key": lead["unique_key"],
-        "lead_data": lead,
-    })
+    return await router._generate_outreach_draft(
+        {
+            "unique_key": lead["unique_key"],
+            "lead_data": lead,
+        }
+    )
 
 
 async def _generate_all(router, leads: list[dict]) -> list[dict]:
@@ -198,6 +236,7 @@ def _parse_judge(raw: str) -> list[dict]:
 async def _judge_one(router, lead: dict, draft: dict) -> tuple[str, list[dict]]:
     """Returns (unique_key, claims_list). Caller filters for verifiable=False."""
     from google.genai import types as genai_types
+
     source = _source_view_for_judge(lead)
     prompt = _judge_prompt(
         source=source,
@@ -220,12 +259,14 @@ async def _judge_one(router, lead: dict, draft: dict) -> tuple[str, list[dict]]:
         claims = _parse_judge(raw)
     except Exception:
         # Surface raw payload at the test layer rather than swallowing.
-        return lead["unique_key"], [{
-            "claim": f"<JUDGE_PARSE_ERROR>: {raw[:400]}",
-            "verifiable": False,
-            "source_field": None,
-            "reason": "judge returned non-JSON",
-        }]
+        return lead["unique_key"], [
+            {
+                "claim": f"<JUDGE_PARSE_ERROR>: {raw[:400]}",
+                "verifiable": False,
+                "source_field": None,
+                "reason": "judge returned non-JSON",
+            }
+        ]
     return lead["unique_key"], claims
 
 
@@ -235,15 +276,19 @@ class TestOutreachHallucination(unittest.IsolatedAsyncioTestCase):
     """Sparse-input hallucination guard for /draft-outreach."""
 
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": GEMINI_KEY or "",
-            "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": GEMINI_KEY or "",
+                "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
+            },
+        )
         self.env_patcher.start()
         self.sb_patcher = patch("src.core.agentic_router.SupabaseHelper")
         self.sb_patcher.start()
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
         self.assertIsNotNone(self.router.client, "Gemini client must initialize")
 
@@ -284,8 +329,12 @@ class TestOutreachHallucination(unittest.IsolatedAsyncioTestCase):
             body = g["draft"].get("draft", "")
             hits = _matches(body, PERSON_CLAIM_PATTERNS)
             if hits:
-                failures.append(f"{g['lead']['unique_key']}: invented title claim {hits}")
-        self.assertFalse(failures, "Fabricated leadership claims:\n" + "\n".join(failures))
+                failures.append(
+                    f"{g['lead']['unique_key']}: invented title claim {hits}"
+                )
+        self.assertFalse(
+            failures, "Fabricated leadership claims:\n" + "\n".join(failures)
+        )
 
     def test_no_tech_stack_mentions(self):
         """No specific tools/tech — audit_results is empty, no tech_stack exposed."""
@@ -295,7 +344,9 @@ class TestOutreachHallucination(unittest.IsolatedAsyncioTestCase):
             hits = _tech_hits(body)
             if hits:
                 failures.append(f"{g['lead']['unique_key']}: invented tech {hits}")
-        self.assertFalse(failures, "Fabricated tech-stack mentions:\n" + "\n".join(failures))
+        self.assertFalse(
+            failures, "Fabricated tech-stack mentions:\n" + "\n".join(failures)
+        )
 
     async def test_judge_finds_no_false_claims(self):
         """
@@ -317,7 +368,7 @@ class TestOutreachHallucination(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(
             all_false,
-            "Judge flagged unverifiable (invented) claims:\n" + "\n".join(all_false)
+            "Judge flagged unverifiable (invented) claims:\n" + "\n".join(all_false),
         )
 
 

@@ -18,9 +18,8 @@ export async function createClient() {
           // Used on Server Action paths (e.g. login) where the cookie is set
           // directly during the action handler, not via middleware.
           try {
-            const isProd = process.env.NODE_ENV === 'production'
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, hardenCookieOptions(options, isProd))
+              cookieStore.set(name, value, hardenCookieOptions(options))
             })
           } catch {
             // The `setAll` method was called from a Server Component, which
