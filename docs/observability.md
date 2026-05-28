@@ -350,6 +350,41 @@ arbitrary unauthenticated routes. The `isPublicPrefix` helper uses
 exact-match or trailing-slash-subpath logic (the same hardening that
 covers `/login`, `/auth`, `/api/auth`).
 
+### 10.1 Manual handler at `app/monitoring/route.ts`
+
+The webpack-plugin virtual route was empirically returning 404 in prod
+(see `test-results/10-mobile.md` RESP-044 — `GET /monitoring` and `POST
+/monitoring` both 404 against `lead-scraper-frontend.onrender.com`,
+confirmed via direct HTTP probe 2026-05-28). Root cause unconfirmed
+(suspected build-step glitch in `@sentry/nextjs@10.53.1` + Next 16
+interaction). Belt-and-braces fix: a physical route handler at
+`frontend/app/monitoring/route.ts` that always resolves in Next 16 App
+Router regardless of plugin auto-injection state. The physical file
+takes precedence over any webpack-injected virtual handler at the same
+path.
+
+`Sentry.init({ tunnel: '/monitoring' })` is set explicitly in
+`instrumentation-client.ts` (in addition to the `tunnelRoute` build-time
+injection) so the client SDK uses the tunnel even if the build-time env
+shim drops the value.
+
+Handler behaviour (`POST /monitoring`):
+
+| Condition | Response |
+|---|---|
+| `NEXT_PUBLIC_SENTRY_DSN` unset at build time | `204 No Content` (silent no-op — keeps dev/preview clean) |
+| `Content-Type` not `application/x-sentry-envelope` | `415 Unsupported Media Type` |
+| Body > 1 MB | `413 Payload Too Large` |
+| Envelope header missing `dsn` field or unparseable | `400 Bad Request` |
+| Envelope `dsn` host or projectId ≠ configured DSN | `403 Forbidden` (anti-abuse — prevents tunnel being used to ferry envelopes to arbitrary Sentry projects) |
+| Upstream Sentry ingest reject | `502 Bad Gateway` |
+| Upstream timeout (5 s `AbortSignal.timeout`) | `502 Bad Gateway` |
+| OPTIONS preflight | `204 No Content` |
+| Otherwise | `200 OK` |
+
+Runtime is `edge` (`AbortSignal.timeout` is edge-safe) and `dynamic =
+'force-dynamic'`.
+
 ## 11. Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -359,6 +394,9 @@ covers `/login`, `/auth`, `/api/auth`).
 | `Cannot find module '@sentry/nextjs'` in IDE | `npm install` hasn't run yet | `cd frontend && npm install` |
 | `/_sentry/test` returns 404 | `SENTRY_TEST_ENABLED` not set | Set to `1` in Render → save → redeploy |
 | Sentry shows 0 events after a known error | DSN wrong, or network blocked Sentry's ingest | Check DSN in Render dashboard; check `/monitoring` tunnel route reachable from browser |
+| `POST /monitoring` returns `404` in prod | Sentry webpack-plugin virtual route handler not generated for this build | §10.1 — `frontend/app/monitoring/route.ts` is the physical fallback; if it's missing for any reason, restore from `fix/sentry-tunnel-route` |
+| `POST /monitoring` returns `415` | SDK posting wrong `Content-Type` (should be `application/x-sentry-envelope`) | Likely `Sentry.init({ tunnel })` accidentally set to non-tunnel URL — verify `instrumentation-client.ts` |
+| `POST /monitoring` returns `403` | Envelope's embedded DSN doesn't match `NEXT_PUBLIC_SENTRY_DSN` | DSN env-var drift between Render frontend service and the Sentry project — re-sync |
 | Slack alert never fires | Alert rule's project filter doesn't match | Sentry → Alerts → edit rule, confirm `project` filter matches the backend/frontend project name |
 | `sentry-sdk` import fails after `make lock-python` | Lockfile didn't regenerate | `pip install pip-tools && make lock-python && pip install --require-hashes -r requirements.txt` |
 
