@@ -21,6 +21,7 @@ Coverage:
 Pure offline — no network calls. `getaddrinfo` is mocked at the module
 level so the test outcome is deterministic.
 """
+
 import asyncio
 import os
 import socket
@@ -38,61 +39,64 @@ from src.utils.ssrf_guard import SSRFError, assert_safe_url, assert_safe_scheme
 # blocked host, literal IP, or numeric-host regex).
 REJECT_CASES: list[tuple[str, str, str | None]] = [
     # Loopback literals (no DNS needed — ipaddress.ip_address resolves directly)
-    ("loopback_127",          "http://127.0.0.1/foo",           None),
-    ("loopback_127_https",    "https://127.0.0.1/foo",          None),
-    ("unspecified_0",         "http://0.0.0.0/foo",             None),
-    ("ipv6_loopback",         "http://[::1]/foo",               None),
-    ("ipv6_linklocal",        "http://[fe80::1]/foo",           None),
-
+    ("loopback_127", "http://127.0.0.1/foo", None),
+    ("loopback_127_https", "https://127.0.0.1/foo", None),
+    ("unspecified_0", "http://0.0.0.0/foo", None),
+    ("ipv6_loopback", "http://[::1]/foo", None),
+    ("ipv6_linklocal", "http://[fe80::1]/foo", None),
     # localhost — falls through to DNS lookup; mock resolver returns 127.0.0.1
-    ("localhost_hostname",    "http://localhost/foo",           "127.0.0.1"),
-
+    ("localhost_hostname", "http://localhost/foo", "127.0.0.1"),
     # Cloud metadata endpoints — IP literal OR hostname matched against _BLOCKED_HOSTS
-    ("aws_metadata_ip",       "http://169.254.169.254/latest",  None),
-    ("gcp_metadata_host",     "http://metadata.google.internal/foo", None),
-    ("gcp_metadata_alias",    "http://metadata.goog/foo",       None),
-    ("ec2_instance_data",     "http://instance-data/foo",       None),
-    ("azure_metadata_host",   "http://metadata.azure.com/metadata/instance", None),
-    ("oracle_metadata_host",  "http://metadata.oraclecloud.com/opc/v2/instance/", None),
-    ("alibaba_metadata_host", "http://metadata.alibabacloud.com/latest/meta-data/", None),
-    ("tencent_metadata_host", "http://metadata.tencentcloudapi.com/latest/meta-data/", None),
-
+    ("aws_metadata_ip", "http://169.254.169.254/latest", None),
+    ("gcp_metadata_host", "http://metadata.google.internal/foo", None),
+    ("gcp_metadata_alias", "http://metadata.goog/foo", None),
+    ("ec2_instance_data", "http://instance-data/foo", None),
+    ("azure_metadata_host", "http://metadata.azure.com/metadata/instance", None),
+    ("oracle_metadata_host", "http://metadata.oraclecloud.com/opc/v2/instance/", None),
+    (
+        "alibaba_metadata_host",
+        "http://metadata.alibabacloud.com/latest/meta-data/",
+        None,
+    ),
+    (
+        "tencent_metadata_host",
+        "http://metadata.tencentcloudapi.com/latest/meta-data/",
+        None,
+    ),
     # Kubernetes service DNS
-    ("k8s_default_svc",       "http://kubernetes.default.svc/api", None),
-    ("k8s_cluster_local",     "http://kubernetes.default.svc.cluster.local/api", None),
-
+    ("k8s_default_svc", "http://kubernetes.default.svc/api", None),
+    ("k8s_cluster_local", "http://kubernetes.default.svc.cluster.local/api", None),
     # RFC1918 private ranges (literals — no DNS)
-    ("rfc1918_10",            "http://10.0.0.1/foo",            None),
-    ("rfc1918_192_168",       "http://192.168.1.1/foo",         None),
-    ("rfc1918_172_16",        "http://172.16.0.1/foo",          None),
-
+    ("rfc1918_10", "http://10.0.0.1/foo", None),
+    ("rfc1918_192_168", "http://192.168.1.1/foo", None),
+    ("rfc1918_172_16", "http://172.16.0.1/foo", None),
     # Disallowed schemes
-    ("file_scheme",           "file:///etc/passwd",             None),
-    ("gopher_scheme",         "gopher://example.com/x",         None),
-    ("ftp_scheme",            "ftp://example.com/x",            None),
-    ("javascript_scheme",     "javascript:alert(1)",            None),
-    ("data_scheme",           "data:text/plain,evil",           None),
-
+    ("file_scheme", "file:///etc/passwd", None),
+    ("gopher_scheme", "gopher://example.com/x", None),
+    ("ftp_scheme", "ftp://example.com/x", None),
+    ("javascript_scheme", "javascript:alert(1)", None),
+    ("data_scheme", "data:text/plain,evil", None),
     # Userinfo confusion — `urlparse` extracts hostname='127.0.0.1', drops userinfo
-    ("userinfo_confusion",    "http://evil.com@127.0.0.1/foo",  None),
-
+    ("userinfo_confusion", "http://evil.com@127.0.0.1/foo", None),
     # Decimal-encoded IPv4 (regex catches it before DNS)
-    ("decimal_ipv4",          "http://2130706433/foo",          None),
-
+    ("decimal_ipv4", "http://2130706433/foo", None),
     # Hex-octet IPv4 — regex doesn't match (contains 'x'), but mocked DNS
     # returns the equivalent loopback so _assert_public_ip rejects.
-    ("hex_octet_ipv4",        "http://0x7f.0x0.0x0.0x1/foo",    "127.0.0.1"),
-
+    ("hex_octet_ipv4", "http://0x7f.0x0.0x0.0x1/foo", "127.0.0.1"),
     # Hostname that LOOKS public but DNS-resolves to private
-    ("dns_returns_private",   "http://attacker-controlled.example/foo", "10.0.0.5"),
+    ("dns_returns_private", "http://attacker-controlled.example/foo", "10.0.0.5"),
 ]
 
 
 ALLOW_CASES: list[tuple[str, str, str]] = [
-    ("google",          "https://google.com/",      "142.250.190.78"),
-    ("example_com",     "https://example.com/",     "93.184.216.34"),
-    ("valid_site",      "https://valid-site.io/",   "203.0.113.42"),  # TEST-NET-3 is not actually public, but ipaddress.is_global is True for it
-    ("with_path",       "https://api.example.com/v1/leads", "198.51.100.7"),
+    ("google", "https://google.com/", "142.250.190.78"),
+    ("example_com", "https://example.com/", "93.184.216.34"),
+    (
+        "valid_site",
+        "https://valid-site.io/",
+        "203.0.113.42",
+    ),  # TEST-NET-3 is not actually public, but ipaddress.is_global is True for it
+    ("with_path", "https://api.example.com/v1/leads", "198.51.100.7"),
     # Wait — TEST-NET (203.0.113.0/24, 198.51.100.0/24) ARE reserved.
     # See assertion comment in setUp.
 ]
@@ -113,11 +117,15 @@ class TestSSRFRejection(unittest.IsolatedAsyncioTestCase):
                 # Patch getaddrinfo on the running loop if we need to resolve.
                 if dns_ip is not None:
                     fake_loop = MagicMock()
-                    fake_loop.getaddrinfo = AsyncMock(return_value=_gai_returning(dns_ip))
+                    fake_loop.getaddrinfo = AsyncMock(
+                        return_value=_gai_returning(dns_ip)
+                    )
                     with patch("asyncio.get_event_loop", return_value=fake_loop):
                         try:
                             await assert_safe_url(url)
-                            failures.append(f"{label}: {url!r} not rejected (DNS={dns_ip})")
+                            failures.append(
+                                f"{label}: {url!r} not rejected (DNS={dns_ip})"
+                            )
                         except SSRFError:
                             pass
                         except Exception as e:
@@ -149,6 +157,7 @@ class TestSSRFAllow(unittest.IsolatedAsyncioTestCase):
         # behaviour. The test acknowledges this by sticking to IPs that are
         # actually globally routable in Python's check.
         import ipaddress
+
         for label, url, dns_ip in ALLOW_CASES:
             ip = ipaddress.ip_address(dns_ip)
             if not ip.is_global or ip.is_reserved or ip.is_multicast:
@@ -173,18 +182,23 @@ class TestDNSRebinding(unittest.IsolatedAsyncioTestCase):
     The guard is designed so EVERY call re-resolves — the second call must
     raise even though the first passed.
     """
+
     async def test_rebind_first_public_then_private(self):
         url = "http://attacker.example/x"
-        responses = iter([
-            _gai_returning("203.0.113.42"),  # TEST-NET-3 — reserved, NOT global
-            _gai_returning("10.0.0.5"),      # private
-        ])
+        responses = iter(
+            [
+                _gai_returning("203.0.113.42"),  # TEST-NET-3 — reserved, NOT global
+                _gai_returning("10.0.0.5"),  # private
+            ]
+        )
 
         # Use a globally-routable IP for the first response so the first check passes.
-        responses = iter([
-            _gai_returning("142.250.190.78"),  # google.com public IPv4
-            _gai_returning("10.0.0.5"),
-        ])
+        responses = iter(
+            [
+                _gai_returning("142.250.190.78"),  # google.com public IPv4
+                _gai_returning("10.0.0.5"),
+            ]
+        )
 
         async def _fake_gai(*_args, **_kwargs):
             return next(responses)
@@ -244,6 +258,7 @@ class TestAssertSafeScheme(unittest.TestCase):
 # by mocking DNS to return a PUBLIC IP — the guard MUST still reject because
 # the host is on the blocklist.
 
+
 class TestBlockedHostsMembership(unittest.IsolatedAsyncioTestCase):
     """Each `_BLOCKED_HOSTS` entry must reject even when DNS would say public."""
 
@@ -296,6 +311,7 @@ class TestSSRFGuardResolver(unittest.IsolatedAsyncioTestCase):
 
     async def _make_resolver(self):
         from src.utils.ssrf_guard import SSRFGuardResolver
+
         return SSRFGuardResolver()
 
     async def test_resolver_rejects_blocked_host(self):
@@ -325,8 +341,16 @@ class TestSSRFGuardResolver(unittest.IsolatedAsyncioTestCase):
         from src.utils.ssrf_guard import SSRFGuardResolver
 
         async def _fake_super_resolve(self, host, port=0, family=socket.AF_INET):
-            return [{"hostname": host, "host": "10.0.0.5", "port": port,
-                     "family": family, "proto": 0, "flags": 0}]
+            return [
+                {
+                    "hostname": host,
+                    "host": "10.0.0.5",
+                    "port": port,
+                    "family": family,
+                    "proto": 0,
+                    "flags": 0,
+                }
+            ]
 
         with patch.object(
             type(resolver).__mro__[1],  # DefaultResolver.resolve
@@ -342,8 +366,16 @@ class TestSSRFGuardResolver(unittest.IsolatedAsyncioTestCase):
         resolver = await self._make_resolver()
 
         async def _fake_super_resolve(self, host, port=0, family=socket.AF_INET):
-            return [{"hostname": host, "host": "142.250.190.78", "port": port,
-                     "family": family, "proto": 0, "flags": 0}]
+            return [
+                {
+                    "hostname": host,
+                    "host": "142.250.190.78",
+                    "port": port,
+                    "family": family,
+                    "proto": 0,
+                    "flags": 0,
+                }
+            ]
 
         with patch.object(
             type(resolver).__mro__[1],
@@ -366,30 +398,35 @@ class TestSSRFErrorMessages(unittest.TestCase):
     def test_scheme_rejection_message(self):
         # Kills mutant #15.
         from src.utils.ssrf_guard import assert_safe_scheme
+
         with self.assertRaisesRegex(SSRFError, r"^Blocked URL scheme:"):
             assert_safe_scheme("ftp://example.com/x")
 
     def test_no_host_message_in_scheme_check(self):
         # Kills mutant #17.
         from src.utils.ssrf_guard import assert_safe_scheme
+
         with self.assertRaisesRegex(SSRFError, r"^URL has no host$"):
             assert_safe_scheme("http:///path-only")
 
     def test_blocked_hostname_message(self):
         # Kills mutant #21.
         from src.utils.ssrf_guard import assert_safe_scheme
+
         with self.assertRaisesRegex(SSRFError, r"^Blocked hostname:"):
             assert_safe_scheme("http://metadata.google.internal/x")
 
     def test_numeric_host_message(self):
         # Kills mutant #23.
         from src.utils.ssrf_guard import assert_safe_scheme
+
         with self.assertRaisesRegex(SSRFError, r"^Suspicious numeric host"):
             assert_safe_scheme("http://2130706433/foo")
 
     def test_non_public_ip_message(self):
         # Kills mutant #26.
         from src.utils.ssrf_guard import assert_safe_scheme
+
         with self.assertRaisesRegex(SSRFError, r"^Blocked non-public IP"):
             assert_safe_scheme("http://10.0.0.1/x")
 
@@ -428,14 +465,27 @@ class TestMultiResultDNS(unittest.IsolatedAsyncioTestCase):
         # Kills mutant #45 (`continue` → `break` in SSRFGuardResolver).
         # Mirror of the above but at the aiohttp-resolver layer.
         from src.utils.ssrf_guard import SSRFGuardResolver
+
         resolver = SSRFGuardResolver()
 
         async def _fake_super_resolve(self, host, port=0, family=socket.AF_INET):
             return [
-                {"hostname": host, "host": "not-an-ip-at-all", "port": port,
-                 "family": family, "proto": 0, "flags": 0},
-                {"hostname": host, "host": "10.0.0.5", "port": port,
-                 "family": family, "proto": 0, "flags": 0},
+                {
+                    "hostname": host,
+                    "host": "not-an-ip-at-all",
+                    "port": port,
+                    "family": family,
+                    "proto": 0,
+                    "flags": 0,
+                },
+                {
+                    "hostname": host,
+                    "host": "10.0.0.5",
+                    "port": port,
+                    "family": family,
+                    "proto": 0,
+                    "flags": 0,
+                },
             ]
 
         with patch.object(
@@ -462,6 +512,7 @@ class TestAssertSafeUrlMessages(unittest.IsolatedAsyncioTestCase):
         # some platforms; safer to monkey-patch urlparse for one call.
         with patch("src.utils.ssrf_guard.urlparse") as mp:
             from urllib.parse import urlparse as _real
+
             calls = [_real("https://example.com/foo")]
             calls.append(_real("https://"))  # hostname empty
             mp.side_effect = calls
@@ -471,7 +522,9 @@ class TestAssertSafeUrlMessages(unittest.IsolatedAsyncioTestCase):
     async def test_dns_failure_message(self):
         # Kills mutant #33.
         fake_loop = MagicMock()
-        fake_loop.getaddrinfo = AsyncMock(side_effect=socket.gaierror(8, "nodename nor servname"))
+        fake_loop.getaddrinfo = AsyncMock(
+            side_effect=socket.gaierror(8, "nodename nor servname")
+        )
         with patch("asyncio.get_event_loop", return_value=fake_loop):
             with self.assertRaisesRegex(SSRFError, r"^DNS resolution failed for"):
                 await assert_safe_url("https://nonexistent.invalid/foo")
