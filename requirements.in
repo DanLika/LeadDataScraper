@@ -24,10 +24,20 @@ beautifulsoup4==4.13.3
 lxml==6.1.1
 google-genai==1.12.1
 urllib3==2.7.0
-fastapi==0.121.0
+fastapi==0.136.3
+# Transitive via fastapi; pinned to the fix-version floor for
+# PYSEC-2026-161 (starlette <1.0.1 vulnerable). fastapi 0.136 only
+# requires starlette>=0.46.0, so without this floor pip-compile keeps
+# the existing 0.49.3 to minimise diff — and the CVE stays in the lock.
+starlette>=1.0.1
 uvicorn==0.34.0
 python-multipart==0.0.29
 supabase==2.30.0
+# Phase 15.3 — Jinja2 sandbox + autoescape for the sequence_variants
+# body_template / subject_template rendering path. ~= pins minor so
+# patch updates flow via Dependabot without auto-accepting a 3.2
+# (Jinja2's sandbox has had bypass CVEs across minors: 2019, 2024).
+jinja2~=3.1.4
 python-dotenv==1.2.2
 aiohttp==3.13.5
 # Transitive of aiohttp on Python 3.10 (Dockerfile base image
@@ -74,3 +84,9 @@ pytest-asyncio>=1.0,<2.0
 pytest==9.0.3
 iniconfig==2.0.0
 pluggy==1.6.0
+# pytest-asyncio 1.4.0+ added a conditional transitive that resolves on
+# python<3.11 (our Render Docker base = python:3.10). The dep spec is a
+# range (<2,>=1.1) which --require-hashes rejects; pin explicitly. The
+# env marker scopes the install to the Docker base only — local devs on
+# py3.11+ skip the install but the entry stays in the lockfile.
+backports-asyncio-runner==1.2.0  ; python_version < "3.11"

@@ -1,7 +1,7 @@
 # Developer-facing targets. CI runs the same commands directly — this
 # file exists so the local-dev → CI parity is one `make` away.
 
-.PHONY: install-hooks uninstall-hooks pre-commit-all fmt fmt-frontend workflow-hashes lock-python help
+.PHONY: install-hooks uninstall-hooks pre-commit-all fmt fmt-frontend workflow-hashes lock-python verify-prod-constraints verify-prod-constraints-canary help
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -33,6 +33,21 @@ lock-python:  ## Regenerate requirements.txt from requirements.in with sha256 ha
 	@command -v pip-compile >/dev/null 2>&1 || python3 -m pip install --user pip-tools
 	pip-compile --generate-hashes --strip-extras --output-file requirements.txt requirements.in
 	@echo "Regenerated requirements.txt with hashes. Commit alongside requirements.in changes."
+
+verify-prod-constraints:  ## Verify prod CHECK constraints (run AFTER applying any migration with regex/IN-list literals)
+	@if [ -z "$$SUPABASE_ACCESS_TOKEN" ]; then \
+		echo "ERROR: SUPABASE_ACCESS_TOKEN not set."; \
+		echo "Generate a PAT at https://supabase.com/dashboard/account/tokens, then:"; \
+		echo "  SUPABASE_ACCESS_TOKEN=sbp_... make verify-prod-constraints"; \
+		exit 1; \
+	fi
+	python3 scripts/migrations/_verify_constraints.py
+
+verify-prod-constraints-canary:  ## One-shot probe — confirm Management API echoes RAISE EXCEPTION verbatim
+	@if [ -z "$$SUPABASE_ACCESS_TOKEN" ]; then \
+		echo "ERROR: SUPABASE_ACCESS_TOKEN not set."; exit 1; \
+	fi
+	python3 scripts/migrations/_verify_constraints.py --canary
 
 workflow-hashes:  ## Regenerate .github/workflow-hashes.json after intentional workflow edits
 	@python3 -c "import json, hashlib, pathlib; \

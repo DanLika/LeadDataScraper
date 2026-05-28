@@ -186,10 +186,11 @@ class TestDayBoundary:
         in usage_daily."""
         monkeypatch.setenv("GEMINI_DAILY_TOKEN_CEILING", "100000")
         import src.utils.gemini_budget as bm
+
         seq = iter(["2026-05-23", "2026-05-24"])
         monkeypatch.setattr(bm, "_today_utc", lambda: next(seq))
         check_budget(100, 200)  # day1
-        check_budget(50, 75)    # day2
+        check_budget(50, 75)  # day2
         # Both rows present (filter out any auto-created get_state row
         # if a third call slipped in).
         rows = sorted(_read_row(budget_env), key=lambda r: r[0])

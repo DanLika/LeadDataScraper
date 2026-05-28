@@ -292,17 +292,101 @@ CREATE TABLE email_send_ledger (
 CREATE INDEX idx_email_send_ledger_domain_sent
   ON email_send_ledger(recipient_domain, sent_at DESC);
 
-CREATE TABLE email_suppression (
-  email TEXT PRIMARY KEY,
-  reason TEXT NOT NULL,  -- 'bounce' / 'complaint' / 'manual'
-  added_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- Phase 14.2: renamed from email_suppression to a generic multi-channel
+-- table. identifier_type ∈ {email, domain, linkedin_url, phone}, channel ∈
+-- {email, linkedin, sms, all}. Dispatcher predicate filters on
+-- (identifier_type='email', channel ∈ {email, all}).
+CREATE TABLE suppressions (
+  id BIGSERIAL PRIMARY KEY,
+  identifier_type TEXT NOT NULL DEFAULT 'email',
+  identifier_value TEXT NOT NULL,
+  reason TEXT NOT NULL,  -- 'bounce' / 'bounce_hard' / 'bounce_soft_3x' /
+                         -- 'complaint' / 'manual' / 'unsubscribe' /
+                         -- 'gdpr_request' / 'spam_trap'
+  channel TEXT NOT NULL DEFAULT 'email',
+  source_provider TEXT,         -- 'resend' / 'instantly' / 'smtp' / 'heyreach' / 'manual'
+  source_campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by TEXT,
+  notes TEXT,
+  UNIQUE (identifier_type, identifier_value, channel)
 );
+CREATE INDEX idx_suppressions_lookup
+  ON suppressions (identifier_value, channel)
+  WHERE channel IN ('email', 'all');
 
 ALTER TABLE email_send_ledger ENABLE ROW LEVEL SECURITY;
-ALTER TABLE email_suppression ENABLE ROW LEVEL SECURITY;
+ALTER TABLE suppressions ENABLE ROW LEVEL SECURITY;
 -- + deny-all policies matching the 5-table pattern, + GRANT REVOKE
 -- on anon/authenticated, + schema_drift_check.py TABLES tuple update.
 ```
+
+**Repository layer (Phase 14.2):** `src/repositories/suppression_repo.py`
+provides `is_suppressed()`, `filter_suppressed()` (single batch query),
+`add()` (duplicate-tolerant via DB UNIQUE constraint), and
+`bulk_import()` (operator paste-500-emails workflow via PostgREST
+`upsert(ignore_duplicates=True)`). Dispatcher precheck is unchanged
+behaviour — just rewired to the new table + columns.
+
+### Phase 14.2 PR β — thread/idempotency columns + RFC 8058 + daily-cap env
+
+Three additive columns on `campaign_messages` (each backed by a partial
+index on its only lookup shape):
+
+- `thread_id TEXT` — provider-side conversation key. Webhook handler
+  (PR γ) attributes `email_replied` events back to the originating
+  thread via this column.
+- `in_reply_to_message_id TEXT` — points at a previously-sent message
+  in the same thread; NULL on the initial touch.
+- `tracking_id UUID DEFAULT gen_random_uuid()` — LDS-side opaque
+  identifier used by the RFC 8058 List-Unsubscribe-Post token. UNIQUE.
+
+**RFC 8058 unsubscribe endpoint** (`backend/main.py`):
+
+- `GET /unsubscribe/{token}` — minimal HTML confirmation page with a
+  POST form. Public, no API key, 10/min/IP throttle.
+- `POST /unsubscribe/{token}` — verify HMAC + timestamp window,
+  dereference `tracking_id → campaign_messages → leads.email`, insert
+  suppression(`identifier_type='email'`, `channel='all'`,
+  `reason='unsubscribe'`, `source_campaign_id`). Always 200 on
+  success / 410 on any failure (generic body — never leaks which
+  verification stage rejected).
+
+Token format (`src/utils/unsubscribe_tokens.py`):
+- 2-byte version `v1` + 32-byte payload (`tracking_id u128 BE` +
+  `issued_at u32 BE` + 12 reserved bytes) + 32-byte HMAC-SHA256
+- Total raw 66 bytes → 88-char URL-safe base64 (no padding)
+- 90-day TTL (Mailgun/Mailmodo recommendation)
+- ±5-min clock-skew tolerance
+- `hmac.compare_digest` everywhere — timing-safe
+
+**Daily cap + send window** (`src/utils/dispatch_policy.py`):
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `EMAIL_DAILY_CAP_PER_MAILBOX` | `30` | Per-mailbox cap once warmed |
+| `EMAIL_WARMUP_PER_MAILBOX` | `10` | Per-mailbox cap during 21-day warm-up |
+| `SEND_WINDOW_START` | `09:00` | HH:MM, inclusive |
+| `SEND_WINDOW_END` | `17:00` | HH:MM, exclusive |
+| `SEND_DAYS` | `mon,tue,wed,thu,fri` | Comma-separated tokens |
+| `SEND_TIMEZONE_MODE` | `lead` | `lead` / `campaign` / `UTC` |
+| `UNSUBSCRIBE_TOKEN_SECRET` | _(required)_ | HMAC signing key for token mint/verify |
+| `UNSUBSCRIBE_BASE_URL` | _(operator-set)_ | Base URL embedded in the List-Unsubscribe header |
+
+`DispatchPolicy` is loaded **once at process boot** from `os.environ`;
+test code can rebuild via `_reload_for_testing()`. Multi-worker uvicorn
+races mid-request env mutation, so the snapshot is the only legitimate
+read-path.
+
+**Instantly payload integration** (`src/integrations/instantly_models.py`):
+`from_lds_lead()` now accepts `list_unsubscribe=...` and threads it through
+two new custom variables (`list_unsubscribe`, `list_unsubscribe_post`).
+Instantly's custom-vars-to-header bridge writes them as the SMTP
+`List-Unsubscribe` and `List-Unsubscribe-Post` headers.
+
+Full wiring (dispatcher mints the token at push time using the freshly
+inserted `campaign_messages.tracking_id`) lands in PR γ alongside the
+webhook handler.
 
 ---
 
@@ -388,7 +472,9 @@ is 100% complete:
 
 → PR 2: Schema additions
     - provider_message_id + bounce_reason on campaign_messages
-    - email_send_ledger + email_suppression tables (+RLS, +grants)
+    - email_send_ledger + suppressions tables (+RLS, +grants)
+    - (Phase 14.2) suppressions renamed from email_suppression, extended
+      to multi-channel identifier_type + channel
     - schema_drift_check.py + check_grants_matrix.py allowlist updates
 
 → PR 3: Webhook handler

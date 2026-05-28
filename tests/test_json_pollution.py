@@ -50,6 +50,7 @@ def _set_api_key(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
     from main import limiter
+
     try:
         limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except (AttributeError, TypeError):
@@ -112,16 +113,20 @@ def client():
 # ---------------------------------------------------------------------------
 
 ENDPOINTS = [
-    ("POST", "/process-lead",      {"unique_key": "abc"}),
-    ("POST", "/draft-outreach",    {"unique_key": "abc"}),
-    ("POST", "/draft-linkedin",    {"unique_key": "abc"}),
-    ("POST", "/hunt-lead",         {"unique_key": "abc"}),
-    ("POST", "/enrich/start",      {"unique_key": "abc"}),
-    ("POST", "/ask",               {"instruction": {"text": "How many leads?"}}),
-    ("POST", "/execute",           {"task": "STATUS_CHECK", "params": {}}),
-    ("POST", "/campaigns",         {"name": "n", "channel": "email"}),
-    ("POST", "/discovery/start",   {"query": "pizza", "location": "NYC"}),
-    ("POST", "/orchestrator/start", {"filters": {}, "lead_ids": ["a"], "tasks": ["audit"]}),
+    ("POST", "/process-lead", {"unique_key": "abc"}),
+    ("POST", "/draft-outreach", {"unique_key": "abc"}),
+    ("POST", "/draft-linkedin", {"unique_key": "abc"}),
+    ("POST", "/hunt-lead", {"unique_key": "abc"}),
+    ("POST", "/enrich/start", {"unique_key": "abc"}),
+    ("POST", "/ask", {"instruction": {"text": "How many leads?"}}),
+    ("POST", "/execute", {"task": "STATUS_CHECK", "params": {}}),
+    ("POST", "/campaigns", {"name": "n", "channel": "email"}),
+    ("POST", "/discovery/start", {"query": "pizza", "location": "NYC"}),
+    (
+        "POST",
+        "/orchestrator/start",
+        {"filters": {}, "lead_ids": ["a"], "tasks": ["audit"]},
+    ),
 ]
 
 
@@ -150,7 +155,7 @@ PROTO_POLLUTION_PAYLOADS = [
     {"hasOwnProperty": "x"},
     {"valueOf": {"x": 1}},
     {"prototype": {"isAdmin": True}},
-    {"__class__": "AdminPlan"},                # Python attribute confusion
+    {"__class__": "AdminPlan"},  # Python attribute confusion
     {"__init__": "evil"},
 ]
 
@@ -160,9 +165,14 @@ PROTO_POLLUTION_PAYLOADS = [
     "pollution",
     PROTO_POLLUTION_PAYLOADS,
     ids=[
-        "__proto__", "constructor.prototype", "toString",
-        "hasOwnProperty", "valueOf", "prototype",
-        "__class__", "__init__",
+        "__proto__",
+        "constructor.prototype",
+        "toString",
+        "hasOwnProperty",
+        "valueOf",
+        "prototype",
+        "__class__",
+        "__init__",
     ],
 )
 def test_prototype_pollution_rejected(client, method, path, base, pollution):
@@ -216,10 +226,16 @@ DUPLICATE_KEY_PAYLOADS = [
 @pytest.mark.parametrize(
     "path,raw_json,expect_4xx",
     DUPLICATE_KEY_PAYLOADS,
-    ids=["execute-task-evil-wins", "execute-task-same-twice",
-         "campaigns-channel-evil-wins", "discovery-query-oversize-wins"],
+    ids=[
+        "execute-task-evil-wins",
+        "execute-task-same-twice",
+        "campaigns-channel-evil-wins",
+        "discovery-query-oversize-wins",
+    ],
 )
-def test_duplicate_keys_last_value_wins_and_validator_catches(client, path, raw_json, expect_4xx):
+def test_duplicate_keys_last_value_wins_and_validator_catches(
+    client, path, raw_json, expect_4xx
+):
     """JSON spec leaves duplicate-key behavior undefined. Python's
     `json.loads` keeps the LAST occurrence. If an attacker crafts a
     body where the SECOND value is malicious, the allowlist must still
@@ -243,14 +259,14 @@ def test_duplicate_keys_last_value_wins_and_validator_catches(client, path, raw_
 # control chars (semgrep flags those at write time — CWE-94).
 # Same byte values at runtime.
 CONTROL_CHAR_STRING_PAYLOADS = [
-    "x" + chr(0x00) + "y",   # NUL
-    "x" + chr(0x01) + "y",   # SOH
-    "x" + chr(0x08) + "y",   # backspace
-    "x" + chr(0x0b) + "y",   # VT
-    "x" + chr(0x0c) + "y",   # FF
-    "x" + chr(0x7f) + "y",   # DEL
+    "x" + chr(0x00) + "y",  # NUL
+    "x" + chr(0x01) + "y",  # SOH
+    "x" + chr(0x08) + "y",  # backspace
+    "x" + chr(0x0B) + "y",  # VT
+    "x" + chr(0x0C) + "y",  # FF
+    "x" + chr(0x7F) + "y",  # DEL
     chr(0x202E) + " reversed",  # right-to-left override (bidi)
-    "x" + chr(0x00) * 100,   # NUL bomb
+    "x" + chr(0x00) * 100,  # NUL bomb
 ]
 
 
@@ -258,8 +274,14 @@ CONTROL_CHAR_STRING_PAYLOADS = [
     "control_str",
     CONTROL_CHAR_STRING_PAYLOADS,
     ids=[
-        "nul", "soh", "backspace", "vt", "ff", "del",
-        "rtl-override", "nul-bomb",
+        "nul",
+        "soh",
+        "backspace",
+        "vt",
+        "ff",
+        "del",
+        "rtl-override",
+        "nul-bomb",
     ],
 )
 def test_control_chars_do_not_crash_validator(client, control_str):
@@ -282,6 +304,7 @@ def test_control_chars_do_not_crash_validator(client, control_str):
 # 4) Deeply-nested JSON — must reject before stack blow-up.
 # ---------------------------------------------------------------------------
 
+
 class TestDeeplyNestedJSON(unittest.TestCase):
     """Build a JSON document with 1000 levels of nesting. The server
     must reject with a 4xx (parser limit / validation failure), never
@@ -292,6 +315,7 @@ class TestDeeplyNestedJSON(unittest.TestCase):
         self.client = TestClient(app)
         # Reset rate limiter
         from main import limiter
+
         try:
             limiter._storage.storage.clear()  # type: ignore[attr-defined]
         except Exception:
@@ -299,7 +323,7 @@ class TestDeeplyNestedJSON(unittest.TestCase):
 
     def _build_deep(self, depth: int) -> str:
         # Build `{"a":{"a":{"a":...}}}` to `depth` levels.
-        return "{\"a\":" * depth + "1" + "}" * depth
+        return '{"a":' * depth + "1" + "}" * depth
 
     def test_1000_deep_nested_object_rejected_cleanly(self):
         deep_json = self._build_deep(1000)
@@ -309,7 +333,8 @@ class TestDeeplyNestedJSON(unittest.TestCase):
             headers={API_KEY_HEADER: API_KEY, "Content-Type": "application/json"},
         )
         self.assertNotEqual(
-            r.status_code, 500,
+            r.status_code,
+            500,
             f"1000-deep JSON crashed: body={r.text[:200]}",
         )
         # Must be a 4xx (parse error / extra field rejection).
@@ -328,7 +353,8 @@ class TestDeeplyNestedJSON(unittest.TestCase):
             headers={API_KEY_HEADER: API_KEY, "Content-Type": "application/json"},
         )
         self.assertNotEqual(
-            r.status_code, 500,
+            r.status_code,
+            500,
             f"2000-deep JSON 500'd: body={r.text[:200]}",
         )
 
@@ -340,7 +366,8 @@ class TestDeeplyNestedJSON(unittest.TestCase):
             headers={API_KEY_HEADER: API_KEY, "Content-Type": "application/json"},
         )
         self.assertNotEqual(
-            r.status_code, 500,
+            r.status_code,
+            500,
             f"deep array crashed: body={r.text[:200]}",
         )
 
@@ -348,6 +375,7 @@ class TestDeeplyNestedJSON(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 5) Large numbers — precision loss / type confusion.
 # ---------------------------------------------------------------------------
+
 
 class TestLargeNumberPrecision(unittest.TestCase):
     """`1e308` parses to a Python float (≈ 1.7e308 max). If a Pydantic
@@ -360,6 +388,7 @@ class TestLargeNumberPrecision(unittest.TestCase):
         os.environ["API_SECRET_KEY"] = API_KEY
         self.client = TestClient(app)
         from main import limiter
+
         try:
             limiter._storage.storage.clear()  # type: ignore[attr-defined]
         except Exception:
@@ -376,7 +405,7 @@ class TestLargeNumberPrecision(unittest.TestCase):
         self.assertNotEqual(r.status_code, 500, r.text[:200])
         self.assertTrue(
             400 <= r.status_code < 500,
-            f"large float in unique_key accepted: {r.status_code} {r.text[:200]}"
+            f"large float in unique_key accepted: {r.status_code} {r.text[:200]}",
         )
 
     def test_large_int_in_query_rejected(self):
@@ -391,7 +420,7 @@ class TestLargeNumberPrecision(unittest.TestCase):
         self.assertNotEqual(r.status_code, 500, r.text[:200])
         self.assertTrue(
             400 <= r.status_code < 500,
-            f"oversize number in query accepted: {r.status_code} {r.text[:200]}"
+            f"oversize number in query accepted: {r.status_code} {r.text[:200]}",
         )
 
     def test_negative_zero_in_string_field(self):
@@ -408,19 +437,24 @@ class TestLargeNumberPrecision(unittest.TestCase):
         """`NaN` / `Infinity` are NOT in the JSON spec but Python's
         stdlib accepts them with `parse_constant`. FastAPI/Starlette
         use a stricter parser that should reject. Verify."""
-        for bad in (b'{"unique_key": NaN}',
-                    b'{"unique_key": Infinity}',
-                    b'{"unique_key": -Infinity}'):
+        for bad in (
+            b'{"unique_key": NaN}',
+            b'{"unique_key": Infinity}',
+            b'{"unique_key": -Infinity}',
+        ):
             with self.subTest(bad=bad):
                 r = self.client.post(
                     "/process-lead",
                     content=bad,
-                    headers={API_KEY_HEADER: API_KEY, "Content-Type": "application/json"},
+                    headers={
+                        API_KEY_HEADER: API_KEY,
+                        "Content-Type": "application/json",
+                    },
                 )
                 self.assertNotEqual(r.status_code, 500, r.text[:200])
                 self.assertTrue(
                     400 <= r.status_code < 500,
-                    f"{bad!r} accepted: {r.status_code} {r.text[:200]}"
+                    f"{bad!r} accepted: {r.status_code} {r.text[:200]}",
                 )
 
 
@@ -430,13 +464,19 @@ class TestLargeNumberPrecision(unittest.TestCase):
 #    pollution sweep while breaking the real endpoint.
 # ---------------------------------------------------------------------------
 
+
 def test_known_valid_payload_reaches_validator(client):
     """`/execute` with `STATUS_CHECK` is the cheapest valid call. We
     don't care if Supabase is reachable in test mode — Pydantic
     validation passes either way. Accept any 2xx OR 5xx (service
     unavailable due to fake env), but NOT 403 (auth) or 422 (validation)."""
     status, body = _do_post(
-        client, "POST", "/execute", {"task": "STATUS_CHECK", "params": {}},
+        client,
+        "POST",
+        "/execute",
+        {"task": "STATUS_CHECK", "params": {}},
     )
     assert status != 403, f"valid payload 403'd — auth misconfig: {body[:200]}"
-    assert status != 422, f"valid payload 422'd — pollution test over-broad: {body[:200]}"
+    assert status != 422, (
+        f"valid payload 422'd — pollution test over-broad: {body[:200]}"
+    )

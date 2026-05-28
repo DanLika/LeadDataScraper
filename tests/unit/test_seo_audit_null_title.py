@@ -7,6 +7,7 @@ and the original ``soup.title.string.strip()`` had no guard.
 
 These tests pin the guard in `src/scrapers/seo_audit.py::_check_meta_tags`.
 """
+
 from __future__ import annotations
 
 import sys
@@ -29,7 +30,9 @@ class TestNullTitleString:
     def test_empty_title_tag_does_not_crash(self):
         # The original bug: <title></title> → soup.title is truthy but
         # soup.title.string is None.
-        soup = BeautifulSoup("<html><head><title></title></head><body></body></html>", "html.parser")
+        soup = BeautifulSoup(
+            "<html><head><title></title></head><body></body></html>", "html.parser"
+        )
         results = _make_results()
         _check_meta_tags(soup, results)  # must not raise
         assert results["title"] is None
@@ -85,7 +88,7 @@ class TestNullMetaDescription:
 
     def test_meta_description_missing_entirely(self):
         soup = BeautifulSoup(
-            '<html><head><title>x</title></head></html>',
+            "<html><head><title>x</title></head></html>",
             "html.parser",
         )
         results = _make_results()

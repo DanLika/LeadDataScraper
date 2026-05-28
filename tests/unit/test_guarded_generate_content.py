@@ -86,7 +86,8 @@ class TestGuardedGenerateContentSync:
         # record_usage delta is computed off the SDK numbers.
         client = MagicMock()
         client.models.generate_content.return_value = _fake_response(
-            prompt_tokens=123, candidates_tokens=456,
+            prompt_tokens=123,
+            candidates_tokens=456,
         )
 
         response = gemini_call.guarded_generate_content(
@@ -203,7 +204,9 @@ class TestGuardedGenerateContentAsync:
             estimate_output=80,
         )
         client.aio.models.generate_content.assert_awaited_once_with(
-            model="m", contents="hello", config=None,
+            model="m",
+            contents="hello",
+            config=None,
         )
         state = gemini_budget.get_state()
         # estimate 40/80 was pre-debited; actual was 50/75.
@@ -289,7 +292,8 @@ class TestExtractUsageEdgeCases:
         # silently revert the pre-debit to zero.
         r = SimpleNamespace(
             usage_metadata=SimpleNamespace(
-                prompt_token_count=0, candidates_token_count=0,
+                prompt_token_count=0,
+                candidates_token_count=0,
             ),
         )
         a, b = gemini_call._extract_usage(r, 42, 17)

@@ -80,8 +80,15 @@ class TestJsonFormatterEnvelope(unittest.TestCase):
 
     def test_canonical_fields_present(self):
         out = self._format()
-        for key in ("timestamp", "level", "logger", "message",
-                    "request_id", "user_id", "route"):
+        for key in (
+            "timestamp",
+            "level",
+            "logger",
+            "message",
+            "request_id",
+            "user_id",
+            "route",
+        ):
             self.assertIn(key, out, f"missing canonical field {key!r}: {out!r}")
 
     def test_timestamp_iso8601_z_suffix(self):
@@ -148,6 +155,7 @@ class TestJsonFormatterEnvelope(unittest.TestCase):
         class _Weird:
             def __repr__(self):
                 return "<Weird>"
+
         out = self._format(extra={"weird": _Weird()})
         # Either repr or some string — but the format MUST NOT crash.
         self.assertIn("weird", out)
@@ -189,11 +197,15 @@ def _client():
     """TestClient with the lazy singletons mocked out. Pattern matches
     `tests/test_endpoint_hardening.py`."""
     # Required env so the X-API-Key check has a value.
-    with patch.dict("os.environ", {
-        "API_SECRET_KEY": "test-secret-key-must-be-long-enough",
-        "ADMIN_TOKEN": "test-admin-token",
-        "ALLOWED_ORIGINS": "http://localhost:3000",
-    }, clear=False):
+    with patch.dict(
+        "os.environ",
+        {
+            "API_SECRET_KEY": "test-secret-key-must-be-long-enough",
+            "ADMIN_TOKEN": "test-admin-token",
+            "ALLOWED_ORIGINS": "http://localhost:3000",
+        },
+        clear=False,
+    ):
         # Mock the lazy singletons so import doesn't try to reach Supabase.
         with patch.dict(
             "sys.modules",
@@ -204,12 +216,14 @@ def _client():
         ):
             import importlib
             import backend.main as main_mod  # type: ignore
+
             importlib.reload(main_mod)
             main_mod.db = MagicMock()
             main_mod.router = MagicMock()
             main_mod.auditor = MagicMock()
             main_mod.orchestrator = MagicMock()
             from fastapi.testclient import TestClient
+
             yield TestClient(main_mod.app)
 
 
