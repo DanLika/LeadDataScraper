@@ -40,6 +40,16 @@ TABLES: tuple[str, ...] = (
 TABLE_LIST = list(TABLES)
 DEAD_TUPLE_RATIO_THRESHOLD = 0.20
 
+# Suppress noise on tiny tables. The 20% dead_tuple_ratio gate is
+# inherently noisy when (n_live + n_dead) < 100 because (a)
+# autovacuum_vacuum_threshold (default 50 + 0.2*n_live) hasn't fired
+# yet, and (b) a single insert/delete cycle on a 10-row table swings
+# the ratio 10x. Real-sized tables (>=100 total tuples) stay gated by
+# the 20% threshold; tiny tables emit the row in the report but don't
+# trip the FAIL exit. Tracked in #363 follow-up after sec.yml triage
+# flagged orchestration_jobs at 30/6 = 500%.
+MINIMUM_TOTAL_ROWS_TO_FLAG = 100
+
 
 def _human_bytes(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -98,7 +108,11 @@ def main() -> int:
                 f"  {relname:<22} {n_live:>10} {n_dead:>10} "
                 f"{ratio:>10.1%} {_human_bytes(int(total_bytes)):>12}"
             )
-            if ratio > DEAD_TUPLE_RATIO_THRESHOLD and n_live > 0:
+            if (
+                ratio > DEAD_TUPLE_RATIO_THRESHOLD
+                and n_live > 0
+                and (n_live + n_dead) >= MINIMUM_TOTAL_ROWS_TO_FLAG
+            ):
                 failures.append(
                     f"public.{relname}: dead_tuple_ratio={ratio:.1%} "
                     f"({n_dead}/{n_live}) — exceeds "

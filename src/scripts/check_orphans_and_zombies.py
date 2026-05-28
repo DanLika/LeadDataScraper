@@ -128,10 +128,17 @@ def _check_and_heal_zombies(conn: psycopg.Connection) -> list[str]:
 
 def _check_stuck_leads(conn: psycopg.Connection) -> list[str]:
     threshold_clause = f"interval '{STUCK_THRESHOLD_HOURS} hours'"
+    # `AND is_demo = false` excludes Phase 13.3 demo-seed rows that are
+    # intentionally inserted with audit_status='Pending' (see
+    # seed_demo_data.py L271 + docstring "Pending rows would also fail-
+    # fast on resolution"). Without this filter the daily security gate
+    # flags 3 _demo_* rows as stuck — false alarm, not a real worker
+    # crash. CLAUDE.md "Phase 13.3 demo-data" pins the invariant.
     cur = conn.execute(
         "SELECT unique_key, audit_status, updated_at, last_processed_at "
         "FROM leads "
         "WHERE audit_status IN ('Pending', 'Processing') "
+        "  AND is_demo = false "
         f"  AND updated_at < (now() - {threshold_clause})"
     )
     rows = cur.fetchall()
