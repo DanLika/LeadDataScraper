@@ -46,6 +46,7 @@ Run via the dedicated ``concurrency-tests`` job:
 
     DATABASE_URL=postgres://...  pytest tests/test_connection_pool.py
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -81,7 +82,8 @@ def test_backend_has_no_direct_postgres_driver_import() -> None:
     forbidden_patterns = (
         re.compile(rb"^\s*import\s+(psycopg|psycopg2|asyncpg|pg8000)\b", re.M),
         re.compile(
-            rb"^\s*from\s+(psycopg|psycopg2|asyncpg|pg8000)\b", re.M,
+            rb"^\s*from\s+(psycopg|psycopg2|asyncpg|pg8000)\b",
+            re.M,
         ),
     )
     allowed_prefixes = (
@@ -94,9 +96,7 @@ def test_backend_has_no_direct_postgres_driver_import() -> None:
         if not tree.is_dir():
             continue
         for path in tree.rglob("*.py"):
-            if any(
-                str(path).startswith(str(p)) for p in allowed_prefixes
-            ):
+            if any(str(path).startswith(str(p)) for p in allowed_prefixes):
                 continue
             try:
                 body = path.read_bytes()
@@ -126,7 +126,9 @@ def test_database_url_points_at_supabase_pooler() -> None:
     parsed = urlparse(DATABASE_URL)
     host = (parsed.hostname or "").lower()
     assert host, f"could not parse host from DATABASE_URL ({DATABASE_URL[:25]}...)"
-    assert host.endswith(".pooler.supabase.com") or host.endswith(".pooler.supabase.co"), (
+    assert host.endswith(".pooler.supabase.com") or host.endswith(
+        ".pooler.supabase.co"
+    ), (
         f"DATABASE_URL host {host!r} is not a Supabase pooler endpoint. "
         f"Use the connection-pooler URL from the project settings (port "
         f"6543 typically) — direct-host URLs exhaust connection slots."
@@ -154,9 +156,7 @@ def test_concurrent_connections_succeed() -> None:
             cur = conn.execute("SELECT 1")
             return cur.fetchone()[0] == 1
 
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=POOL_TEST_CONCURRENCY
-    ) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=POOL_TEST_CONCURRENCY) as ex:
         results = list(ex.map(worker, range(POOL_TEST_CONCURRENCY), timeout=60))
 
     assert all(results), (

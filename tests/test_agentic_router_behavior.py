@@ -18,6 +18,7 @@ Coverage matrix:
 
 Pure-mock, offline test — no API key, no network.
 """
+
 import asyncio
 import os
 import sys
@@ -44,8 +45,10 @@ SQL_INJECTION_PAYLOAD = "'; DROP TABLE leads;--"
 
 # ---- Fake Supabase -----------------------------------------------------------
 
+
 class _FakeExec:
-    def __init__(self, rows): self.data = rows
+    def __init__(self, rows):
+        self.data = rows
 
 
 class _FakeQuery:
@@ -93,12 +96,14 @@ class _FakeSB:
 
 # ---- Gemini capture ----------------------------------------------------------
 
+
 class _GeminiCapture:
     """
     Replaces every generate_content / embed_content path on the router's
     client with recorders that DON'T call Gemini and DO produce
     plausible responses so the handlers don't crash post-call.
     """
+
     def __init__(self):
         self.calls: list[dict] = []
         self._orig_sync = None
@@ -114,23 +119,31 @@ class _GeminiCapture:
         def _sync(*args, **kwargs):
             contents = kwargs.get("contents", args[1] if len(args) > 1 else None)
             cfg = kwargs.get("config")
-            outer.calls.append({
-                "kind": "sync",
-                "model": kwargs.get("model", args[0] if args else None),
-                "contents": contents,
-                "system_instruction": getattr(cfg, "system_instruction", None) if cfg else None,
-            })
+            outer.calls.append(
+                {
+                    "kind": "sync",
+                    "model": kwargs.get("model", args[0] if args else None),
+                    "contents": contents,
+                    "system_instruction": getattr(cfg, "system_instruction", None)
+                    if cfg
+                    else None,
+                }
+            )
             return _build_stub_response()
 
         async def _async(*args, **kwargs):
             contents = kwargs.get("contents", args[1] if len(args) > 1 else None)
             cfg = kwargs.get("config")
-            outer.calls.append({
-                "kind": "async",
-                "model": kwargs.get("model", args[0] if args else None),
-                "contents": contents,
-                "system_instruction": getattr(cfg, "system_instruction", None) if cfg else None,
-            })
+            outer.calls.append(
+                {
+                    "kind": "async",
+                    "model": kwargs.get("model", args[0] if args else None),
+                    "contents": contents,
+                    "system_instruction": getattr(cfg, "system_instruction", None)
+                    if cfg
+                    else None,
+                }
+            )
             return _build_stub_response()
 
         client.models.generate_content = _sync
@@ -151,7 +164,7 @@ def _build_stub_response():
     # A JSON-ish blob covers extract_json_from_response branches; the
     # Subject: prefix covers outreach_draft's regex match.
     resp.text = (
-        'Subject: stub\n\n'
+        "Subject: stub\n\n"
         '{"summary":"x","insights":[],"top_priorities":[],'
         '"linkedin_hook":"x","email_hook":"y",'
         '"company_size":"x","leadership_team":"x","business_details":"x","target_clients":"x",'
@@ -164,12 +177,15 @@ def _build_stub_response():
 
 # ---- Test class --------------------------------------------------------------
 
-class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
 
+class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": "fake-key-router-behavior",
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "fake-key-router-behavior",
+            },
+        )
         self.env_patcher.start()
 
         # Patch SupabaseHelper BEFORE constructing the router so .db is the fake.
@@ -179,8 +195,11 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
         sb_mock.return_value.client = self.fake_db
 
         from src.core.agentic_router import AgenticRouter
+
         self.router = AgenticRouter()
-        self.assertIsNotNone(self.router.client, "router.client must initialise (env var set)")
+        self.assertIsNotNone(
+            self.router.client, "router.client must initialise (env var set)"
+        )
 
         self.cap = _GeminiCapture()
         self.cap.install(self.router.client)
@@ -200,25 +219,35 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
         but does NOT raise and does NOT return None.
         """
         # Pre-seed fake DB with one lead so per-lead tasks have something.
-        self.fake_db.leads = [{
-            "unique_key": "fake-1",
-            "name": "Fake Lead",
-            "company_name": "Fake Co",
-            "audit_status": "Pending",
-            "seo_score": 30,
-            "lead_source": "google_maps",
-            "audit_results": {"score": 30, "pain_points": "fake pain"},
-            "leadership_team": "Mx Fake",
-            "business_details": "fake details",
-            "target_clients": "fake clients",
-            "email": "fake@x.test",
-        }]
+        self.fake_db.leads = [
+            {
+                "unique_key": "fake-1",
+                "name": "Fake Lead",
+                "company_name": "Fake Co",
+                "audit_status": "Pending",
+                "seo_score": 30,
+                "lead_source": "google_maps",
+                "audit_results": {"score": 30, "pain_points": "fake pain"},
+                "leadership_team": "Mx Fake",
+                "business_details": "fake details",
+                "target_clients": "fake clients",
+                "email": "fake@x.test",
+            }
+        ]
 
         # Patch heavy imports done lazily inside handlers so they don't pull
         # real Playwright / aiohttp.
-        with patch("src.core.parallel_auditor.ParallelAuditor") as PA, \
-             patch("src.core.task_orchestrator.TaskOrchestrator") as TO:
+        with (
+            patch("src.core.parallel_auditor.ParallelAuditor") as PA,
+            patch("src.core.task_orchestrator.TaskOrchestrator") as TO,
+        ):
             PA.return_value.audit_single_lead = AsyncMock(return_value={"score": 50})
+            # `_execute_deep_hunt` awaits `auditor.hunt_single_lead(...)`; without
+            # an AsyncMock the default attribute is a plain MagicMock and the
+            # await raises `TypeError: 'MagicMock' object can't be awaited`.
+            PA.return_value.hunt_single_lead = AsyncMock(
+                return_value={"facebook": None, "instagram": None}
+            )
             TO.return_value.run_massive_pipeline = AsyncMock(return_value="job-x")
             TO.return_value.run_discovery_job = AsyncMock(return_value="job-d")
             TO.return_value.run_enrichment_job = AsyncMock(return_value="job-e")
@@ -233,19 +262,26 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
                     failures.append(f"{task}: raised {type(e).__name__}: {e}")
                     continue
                 if not isinstance(result, dict):
-                    failures.append(f"{task}: returned {type(result).__name__} (want dict)")
-            self.assertFalse(failures, "Allowlisted task dispatch:\n" + "\n".join(failures))
+                    failures.append(
+                        f"{task}: returned {type(result).__name__} (want dict)"
+                    )
+            self.assertFalse(
+                failures, "Allowlisted task dispatch:\n" + "\n".join(failures)
+            )
 
     # ---- Unknown task → reject, no Gemini ----------------------------------
 
     async def test_arbitrary_task_string_rejected(self):
         self.cap.reset()
-        result = await self.router.execute_task({"task": "ARBITRARY_NOPE_TASK", "params": {}})
+        result = await self.router.execute_task(
+            {"task": "ARBITRARY_NOPE_TASK", "params": {}}
+        )
         self.assertIn("error", result)
         self.assertIn("Unknown task", result["error"])
         self.assertEqual(
-            len(self.cap.calls), 0,
-            f"Gemini called {len(self.cap.calls)} times for unknown task — must be 0"
+            len(self.cap.calls),
+            0,
+            f"Gemini called {len(self.cap.calls)} times for unknown task — must be 0",
         )
 
     async def test_missing_task_key_rejected(self):
@@ -278,8 +314,9 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
                 continue
             self.assertIn("error", result, f"Malicious task {malicious!r} not rejected")
             self.assertEqual(
-                len(self.cap.calls), 0,
-                f"Gemini called for malicious task {malicious!r}"
+                len(self.cap.calls),
+                0,
+                f"Gemini called for malicious task {malicious!r}",
             )
 
     # ---- Injection payloads in params ---------------------------------------
@@ -292,33 +329,38 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
           - paired with the _UNTRUSTED_DATA_SYSTEM_INSTRUCTION system message.
         """
         self.cap.reset()
-        await self.router.execute_task({
-            "task": "DATABASE_QUERY",
-            "params": {"query_text": INJECTION_PAYLOAD},
-        })
+        await self.router.execute_task(
+            {
+                "task": "DATABASE_QUERY",
+                "params": {"query_text": INJECTION_PAYLOAD},
+            }
+        )
         gemini_calls = [c for c in self.cap.calls if c["contents"]]
         self.assertGreaterEqual(
-            len(gemini_calls), 1,
-            "DATABASE_QUERY should call Gemini once for the natural-language query"
+            len(gemini_calls),
+            1,
+            "DATABASE_QUERY should call Gemini once for the natural-language query",
         )
         # The contents must wrap the payload in an UNTRUSTED_DATA fence
         contents = "\n".join(str(c["contents"]) for c in gemini_calls)
         self.assertIn(
-            "UNTRUSTED_DATA", contents,
-            "Injection payload not fenced — fenced_json wrapper missing in contents"
+            "UNTRUSTED_DATA",
+            contents,
+            "Injection payload not fenced — fenced_json wrapper missing in contents",
         )
         # The payload itself should appear inside the fenced block, not in the
         # static prompt body (we can't perfectly assert position, but at least
         # verify it's present so the model has the data to operate on).
         self.assertIn(
-            INJECTION_PAYLOAD, contents,
-            "Payload missing from contents — handler dropped query_text on the floor"
+            INJECTION_PAYLOAD,
+            contents,
+            "Payload missing from contents — handler dropped query_text on the floor",
         )
         # System instruction must be set to the prompt-safety constant
         sys_ins = [c["system_instruction"] for c in gemini_calls]
         self.assertTrue(
             all(s is not None for s in sys_ins),
-            f"system_instruction missing on some Gemini calls: {sys_ins}"
+            f"system_instruction missing on some Gemini calls: {sys_ins}",
         )
 
     # ---- Non-existent lead -------------------------------------------------
@@ -327,30 +369,36 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
         # fake DB has no leads
         self.fake_db.leads = []
         self.cap.reset()
-        result = await self.router.execute_task({
-            "task": "OUTREACH_DRAFT",
-            "params": {"unique_key": "does-not-exist"},
-        })
+        result = await self.router.execute_task(
+            {
+                "task": "OUTREACH_DRAFT",
+                "params": {"unique_key": "does-not-exist"},
+            }
+        )
         self.assertIsInstance(result, dict)
         self.assertIn("error", result, f"Expected error, got {result}")
         # And no Gemini draft was requested
         gemini_calls = [c for c in self.cap.calls if c["contents"]]
         self.assertEqual(
-            len(gemini_calls), 0,
-            f"Gemini called {len(gemini_calls)} times for non-existent lead — must be 0"
+            len(gemini_calls),
+            0,
+            f"Gemini called {len(gemini_calls)} times for non-existent lead — must be 0",
         )
 
     async def test_linkedin_draft_for_nonexistent_lead_returns_error(self):
         self.fake_db.leads = []
         self.cap.reset()
-        result = await self.router.execute_task({
-            "task": "LINKEDIN_DRAFT",
-            "params": {"unique_key": "does-not-exist"},
-        })
+        result = await self.router.execute_task(
+            {
+                "task": "LINKEDIN_DRAFT",
+                "params": {"unique_key": "does-not-exist"},
+            }
+        )
         self.assertIn("error", result)
         self.assertEqual(
-            len([c for c in self.cap.calls if c["contents"]]), 0,
-            "Gemini called for non-existent lead in LINKEDIN_DRAFT"
+            len([c for c in self.cap.calls if c["contents"]]),
+            0,
+            "Gemini called for non-existent lead in LINKEDIN_DRAFT",
         )
 
     # ---- DATABASE_QUERY does not execute raw SQL ---------------------------
@@ -364,10 +412,12 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
         """
         self.fake_db.leads = []
         self.cap.reset()
-        await self.router.execute_task({
-            "task": "DATABASE_QUERY",
-            "params": {"query_text": SQL_INJECTION_PAYLOAD},
-        })
+        await self.router.execute_task(
+            {
+                "task": "DATABASE_QUERY",
+                "params": {"query_text": SQL_INJECTION_PAYLOAD},
+            }
+        )
         # Inspect every recorded supabase call across every query
         for q in self.fake_db.queries:
             for op_name, args, kwargs in q.calls:
@@ -384,8 +434,7 @@ class TestAgenticRouterBehavior(unittest.IsolatedAsyncioTestCase):
         self.cap.reset()
         await self.router.execute_task({"task": "TOTALLY_UNKNOWN", "params": {}})
         self.assertEqual(
-            self.cap.calls, [],
-            f"Gemini called for unknown task: {self.cap.calls}"
+            self.cap.calls, [], f"Gemini called for unknown task: {self.cap.calls}"
         )
 
 

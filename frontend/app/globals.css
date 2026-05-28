@@ -119,7 +119,11 @@
   --z-mobile-header: 80;
 
   --touch-target-min: 44px;
-  --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Drop 'Inter' from the stack — the .woff2 was never shipped, so naming
+     it forces a silent fallback to system-ui anyway (Phase 9.7 / Phase 15
+     #10: document.fonts.size === 0). Wire next/font/google with
+     display:'swap' later if a custom face is actually wanted. */
+  --font-main: system-ui, -apple-system, sans-serif;
   --transition-default: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 

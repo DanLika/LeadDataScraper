@@ -105,6 +105,7 @@ def _is_errored(resp: requests.Response) -> bool:
 # SELECT — RLS must hide rows OR PostgREST must reject the anon role.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "table",
     ["leads", "campaigns", "campaign_messages", "orchestration_jobs"],
@@ -132,6 +133,7 @@ def test_anon_cannot_read_table(rest_base, anon_headers, table):
 # ---------------------------------------------------------------------------
 # INSERT — must fail outright.
 # ---------------------------------------------------------------------------
+
 
 def test_anon_cannot_insert_lead(rest_base, anon_headers):
     payload = {
@@ -172,6 +174,7 @@ def test_anon_cannot_insert_lead(rest_base, anon_headers):
 # RPC — malicious column names + non-existent RPCs.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "malicious_col",
     [
@@ -183,7 +186,9 @@ def test_anon_cannot_insert_lead(rest_base, anon_headers):
         "col WITH spaces",
     ],
 )
-def test_anon_add_lead_column_malicious_rejected(rest_base, anon_headers, malicious_col):
+def test_anon_add_lead_column_malicious_rejected(
+    rest_base, anon_headers, malicious_col
+):
     resp = requests.post(
         f"{rest_base}/rpc/add_lead_column",
         headers=anon_headers,
@@ -241,6 +246,7 @@ def test_anon_no_arbitrary_sql_rpc(rest_base, anon_headers, rpc_name):
 # ---------------------------------------------------------------------------
 # Sanity: with NO apikey at all, PostgREST should also 401.
 # ---------------------------------------------------------------------------
+
 
 def test_postgrest_rejects_missing_apikey(rest_base):
     resp = requests.get(

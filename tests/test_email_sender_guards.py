@@ -15,6 +15,7 @@ row from injecting mail headers:
 Tightened during the 2026-05 audit; this file locks the behaviour so a
 future wiring change can't regress it.
 """
+
 import asyncio
 from unittest.mock import patch
 
@@ -37,6 +38,7 @@ def _run(coro):
 
 # ───────────────────────── credentials gate ──────────────────────────
 
+
 def test_missing_credentials_short_circuits():
     s = SMTPEmailSender()
     s.smtp_user = ""
@@ -47,6 +49,7 @@ def test_missing_credentials_short_circuits():
 
 
 # ─────────────── recipient regex — header-injection guard ─────────────
+
 
 def test_recipient_crlf_bcc_injection_rejected():
     s = _configured_sender()
@@ -87,9 +90,14 @@ def test_bounced_recipient_short_circuits():
 
 # ─────────────── CRLF guard on subject + from_name ───────────────────
 
+
 def test_subject_crlf_rejected():
     s = _configured_sender()
-    for evil in ["Subject\r\nBcc: attacker@evil.com", "Subject\nX-Injected: 1", "Subject\rmore"]:
+    for evil in [
+        "Subject\r\nBcc: attacker@evil.com",
+        "Subject\nX-Injected: 1",
+        "Subject\rmore",
+    ]:
         r = _run(s.send("ok@example.com", evil, "Body"))
         assert r["status"] == "error"
         assert "CRLF" in r["error"]
@@ -97,13 +105,20 @@ def test_subject_crlf_rejected():
 
 def test_from_name_crlf_rejected():
     s = _configured_sender()
-    r = _run(s.send("ok@example.com", "Clean Subject", "Body",
-                     from_name="Evil\r\nBcc: attacker@evil.com"))
+    r = _run(
+        s.send(
+            "ok@example.com",
+            "Clean Subject",
+            "Body",
+            from_name="Evil\r\nBcc: attacker@evil.com",
+        )
+    )
     assert r["status"] == "error"
     assert "CRLF" in r["error"]
 
 
 # ─────────────── positive path — clean inputs reach SMTP ─────────────
+
 
 def test_clean_inputs_pass_validation_and_reach_send():
     """A well-formed recipient + clean subject/from_name must clear
@@ -113,8 +128,10 @@ def test_clean_inputs_pass_validation_and_reach_send():
     async def _noop_rate_limit():
         return None
 
-    with patch.object(s, "_wait_for_rate_limit", _noop_rate_limit), \
-         patch.object(s, "_send_smtp", lambda msg, to: None):
+    with (
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+        patch.object(s, "_send_smtp", lambda msg, to: None),
+    ):
         r = _run(s.send("lead@example.com", "Quick question", "Hello there"))
     assert r["status"] == "sent"
     assert r["to"] == "lead@example.com"

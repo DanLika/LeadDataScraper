@@ -32,6 +32,7 @@ Design notes:
 
 Regenerate snapshots: `UPDATE_PROMPT_SNAPSHOTS=1 pytest tests/test_prompt_snapshots.py`
 """
+
 import asyncio
 import hashlib
 import json
@@ -56,6 +57,7 @@ def _sha256(s: str | None) -> str:
 
 # ---- Stub response ----------------------------------------------------------
 
+
 class _StubResponse:
     """
     Minimal response object satisfying everything the production parsers
@@ -63,13 +65,15 @@ class _StubResponse:
     JSON-parsing branches don't raise mid-function (we already captured
     the prompt before that point).
     """
+
     def __init__(self, text: str):
         self.text = text
-        self.candidates = []          # route_instruction's UNKNOWN branch
+        self.candidates = []  # route_instruction's UNKNOWN branch
         self.usage_metadata = None
 
 
 # ---- Capture ---------------------------------------------------------------
+
 
 class _PromptCapture:
     """
@@ -77,6 +81,7 @@ class _PromptCapture:
     wrapper that records (contents, system_instruction) and returns a
     pre-configured _StubResponse.
     """
+
     def __init__(self):
         self.contents: Any = None
         self.system_instruction: Any = None
@@ -98,6 +103,7 @@ class _PromptCapture:
                 getattr(cfg, "system_instruction", None) if cfg else None
             )
             return _StubResponse(outer.stub_text)
+
         self._sync_holder.generate_content = _sync
 
         if has_aio:
@@ -105,12 +111,15 @@ class _PromptCapture:
             self._orig_async = self._async_holder.generate_content
 
             async def _async(*args, **kwargs):
-                outer.contents = kwargs.get("contents", args[1] if len(args) > 1 else None)
+                outer.contents = kwargs.get(
+                    "contents", args[1] if len(args) > 1 else None
+                )
                 cfg = kwargs.get("config")
                 outer.system_instruction = (
                     getattr(cfg, "system_instruction", None) if cfg else None
                 )
                 return _StubResponse(outer.stub_text)
+
             self._async_holder.generate_content = _async
 
     def restore(self):
@@ -123,15 +132,33 @@ class _PromptCapture:
 # ---- Fake Supabase (for lead_index, insights, linkedin lookups) ------------
 
 INSIGHT_LEADS = [
-    {"name": "Acme Co", "company_name": "Acme Co.", "audit_status": "Completed",
-     "seo_score": 40, "lead_source": "google_maps"},
-    {"name": "Beta LLC", "company_name": "Beta LLC", "audit_status": "Pending",
-     "seo_score": 0, "lead_source": "csv"},
+    {
+        "name": "Acme Co",
+        "company_name": "Acme Co.",
+        "audit_status": "Completed",
+        "seo_score": 40,
+        "lead_source": "google_maps",
+    },
+    {
+        "name": "Beta LLC",
+        "company_name": "Beta LLC",
+        "audit_status": "Pending",
+        "seo_score": 0,
+        "lead_source": "csv",
+    },
 ]
 
 LEAD_INDEX_ROWS = [
-    {"unique_key": "snap-1", "name": "Snapshot Lead 1", "company_name": "Snapshot Co 1"},
-    {"unique_key": "snap-2", "name": "Snapshot Lead 2", "company_name": "Snapshot Co 2"},
+    {
+        "unique_key": "snap-1",
+        "name": "Snapshot Lead 1",
+        "company_name": "Snapshot Co 1",
+    },
+    {
+        "unique_key": "snap-2",
+        "name": "Snapshot Lead 2",
+        "company_name": "Snapshot Co 2",
+    },
 ]
 
 LINKEDIN_LEAD = {
@@ -144,18 +171,25 @@ LINKEDIN_LEAD = {
 
 
 class _FakeExec:
-    def __init__(self, rows): self.data = rows
+    def __init__(self, rows):
+        self.data = rows
 
 
 class _FakeQuery:
     def __init__(self, payload):
         self._payload = payload  # callable(eq_value) -> rows
         self._eq_val = None
-    def select(self, *_a, **_k): return self
+
+    def select(self, *_a, **_k):
+        return self
+
     def eq(self, _col, val):
         self._eq_val = val
         return self
-    def limit(self, _n): return self
+
+    def limit(self, _n):
+        return self
+
     def execute(self):
         if callable(self._payload):
             return _FakeExec(self._payload(self._eq_val))
@@ -164,10 +198,13 @@ class _FakeQuery:
 
 class _FakeSB:
     """Routes by .table() name. Each table returns deterministic rows."""
+
     def __init__(self):
         self._tables = {}
+
     def add(self, name, payload):
         self._tables[name] = payload
+
     def table(self, name):
         return _FakeQuery(self._tables.get(name, []))
 
@@ -191,27 +228,56 @@ STUB_TEXTS = {
 
 # ---- Test driver ------------------------------------------------------------
 
+
 @unittest.skipIf(False, "Pure-offline snapshot test — no GEMINI_API_KEY needed")
 class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
-
     async def asyncSetUp(self):
         # Pretend a Gemini API key exists so clients initialize. We never
         # actually call Gemini — `install()` replaces the methods first.
-        self.env_patcher = patch.dict(os.environ, {
-            "GEMINI_API_KEY": "snapshot-fake-key",
-            "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
-        })
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "snapshot-fake-key",
+                "OPERATOR_NAME": OPERATOR_NAME_FIXTURE,
+            },
+        )
         self.env_patcher.start()
+
+        # No-op the guarded_generate_content_async budget gate. The test
+        # already stubs `client.aio.models.generate_content` via
+        # `_PromptCapture.install()`, but the surrounding wrapper
+        # `guarded_generate_content_async` *also* calls `check_budget` +
+        # `record_usage` against the live SQLite budget DB before the
+        # mocked call ever runs. Without these patches the test fails
+        # with `BudgetExceededError` once the operator's local budget
+        # DB accumulates near the daily ceiling (verified 2026-05-24
+        # smoke run: 4999246 / 5000000 tokens). Patching the symbols at
+        # `gemini_call` (where they're imported + invoked) keeps the
+        # production code path identical except for the gate, so the
+        # SHA256 of the captured prompt remains the prod prompt.
+        self.budget_check_patcher = patch(
+            "src.utils.gemini_call.check_budget", lambda *_a, **_kw: None
+        )
+        self.budget_check_patcher.start()
+        self.budget_record_patcher = patch(
+            "src.utils.gemini_call.record_usage", lambda *_a, **_kw: None
+        )
+        self.budget_record_patcher.start()
 
         # Fake Supabase with the three tables/queries our call sites trigger.
         # The linkedin path uses .eq("unique_key", val) — we return the fixture
         # only when the val matches snap-linkedin.
         sb = _FakeSB()
-        sb.add("leads", lambda eq_val: (
-            [LINKEDIN_LEAD] if eq_val == LINKEDIN_LEAD["unique_key"] else
-            INSIGHT_LEADS if eq_val is None else
-            []
-        ))
+        sb.add(
+            "leads",
+            lambda eq_val: (
+                [LINKEDIN_LEAD]
+                if eq_val == LINKEDIN_LEAD["unique_key"]
+                else INSIGHT_LEADS
+                if eq_val is None
+                else []
+            ),
+        )
 
         # The mapper module instantiates the genai.Client at __init__ — let it.
         # We'll swap generate_content out before invoking get_column_mapping.
@@ -230,7 +296,14 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
         # insights just needs (name,company_name,audit_status,seo_score,lead_source).
         # We feed UNION-of-fields rows so both selects work.
         merged_rows = [
-            {**lr, **{"audit_status": "Completed", "seo_score": 40, "lead_source": "google_maps"}}
+            {
+                **lr,
+                **{
+                    "audit_status": "Completed",
+                    "seo_score": 40,
+                    "lead_source": "google_maps",
+                },
+            }
             for lr in LEAD_INDEX_ROWS
         ]
 
@@ -238,6 +311,7 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
             if eq_val == LINKEDIN_LEAD["unique_key"]:
                 return [LINKEDIN_LEAD]
             return merged_rows
+
         sb.add("leads", _resolve)
         sb_mock.return_value.client = sb
         self.sb_patcher = sb_patcher
@@ -253,19 +327,29 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
         self.hunter = LeadHunter()
 
         # Sanity: clients must be initialised
-        for name, c in (("mapper", self.mapper.client),
-                        ("router", self.router.client),
-                        ("hunter", self.hunter.client)):
+        for name, c in (
+            ("mapper", self.mapper.client),
+            ("router", self.router.client),
+            ("hunter", self.hunter.client),
+        ):
             self.assertIsNotNone(c, f"{name} Gemini client must initialize")
 
     async def asyncTearDown(self):
+        self.budget_record_patcher.stop()
+        self.budget_check_patcher.stop()
         self.sb_patcher.stop()
         self.env_patcher.stop()
         if self.hunter._session and not self.hunter._session.closed:
             await self.hunter.close()
 
-    async def _capture(self, *, client, has_aio: bool, stub_text: str,
-                       runner: Callable[[], Awaitable[None]]):
+    async def _capture(
+        self,
+        *,
+        client,
+        has_aio: bool,
+        stub_text: str,
+        runner: Callable[[], Awaitable[None]],
+    ):
         cap = _PromptCapture()
         cap.stub_text = stub_text
         cap.install(client, has_aio=has_aio)
@@ -280,28 +364,35 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
 
         # mapper — sync method; wrap in to_thread to call from async context
         contents, sys_ins = await self._capture(
-            client=self.mapper.client, has_aio=False,
+            client=self.mapper.client,
+            has_aio=False,
             stub_text=STUB_TEXTS["mapper"],
             runner=lambda: asyncio.to_thread(
                 self.mapper.get_column_mapping,
                 ["Business Name", "Web Address", "Mail", "Tel"],
             ),
         )
-        out["mapper"] = self._render(contents, sys_ins,
-                                     "headers=['Business Name','Web Address','Mail','Tel']")
+        out["mapper"] = self._render(
+            contents, sys_ins, "headers=['Business Name','Web Address','Mail','Tel']"
+        )
 
         # route_instruction — async wrapper, sync gen call under the hood
         contents, sys_ins = await self._capture(
-            client=self.router.client, has_aio=False,
+            client=self.router.client,
+            has_aio=False,
             stub_text=STUB_TEXTS["route"],
             runner=lambda: self.router.route_instruction("find 5 dentists in Sarajevo"),
         )
-        out["route"] = self._render(contents, sys_ins,
-                                    "instruction='find 5 dentists in Sarajevo', lead_index=fixed-2-rows")
+        out["route"] = self._render(
+            contents,
+            sys_ins,
+            "instruction='find 5 dentists in Sarajevo', lead_index=fixed-2-rows",
+        )
 
         # insights
         contents, sys_ins = await self._capture(
-            client=self.router.client, has_aio=False,
+            client=self.router.client,
+            has_aio=False,
             stub_text=STUB_TEXTS["insights"],
             runner=lambda: self.router._get_strategic_insights(),
         )
@@ -309,50 +400,66 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
 
         # outreach_draft — uses lead_data bypass, no DB
         contents, sys_ins = await self._capture(
-            client=self.router.client, has_aio=False,
+            client=self.router.client,
+            has_aio=False,
             stub_text=STUB_TEXTS["outreach"],
-            runner=lambda: self.router._generate_outreach_draft({
-                "unique_key": "snap-outreach",
-                "lead_data": {
-                    "name": "Snapshot Outreach Lead",
-                    "company_name": "Snapshot Outreach Co",
-                    "website": "https://snap.example",
-                    "email": "x@snap.example",
-                    "audit_results": {
-                        "score": 42, "missing_title": False,
-                        "missing_description": True, "no_h1": True,
-                        "ssl_valid": True,
-                        "pain_points": "Missing H1 and meta description on homepage.",
+            runner=lambda: self.router._generate_outreach_draft(
+                {
+                    "unique_key": "snap-outreach",
+                    "lead_data": {
+                        "name": "Snapshot Outreach Lead",
+                        "company_name": "Snapshot Outreach Co",
+                        "website": "https://snap.example",
+                        "email": "x@snap.example",
+                        "audit_results": {
+                            "score": 42,
+                            "missing_title": False,
+                            "missing_description": True,
+                            "no_h1": True,
+                            "ssl_valid": True,
+                            "pain_points": "Missing H1 and meta description on homepage.",
+                        },
                     },
-                },
-            }),
+                }
+            ),
         )
-        out["outreach"] = self._render(contents, sys_ins,
-                                       "lead=Snapshot Outreach Co, OPERATOR_NAME='Test Operator'")
+        out["outreach"] = self._render(
+            contents,
+            sys_ins,
+            "lead=Snapshot Outreach Co, OPERATOR_NAME='Test Operator'",
+        )
 
         # linkedin_draft — reads lead from fake DB by unique_key
         contents, sys_ins = await self._capture(
-            client=self.router.client, has_aio=False,
+            client=self.router.client,
+            has_aio=False,
             stub_text=STUB_TEXTS["linkedin"],
-            runner=lambda: self.router._generate_linkedin_draft({
-                "unique_key": LINKEDIN_LEAD["unique_key"],
-            }),
+            runner=lambda: self.router._generate_linkedin_draft(
+                {
+                    "unique_key": LINKEDIN_LEAD["unique_key"],
+                }
+            ),
         )
-        out["linkedin"] = self._render(contents, sys_ins,
-                                       f"unique_key={LINKEDIN_LEAD['unique_key']}")
+        out["linkedin"] = self._render(
+            contents, sys_ins, f"unique_key={LINKEDIN_LEAD['unique_key']}"
+        )
 
         # pain_points — async, hunter
         contents, sys_ins = await self._capture(
-            client=self.hunter.client, has_aio=True,
+            client=self.hunter.client,
+            has_aio=True,
             stub_text=STUB_TEXTS["pain_points"],
             runner=lambda: self.hunter.analyze_pain_points_async(
                 page_text="Acme Co is a dental clinic in Sarajevo with no SSL.",
                 business_name="Acme Dental",
                 audit_results={
                     "tech_flags": {
-                        "has_viewport": True, "has_google_analytics": False,
-                        "has_gtm": False, "has_facebook_pixel": False,
-                        "has_portal": False, "has_robots_txt": True,
+                        "has_viewport": True,
+                        "has_google_analytics": False,
+                        "has_gtm": False,
+                        "has_facebook_pixel": False,
+                        "has_portal": False,
+                        "has_robots_txt": True,
                         "has_sitemap": True,
                     },
                     "red_flags": ["no_ssl"],
@@ -361,11 +468,14 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
                 },
             ),
         )
-        out["pain_points"] = self._render(contents, sys_ins, "Acme Dental, Shopify no-ssl fixture")
+        out["pain_points"] = self._render(
+            contents, sys_ins, "Acme Dental, Shopify no-ssl fixture"
+        )
 
         # hooks
         contents, sys_ins = await self._capture(
-            client=self.hunter.client, has_aio=True,
+            client=self.hunter.client,
+            has_aio=True,
             stub_text=STUB_TEXTS["hooks"],
             runner=lambda: self.hunter.generate_outreach_hooks_async(
                 pain_points="No SSL and no GA installed.",
@@ -373,11 +483,14 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
                 audit_results={"cms": "Shopify"},
             ),
         )
-        out["hooks"] = self._render(contents, sys_ins, "Acme Dental, Shopify hooks fixture")
+        out["hooks"] = self._render(
+            contents, sys_ins, "Acme Dental, Shopify hooks fixture"
+        )
 
         # enrich
         contents, sys_ins = await self._capture(
-            client=self.hunter.client, has_aio=True,
+            client=self.hunter.client,
+            has_aio=True,
             stub_text=STUB_TEXTS["enrich"],
             runner=lambda: self.hunter.enrich_business_data_async(
                 page_text="Acme Dental is a family-owned clinic since 1998.",
@@ -390,10 +503,16 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _render(contents, system_instruction, description) -> dict[str, Any]:
-        contents_str = contents if isinstance(contents, str) else json.dumps(
-            contents, sort_keys=True, ensure_ascii=False, default=str
+        contents_str = (
+            contents
+            if isinstance(contents, str)
+            else json.dumps(contents, sort_keys=True, ensure_ascii=False, default=str)
         )
-        sys_str = system_instruction if isinstance(system_instruction, str) else str(system_instruction)
+        sys_str = (
+            system_instruction
+            if isinstance(system_instruction, str)
+            else str(system_instruction)
+        )
         return {
             "contents_hash": _sha256(contents_str),
             "system_instruction_hash": _sha256(sys_str),
@@ -410,7 +529,9 @@ class TestPromptSnapshots(unittest.IsolatedAsyncioTestCase):
                 json.dumps(current, indent=2, ensure_ascii=False, sort_keys=True),
                 encoding="utf-8",
             )
-            print(f"\n[prompt_snapshots] UPDATE_PROMPT_SNAPSHOTS=1 — wrote {SNAPSHOT_FILE}")
+            print(
+                f"\n[prompt_snapshots] UPDATE_PROMPT_SNAPSHOTS=1 — wrote {SNAPSHOT_FILE}"
+            )
             return  # pass
 
         if not SNAPSHOT_FILE.exists():

@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import LocaleSwitcher from './LocaleSwitcher';
 
 interface SidebarLead {
   company_name?: string;
@@ -60,6 +62,10 @@ export default function Sidebar({
   const [isManuallyToggled, setIsManuallyToggled] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  // i18n: pull nav labels from messages/<locale>.json. First component
+  // wired during the next-intl scaffold (13.1) — Audited / High Risk /
+  // Deep Discovery still inline strings, to be extracted in a follow-up.
+  const t = useTranslations('nav');
 
   // Restore collapse preference from localStorage on mount. Safe to read
   // on client only (Sidebar is a client component). User session-scoped
@@ -161,7 +167,7 @@ export default function Sidebar({
               aria-current={!isInsightsPage && view === 'all' && !showDiscoveryModal && !showSettings ? 'page' : undefined}
             >
               <BarChart3 size={18} />
-              {showLabels && <span>Dashboard</span>}
+              {showLabels && <span>{t('dashboard')}</span>}
             </Link>
             <Link
               href="/insights"
@@ -171,7 +177,7 @@ export default function Sidebar({
               aria-current={isInsightsPage ? 'page' : undefined}
             >
               <TrendingUp size={18} />
-              {showLabels && <span>Insights</span>}
+              {showLabels && <span>{t('insights')}</span>}
             </Link>
             <button
               className={`nav-item ${showDiscoveryModal ? 'active' : ''}`}
@@ -206,7 +212,7 @@ export default function Sidebar({
               title="Settings"
             >
               <Settings size={18} />
-              {showLabels && <span>Settings</span>}
+              {showLabels && <span>{t('settings')}</span>}
             </button>
             <button
               className="nav-item"
@@ -222,9 +228,15 @@ export default function Sidebar({
               aria-label="Sign out"
             >
               <LogOut size={18} />
-              {showLabels && <span>Sign Out</span>}
+              {showLabels && <span>{t('signOut')}</span>}
             </button>
           </nav>
+
+          {showLabels && (
+            <div style={{ padding: '0.75rem 1rem 0', borderTop: '1px solid var(--border-subtle)', marginTop: '0.75rem' }}>
+              <LocaleSwitcher />
+            </div>
+          )}
 
           {showExtra && (
             <div className="sidebar-extra-content">

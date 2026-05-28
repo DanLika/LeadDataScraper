@@ -127,7 +127,7 @@ for (const profile of PROFILES) {
       // a wall-clock formatted variant; the bare ISO surface is the
       // failure mode this catches.
       if (bodyText.includes(utcText)) {
-        // eslint-disable-next-line no-console
+
         console.warn(`[locale ${profile.name}] raw UTC ISO surfaced in UI — should be locale-formatted`)
       }
       // Soft signal we accept: expected formatted variant OR a Date that
@@ -137,7 +137,7 @@ for (const profile of PROFILES) {
       // anywhere user-visible, so we don't fail on the absence either.
       // This test serves as a contract anchor: when localized rendering
       // lands, swap the warn-only block above for a hard expect.
-      // eslint-disable-next-line no-console
+
       console.log(`[locale ${profile.name}] hour in TZ: ${hourInTZ}; expected formatted: ${expected}`)
 
       await page.context().close()

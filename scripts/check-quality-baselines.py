@@ -28,6 +28,7 @@ Usage:
     python scripts/check-quality-baselines.py            # current dir
     python scripts/check-quality-baselines.py --repo /path/to/repo
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,9 +53,13 @@ def _run(argv: list[str], cwd: Path) -> tuple[int, str]:
     if not argv or not all(isinstance(a, str) for a in argv):
         raise ValueError(f"argv must be a non-empty list of strings, got {argv!r}")
     result = subprocess.run(  # noqa: S603 — argv is shell=False; CWE-78 N/A
-        argv, cwd=str(cwd),
-        capture_output=True, text=True, timeout=600,
-        shell=False, check=False,
+        argv,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        shell=False,
+        check=False,
     )
     return result.returncode, (result.stdout or "") + (result.stderr or "")
 
@@ -122,28 +127,46 @@ _PARSERS: dict[str, Any] = {
 }
 
 
-def _compare(metric: str, baseline: Any, current: Any, operator: str) -> tuple[str, str]:
+def _compare(
+    metric: str, baseline: Any, current: Any, operator: str
+) -> tuple[str, str]:
     """Return (status, message) where status is 'pass' / 'fail' / 'improvement'."""
     if operator == "gte":
         # Higher is better — fail if current < baseline.
         if current < baseline:
-            return "fail", f"  ❌ {metric}: regressed {baseline} → {current} (lower is worse)"
+            return (
+                "fail",
+                f"  ❌ {metric}: regressed {baseline} → {current} (lower is worse)",
+            )
         if current > baseline:
-            return "improvement", f"  ✨ {metric}: improved {baseline} → {current} — `git add .quality-baselines.json` to lock in"
+            return (
+                "improvement",
+                f"  ✨ {metric}: improved {baseline} → {current} — `git add .quality-baselines.json` to lock in",
+            )
         return "pass", f"  ✓ {metric}: {current} (== baseline)"
 
     # Default: lower is better.
     if current > baseline:
-        return "fail", f"  ❌ {metric}: regressed {baseline} → {current} (+{current - baseline})"
+        return (
+            "fail",
+            f"  ❌ {metric}: regressed {baseline} → {current} (+{current - baseline})",
+        )
     if current < baseline:
-        return "improvement", f"  ✨ {metric}: improved {baseline} → {current} (-{baseline - current}) — `git add .quality-baselines.json` to lock in"
+        return (
+            "improvement",
+            f"  ✨ {metric}: improved {baseline} → {current} (-{baseline - current}) — `git add .quality-baselines.json` to lock in",
+        )
     return "pass", f"  ✓ {metric}: {current} (== baseline)"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="Repository root (default: CWD)")
-    parser.add_argument("--baselines", type=Path, default=Path(".quality-baselines.json"))
+    parser.add_argument(
+        "--repo", type=Path, default=Path.cwd(), help="Repository root (default: CWD)"
+    )
+    parser.add_argument(
+        "--baselines", type=Path, default=Path(".quality-baselines.json")
+    )
     args = parser.parse_args()
 
     repo = args.repo.resolve()
@@ -196,7 +219,9 @@ def main() -> int:
 
     print()
     if any_failed:
-        print("FAIL — one or more metrics regressed. Fix the underlying finding; do not raise the baseline.")
+        print(
+            "FAIL — one or more metrics regressed. Fix the underlying finding; do not raise the baseline."
+        )
         return 1
     print("PASS — every metric at or better than baseline.")
     return 0

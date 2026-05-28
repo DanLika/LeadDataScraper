@@ -13,10 +13,13 @@ Assertions:
 - Every column declared in ``supabase_schema.sql`` exists in DB.
 - Every column in DB is declared in ``supabase_schema.sql`` (no silent drift).
 - RLS enabled on leads, campaigns, campaign_messages, orchestration_jobs,
-  account_deletions.
-- A deny-all policy (qual=false, with_check=false, anon+authenticated, FOR ALL)
-  exists on each of those 5 tables.
-- No GRANT to anon / authenticated / PUBLIC on those 5 tables.
+  account_deletions, email_send_ledger, suppressions, webhook_events,
+  sequences, sequence_steps, sequence_variants.
+- A deny-all policy (AS RESTRICTIVE, qual=false, with_check=false,
+  anon+authenticated, FOR ALL) exists on each of those 11 tables. RESTRICTIVE
+  is enforced so a future ad-hoc PERMISSIVE qual=true policy added in Studio
+  cannot OR over the deny.
+- No GRANT to anon / authenticated / PUBLIC on those 11 tables.
 - ``add_lead_column`` function is ``SECURITY DEFINER``, owned by ``postgres``,
   with ``search_path`` set, and has no EXECUTE grant to anon/authenticated/PUBLIC.
 
@@ -25,6 +28,7 @@ because Supabase's "live state" already drifts on a couple of columns
 (``needs_manual_review`` text vs boolean, ``outreach_score`` double vs int).
 A future type-parity gate can be added once those are reconciled.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,9 +46,21 @@ TABLES: tuple[str, ...] = (
     "campaign_messages",
     "orchestration_jobs",
     "account_deletions",
+    "email_send_ledger",
+    "suppressions",
+    "webhook_events",
+    "sequences",
+    "sequence_steps",
+    "sequence_variants",
 )
 TABLE_CONSTRAINT_KEYWORDS = {
-    "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "EXCLUDE", "LIKE",
+    "CONSTRAINT",
+    "PRIMARY",
+    "UNIQUE",
+    "FOREIGN",
+    "CHECK",
+    "EXCLUDE",
+    "LIKE",
 }
 
 # Named CHECK constraints declared in supabase_schema.sql. Drift in either
@@ -69,6 +85,44 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     "campaign_messages": {
         "campaign_messages_channel_allowed",
         "campaign_messages_status_allowed",
+        # Phase 14+15 hardening (PR #356) — bounce_reason length cap ≤ 200.
+        "campaign_messages_bounce_reason_size",
+    },
+    "suppressions": {
+        "suppressions_identifier_type_allowed",
+        "suppressions_reason_allowed",
+        "suppressions_channel_allowed",
+        "suppressions_provider_allowed",
+    },
+    "email_send_ledger": {
+        "email_send_ledger_provider_allowed",
+    },
+    "webhook_events": {
+        "webhook_events_provider_allowed",
+        # Phase 14+15 hardening (PR #356) — event_id length ∈ [1, 256].
+        "webhook_events_event_id_size",
+    },
+    "sequences": {
+        "sequences_status_allowed",
+    },
+    "sequence_steps": {
+        "sequence_steps_channel_allowed",
+        "sequence_steps_branch_allowed",
+        "sequence_steps_delay_nonneg",
+        # Phase 14+15 hardening (PR #356) — window ordering + send_days
+        # regex allowlist. The regex CHECK is the one re-applied with
+        # E''-prefix in PR #366 after the apostrophe-double-escape bug.
+        "sequence_steps_window_ordered",
+        "sequence_steps_send_days_format",
+    },
+    "sequence_variants": {
+        "sequence_variants_weight_positive",
+        "sequence_variants_label_format",
+        # Phase 14+15 hardening (PR #356) — body/subject size cap +
+        # content_type ∈ ('text','html') allowlist (latter re-applied
+        # as a clean IN-list in PR #366).
+        "sequence_variants_body_size",
+        "sequence_variants_content_type_allowed",
     },
 }
 
@@ -128,6 +182,12 @@ def parse_expected_columns(path: Path) -> dict[str, set[str]]:
         open_paren = m.end() - 1
         close_paren = _find_matching_paren(sql, open_paren)
         body = sql[open_paren + 1 : close_paren]
+        # Strip string literals BEFORE splitting on top-level commas — a
+        # default like ``send_days TEXT NOT NULL DEFAULT 'mon,tue,wed'``
+        # has commas at paren-depth 0 inside the literal that would
+        # otherwise split the column def and produce bogus "columns"
+        # named ``tue``, ``wed``, etc. (Phase 15.1 surfaced this.)
+        body = _strip_string_literals(body)
         for col_def in _split_top_level_commas(body):
             tokens = col_def.split()
             if not tokens:
@@ -183,23 +243,24 @@ def check_rls(conn: psycopg.Connection) -> list[str]:
 
 def check_deny_policies(conn: psycopg.Connection) -> list[str]:
     cur = conn.execute(
-        "SELECT tablename, policyname, roles, cmd, qual, with_check "
+        "SELECT tablename, policyname, permissive, roles, cmd, qual, with_check "
         "FROM pg_policies "
         "WHERE schemaname = 'public' AND tablename = ANY(%s)",
         (list(TABLES),),
     )
     by_table: dict[str, list[tuple]] = {}
-    for table, name, roles, cmd, qual, with_check in cur.fetchall():
+    for table, name, permissive, roles, cmd, qual, with_check in cur.fetchall():
         by_table.setdefault(table, []).append(
-            (name, set(roles or []), cmd, qual, with_check)
+            (name, permissive, set(roles or []), cmd, qual, with_check)
         )
 
     errs: list[str] = []
     for t in TABLES:
         ok = False
-        for name, roles, cmd, qual, with_check in by_table.get(t, []):
+        for name, permissive, roles, cmd, qual, with_check in by_table.get(t, []):
             if (
                 name == f"{t}_deny_all"
+                and permissive == "RESTRICTIVE"
                 and {"anon", "authenticated"}.issubset(roles)
                 and cmd == "ALL"
                 and qual == "false"
@@ -210,8 +271,9 @@ def check_deny_policies(conn: psycopg.Connection) -> list[str]:
         if not ok:
             errs.append(
                 f"deny_all policy missing or misconfigured on public.{t} "
-                f"(expected name={t}_deny_all, roles>={{anon,authenticated}}, "
-                f"FOR ALL, qual=false, with_check=false)"
+                f"(expected name={t}_deny_all, permissive=RESTRICTIVE, "
+                f"roles>={{anon,authenticated}}, FOR ALL, qual=false, "
+                f"with_check=false)"
             )
     return errs
 
@@ -290,9 +352,7 @@ def check_add_lead_column(conn: psycopg.Connection) -> list[str]:
     if not secdef:
         errs.append("public.add_lead_column is not SECURITY DEFINER")
     if owner != "postgres":
-        errs.append(
-            f"public.add_lead_column owner is {owner!r}, expected 'postgres'"
-        )
+        errs.append(f"public.add_lead_column owner is {owner!r}, expected 'postgres'")
     if not any(s.lower().startswith("search_path=") for s in (cfg or [])):
         errs.append("public.add_lead_column has no search_path set")
 
@@ -304,8 +364,7 @@ def check_add_lead_column(conn: psycopg.Connection) -> list[str]:
     )
     for grantee, priv in cur.fetchall():
         errs.append(
-            f"public.add_lead_column has {priv} grant to {grantee} "
-            f"(must be revoked)"
+            f"public.add_lead_column has {priv} grant to {grantee} (must be revoked)"
         )
     return errs
 

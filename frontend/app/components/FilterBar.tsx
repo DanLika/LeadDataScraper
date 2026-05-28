@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, X } from 'lucide-react';
+import { Search, X, Sparkles } from 'lucide-react';
 
 export type SortKey =
   | 'created_at_desc'
@@ -26,6 +26,12 @@ interface FilterBarProps {
   segmentOptions: (string | undefined)[];
   onClearFilters: () => void;
   hasActiveFilters: boolean;
+  /** Phase 13.3 — when true, the dashboard requests `?include_demo=true`
+   *  and the seeded `_demo_*` rows show alongside real leads. Default
+   *  false (operator-facing dashboards hide demo data so screenshots /
+   *  walkthrough videos can flip the toggle on for a moment). */
+  showDemo: boolean;
+  setShowDemo: (value: boolean) => void;
 }
 
 export default function FilterBar({
@@ -42,6 +48,8 @@ export default function FilterBar({
   segmentOptions,
   onClearFilters,
   hasActiveFilters,
+  showDemo,
+  setShowDemo,
 }: FilterBarProps) {
   return (
     <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-muted)', flexWrap: 'wrap', gap: '1.5rem', minWidth: 'min-content' }}>
@@ -116,6 +124,30 @@ export default function FilterBar({
           <option value="name_asc" style={{ background: 'var(--surface-dark)' }}>Name A→Z</option>
           <option value="name_desc" style={{ background: 'var(--surface-dark)' }}>Name Z→A</option>
         </select>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={showDemo}
+          id="toggle-show-demo"
+          onClick={() => setShowDemo(!showDemo)}
+          title="Show Phase 13.3 demo seed data alongside real leads"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            background: showDemo ? 'var(--primary-tint-15)' : 'transparent',
+            border: `1px solid ${showDemo ? 'var(--primary)' : 'var(--border)'}`,
+            color: showDemo ? 'var(--primary)' : 'var(--text-primary)',
+            borderRadius: '12px',
+            padding: '0.55rem 0.85rem',
+            fontSize: '0.85rem',
+            cursor: 'pointer',
+            minHeight: '44px',
+          }}
+        >
+          <Sparkles size={14} aria-hidden="true" /> {showDemo ? 'Hide demo data' : 'Show demo data'}
+        </button>
 
         {hasActiveFilters && (
           <button

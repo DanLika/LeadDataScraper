@@ -9,32 +9,40 @@ from unittest.mock import patch
 # but the plan says PYTHONPATH will be set to '.'.
 
 import sys
+
 backend_path = os.path.join(os.getcwd(), "backend")
 if backend_path not in sys.path:
     sys.path.append(backend_path)
 
 from main import app
 
+
 def test_cors_default_origin():
     # By default, ALLOWED_ORIGINS is http://localhost:3000
     client = TestClient(app)
 
     # Allowed origin
-    response = client.options("/", headers={
-        "Origin": "http://localhost:3000",
-        "Access-Control-Request-Method": "GET"
-    })
+    response = client.options(
+        "/",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
     assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    assert (
+        response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    )
 
     # Disallowed origin
-    response = client.options("/", headers={
-        "Origin": "http://evil.com",
-        "Access-Control-Request-Method": "GET"
-    })
+    response = client.options(
+        "/",
+        headers={"Origin": "http://evil.com", "Access-Control-Request-Method": "GET"},
+    )
     # FastAPI/CORSMiddleware returns 200 for OPTIONS even if origin is not allowed,
     # but the 'access-control-allow-origin' header will be missing.
     assert "access-control-allow-origin" not in response.headers
+
 
 def test_cors_custom_origins():
     # Mocking environment variable before app initialization is tricky because main.py
@@ -44,6 +52,7 @@ def test_cors_custom_origins():
     # Let's try to reload the module or just test the current configuration.
     # Testing multiple configurations in one process might require re-creating the app.
     pass
+
 
 @patch.dict(os.environ, {"ALLOWED_ORIGINS": "http://myapp.com, https://another.com"})
 def test_cors_from_env():
@@ -58,7 +67,9 @@ def test_cors_from_env():
     test_app = FastAPI()
 
     origins_env = "http://myapp.com, https://another.com"
-    allowed_origins = [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+    allowed_origins = [
+        origin.strip() for origin in origins_env.split(",") if origin.strip()
+    ]
 
     test_app.add_middleware(
         CORSMiddleware,
@@ -71,14 +82,16 @@ def test_cors_from_env():
     client = TestClient(test_app)
 
     for origin in ["http://myapp.com", "https://another.com"]:
-        response = client.options("/", headers={
-            "Origin": origin,
-            "Access-Control-Request-Method": "GET"
-        })
+        response = client.options(
+            "/", headers={"Origin": origin, "Access-Control-Request-Method": "GET"}
+        )
         assert response.headers.get("access-control-allow-origin") == origin
 
-    response = client.options("/", headers={
-        "Origin": "http://unauthorized.com",
-        "Access-Control-Request-Method": "GET"
-    })
+    response = client.options(
+        "/",
+        headers={
+            "Origin": "http://unauthorized.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
     assert "access-control-allow-origin" not in response.headers

@@ -118,14 +118,20 @@ _FIXTURE_LEADS = [
 
 _FIXTURE_CAMPAIGNS = [
     {
-        "id": "camp-1", "name": "Q2 Outreach", "channel": "email",
-        "status": "draft", "segment_filter": "dentists",
+        "id": "camp-1",
+        "name": "Q2 Outreach",
+        "channel": "email",
+        "status": "draft",
+        "segment_filter": "dentists",
         "created_at": "2026-04-01T10:00:00Z",
         "updated_at": "2026-04-01T10:00:00Z",
     },
     {
-        "id": "camp-2", "name": "Q3 LinkedIn", "channel": "linkedin",
-        "status": "active", "segment_filter": None,
+        "id": "camp-2",
+        "name": "Q3 LinkedIn",
+        "channel": "linkedin",
+        "status": "active",
+        "segment_filter": None,
         "created_at": "2026-04-15T10:00:00Z",
         "updated_at": "2026-04-15T10:00:00Z",
     },
@@ -133,28 +139,40 @@ _FIXTURE_CAMPAIGNS = [
 
 _FIXTURE_MESSAGES = [
     {
-        "id": "msg-1", "campaign_id": "camp-1",
-        "lead_unique_key": "lead-1", "channel": "email",
-        "subject": "Hello", "body": "Body.", "status": "pending",
+        "id": "msg-1",
+        "campaign_id": "camp-1",
+        "lead_unique_key": "lead-1",
+        "channel": "email",
+        "subject": "Hello",
+        "body": "Body.",
+        "status": "pending",
         "created_at": "2026-04-02T10:00:00Z",
     },
     {
-        "id": "msg-2", "campaign_id": "camp-1",
-        "lead_unique_key": "lead-injection", "channel": "email",
-        "subject": "Re: alpha", "body": "Body.", "status": "pending",
+        "id": "msg-2",
+        "campaign_id": "camp-1",
+        "lead_unique_key": "lead-injection",
+        "channel": "email",
+        "subject": "Re: alpha",
+        "body": "Body.",
+        "status": "pending",
         "created_at": "2026-04-02T10:01:00Z",
     },
 ]
 
 _FIXTURE_JOBS = [
     {
-        "id": "job-1", "type": "discovery", "status": "completed",
+        "id": "job-1",
+        "type": "discovery",
+        "status": "completed",
         "filters": {"type": "pipeline"},
         "created_at": "2026-04-01T09:00:00Z",
         "updated_at": "2026-04-01T09:30:00Z",
     },
     {
-        "id": "job-2", "type": "audit", "status": "running",
+        "id": "job-2",
+        "type": "audit",
+        "status": "running",
         "filters": None,
         "created_at": "2026-04-10T09:00:00Z",
         "updated_at": "2026-04-10T09:00:00Z",
@@ -202,6 +220,7 @@ def _reset_rate_limiter_and_db():
     """Clear slowapi storage AND restore the mock DB between tests.
     Mirrors the pattern from tests/test_error_message_leak.py."""
     import main
+
     try:
         main.limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except Exception:
@@ -340,9 +359,9 @@ class TestRoundTrip:
         parsed = json.loads(json_row["audit_results"])
         # Compare against the original fixture dict — bytes identical
         # after a JSON round-trip.
-        original = next(
-            l for l in _FIXTURE_LEADS if l["unique_key"] == "lead-jsonb"
-        )["audit_results"]
+        original = next(l for l in _FIXTURE_LEADS if l["unique_key"] == "lead-jsonb")[
+            "audit_results"
+        ]
         assert parsed == original
 
     def test_round_trip_campaigns(self, client):
@@ -432,6 +451,7 @@ class TestEmptyTables:
     def test_export_succeeds_with_all_empty(self, client):
         """Fresh deploy, no data yet. Export still produces 4 files."""
         import main
+
         empty_db = MagicMock()
         empty_chain = MagicMock()
         empty_chain.select.return_value = empty_chain
@@ -444,7 +464,10 @@ class TestEmptyTables:
         assert r.status_code == 200
         zf = zipfile.ZipFile(io.BytesIO(r.content))
         assert set(zf.namelist()) == {
-            "leads.csv", "campaigns.csv", "messages.csv", "audit_log.json",
+            "leads.csv",
+            "campaigns.csv",
+            "messages.csv",
+            "audit_log.json",
         }
         # Empty CSVs are zero-byte by design (no header without rows
         # since columns aren't known a priori).
@@ -468,6 +491,7 @@ class TestEmptyTables:
 class TestDbUnavailable:
     def test_503_when_db_client_is_none(self, client):
         import main
+
         main.db = MagicMock()
         main.db.client = None
 

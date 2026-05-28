@@ -84,16 +84,13 @@ repos:
         # ci.yml headers).
         language: system
         files: ^\.github/workflows/.*\.ya?ml$
-        # grep -E exits 0 on match. We INVERT: if any match exists,
-        # `! grep -qE` returns true → hook fails. Quiet mode (-q) means
-        # no spam to stdout; on fail we re-run grep -n for diagnostics.
-        entry: bash -c '
-          if grep -qE "uses:[[:space:]]+[^@#]+@v[0-9]+[[:space:]]*$" "$@"; then
-            echo "Unpinned action tags found (use SHA + # vX.Y.Z comment):";
-            grep -nE "uses:[[:space:]]+[^@#]+@v[0-9]+[[:space:]]*$" "$@";
-            exit 1;
-          fi
-        ' --
+        # Script-extracted (see .github/scripts/workflow-pin-guard.sh)
+        # because the previous inline `entry: bash -c '...'` was
+        # structurally unparseable: YAML's block-mapping parser bailed
+        # on the multi-line single-quoted scalar; the single-line
+        # collapse hit shlex's "No closing quotation" on embedded $@.
+        # Single-path entry sidesteps both. Issue #339.
+        entry: .github/scripts/workflow-pin-guard.sh
         pass_filenames: true
       - id: prettier-frontend
         name: prettier (frontend)

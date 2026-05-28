@@ -1,6 +1,8 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
+import { NextIntlClientProvider } from 'next-intl';
+import { getLocale, getMessages } from 'next-intl/server';
 import OfflineBanner from './components/OfflineBanner';
 import WebVitalsReporter from './components/WebVitalsReporter';
 
@@ -27,12 +29,23 @@ export default async function RootLayout({
   // with `dynamic = 'force-dynamic'` makes Next.js stamp the same nonce on
   // every inline script it streams.
   const nonce = (await headers()).get('x-nonce') ?? undefined;
+
+  // Per-request locale + messages. `getLocale()` consults i18n/request.ts
+  // (cookie NEXT_LOCALE → defaultLocale fallback). `<html lang>` reflects
+  // the active locale so screen readers + browser TTS pick the right
+  // pronunciation, and `<NextIntlClientProvider>` exposes `useTranslations`
+  // / `useFormatter` to every client component below.
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
-    <html lang="en">
+    <html lang={locale}>
       <body data-nonce={nonce ? '1' : '0'}>
-        <OfflineBanner />
-        <WebVitalsReporter />
-        {children}
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <OfflineBanner />
+          <WebVitalsReporter />
+          {children}
+        </NextIntlClientProvider>
       </body>
     </html>
   );

@@ -1,15 +1,28 @@
 {
-  "_doc": "Pinned sha256 of every .github/workflows/*.yml file. Drift between this snapshot and the live files is the alarm tripped by workflow-drift.yml. Regenerate via `make workflow-hashes` (see Makefile) after any intentional workflow change. The drift workflow uses this file as ground truth — keep it under CODEOWNERS review like the rest of /.github/.",
+  "_doc": "Pinned sha256 of every .github/workflows/*.yml file. Regenerate via make workflow-hashes.",
   "files": {
-    "ci.yml": "ea268c508a1cdba8f0900614ede03696091c9707002e6e81a3096770d52b6d40",
+    "backup-verify-deep.yml": "afdccdfb5ddffd5a69bdef2fe4b2c3122aabcfc99eac66be8e314bf7d1e907aa",
+    "cert-expiry-monitor.yml": "af6bfe689d658a6afb4a784eddf21a3e0c041ec99eb64be8b847037cfbb4e542",
+    "ci.yml": "4e709f6bc36c0d7c73a3c0c5a540d13b10302885787862239906ecd3f0d105bb",
+    "claude-md-size.yml": "8d1c7bc49bfd4eedd73906bc64003605115084ad8c8bbd4cb5ef53df2eac1f94",
+    "cold-start-monitor.yml": "744f380b9b7bb13f77adb80fae1692099036bea1b52c1d4c5de79e60d9fc4d29",
+    "cost-report.yml": "6938fa249f0e23b18a376d555f3a71c73145432eb82cc62d5da8ec0c6016f5be",
+    "daily-dogfood-digest.yml": "47f5da82171ed758691fa90e1cbdaead96481f701abb36cdc4ca1fbf73be05f2",
+    "data-integrity.yml": "c0f267ab9fd6e6babcae48aceb9761c18bbec48083149f863a7757b01505e20b",
     "dependabot-auto-merge.yml": "eff54c6ab3bd67ea539416da9735be2b23fc21becb7823eab32b33812dbd35cd",
-    "deploy-backend.yml": "650b6be7eb1e35a909f4dd67503ebd7ba405a18bde01a5758c7a4fd9d890b780",
-    "e2e.yml": "bf901996260cdffcabfe451a56cfd941c38f7c7f9a8e6e3fcc3c63c4ee6ae8f0",
+    "deploy-backend.yml": "44b081e7fda0b10250e3896929a681d8d7e17726259e306bb63604424f722ff6",
+    "e2e.yml": "f44720b0ab041d9cac5cf77213b6e45d96dde68e12459a1fd758d05899d5f9fe",
     "flakiness-detector.yml": "db895d897c44972017a85daec7bad3ba1ee7d4660af0c9c30661f9b2167c9dc1",
-    "mutation-test.yml": "aa0500d6d7239a4b977375db444db1f2022a77f57034210aa4d21c5796947735",
+    "main-matrix.yml": "99a36693a0b462ab1eb449cbdf80f36b36532d27f672a7fc7232acb9f0bab81a",
+    "migration-safety.yml": "2ec978599525fc6d3e3e45247a18b975a000731121c58e600bf5d2ab7f960d92",
+    "mutation-test.yml": "d3ebfafa0e0ed6a7165eb43db5873de648bd79cf7eee5abd76ffa7f8af776cf5",
     "post-deploy-smoke.yml": "8da2fa75dcdf4c40c5446eabb5652a25994615de160f8ae2d15f7fbcfadcbbf6",
     "pr-hygiene.yml": "c8ddafcc64ac3a0b7c59de737d291a8397ab5688921a311c3f7dbe91434c5adc",
-    "security.yml": "6b2deeceb1224a270b15aa2e0aca0646496f77b228f0215dab72913063373a5d",
-    "synthetic-monitor.yml": "2ecf15e2877fe0fdc1d032414aa1cda2a983a5cf9cdf6c5d935f86caeec90cdf"
+    "preview-smoke.yml": "c8f056c0aea89402e10b047899259738b81d8662a00e9c976af9d8996a8a994f",
+    "quality-ratchet.yml": "d85b2aead74a5edc42acfa2f49eead7e4ed0c66ac5cc787ea57f487d49ddfefe",
+    "release.yml": "b4334cd16c18441bf5c7f937168efe44a5978a06845ee1d5281d858a5642b5fb",
+    "security.yml": "dae0fa9ffee6d239d605f275b820f67bb57d82956a7f3f6d07d77d672c633186",
+    "synthetic-monitor.yml": "4f92d7332d70be9f5bffb82cc63481b6fed3f2b9e18377f12b7ac5550f2dd12f",
+    "workflow-drift.yml": "967ef456d4c18b2b5f5c454911fa1661d17c466cf7d1df3962eacf2b480d2931"
   }
 }

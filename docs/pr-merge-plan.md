@@ -1,32 +1,45 @@
 # PR Merge Plan — Phase 12.1
 
-> ## Status — 2026-05-23 update
+> ## Status — 2026-05-23 (afternoon update)
 >
-> **Original #185–#200 stack: all 16 PRs still open.** The planned Stage 1/2/3 sequence has NOT been executed. Instead, the overnight session ran the *parallel* track from `dirty-file-triage.md` — drain PRs #201–#210 landed 8 new buckets of dirty-tree work directly to `main`, bypassing the existing PR queue.
+> **Superseded by full pre-merge review.** See
+> [`tests/quality/pr-review-pass-2026-05-23.md`](../tests/quality/pr-review-pass-2026-05-23.md)
+> for per-PR verdicts and
+> [`docs/pr-merge-order-2026-05-23.md`](pr-merge-order-2026-05-23.md)
+> for the phased sequence.
 >
-> **Current open PR count: 29** (was 30). The –1 is from one merge of original `#171–#200` cohort — verify which via:
-> ```bash
-> gh pr list --state merged --search "merged:>=2026-05-22 head:main" --limit 50
-> ```
-> *(Drain PRs #201–#210 are separate, see `dirty-file-triage.md` 2026-05-23 status block.)*
+> Open PR count today: **49** (up from the 29 originally tracked
+> here — drain PRs #201–#260 added a large session-2026-05-23
+> backlog). The original #171–#200 work plan below is largely
+> stale; treat as historical context.
 >
-> **Implication for this plan:**
+> **Two P0 blockers to clear before any merge:**
 >
-> 1. The Stage 1 / Stage 2 / Stage 3 ordering still applies to the unmerged #185–#200 cohort.
-> 2. The `CLAUDE.md` conflict warning for PR #200 is now **much worse** — drain PR #205 (`chore(B+L)`) already landed massive CLAUDE.md edits to `main`. #200's base is now further behind than it was at planning time. Expect a significant rebase.
-> 3. Drafts #171–#184 remain unreviewed — same plan as the original.
-> 4. The "13 ahead-commits" conflict-source rows in this doc are obsolete — those commits are in `main` now (see `git-state-2026-05.md` 2026-05-23 status). The remaining conflict surface is just drain-PR overlap (e.g. anything touching `frontend/app/components/*` collides with #202).
+> 1. **CI fails on every session + Dependabot PR** (`gh pr checks`
+>    returns `fail,skipping` across the board). Systemic, not per-PR.
+>    Diagnose via `gh run list --workflow=ci.yml --limit 5` against
+>    `main`.
+> 2. **PR #248 vs PR #255** disagree on 4 verification rows of
+>    `docs/bookbed-crossover.md` (2.5 Flutter log CRLF, 2.5 CF logger
+>    CRLF, 2.6 CF Origin gate, 2.12 CF rate-limit, 2.13 Firestore
+>    type checks). Both held until a third re-verification in
+>    `~/git/bookbed` settles each disputed row.
 >
-> **Recommended re-prioritisation:**
+> **Net ready-when-CI-green: ~24 PRs.** Phased order in the
+> companion `pr-merge-order-2026-05-23.md`.
 >
-> | Priority | Action |
-> |---|---|
-> | 1 | Rebase + land #200 first (its `CLAUDE.md` content will increasingly diverge from main otherwise) |
-> | 2 | Run original Stage 1 (#185 #187 #188 #190 #193 #197 #198 → docs first per original sub-order) |
-> | 3 | Then #186 #194 #199 (refactors), then Stage 2 stacks |
-> | 4 | Triage drafts last |
+> **Close list** (no merge — verified in the review pass):
+> #233 (superseded by #251), #134, #137, #139, #140 (targets no
+> longer exist), one of #239/#240 (identical Inter-drop;
+> PR #238 already bundles the same change).
+>
+> **Hold-on-author-rebase**: #135, #136, #138 (tests/ → tests/unit/
+> relocation needed post-Phase-14 reorg; for #138 also a code
+> rebase since `_generate_campaign_strategy` moved L595→L688).
 >
 > ---
+>
+> ## Historical status — 2026-05-23 morning
 
 **Generated:** 2026-05-22
 **Scope:** All open PRs (#171–#200) on `main` base
@@ -172,3 +185,25 @@ For every PR landed:
 ## Outstanding risk
 
 The 13 ahead-commits on local `main` (Phase 12.13) WILL conflict with at least one PR if pushed naively. Resolve `git-state-2026-05.md` decisions FIRST.
+
+---
+
+## 2026-05-23 — docs-PR stack (CLAUDE.md drain documentation)
+
+Three docs PRs all append to the same CLAUDE.md insertion point and were rebased into a deterministic stack:
+
+```
+main ← #253 ← #254 ← #258
+```
+
+| PR | Branch | Content | Base |
+| --- | --- | --- | --- |
+| **#253** | `docs/claude-md-drain-2026-05-23-opus47-v2` | Drain PRs #235–#251 (#238 backend headers, #242 web-vitals, #244 stats card, #245 insights, #246 slow-handler, #250 trigger fn) + A.8 dupe + A.9 already-on-main notes | `main` |
+| **#254** | `docs/claude-md-phase15-session-2026-05-23` | Phase 15 finding matrix with refreshed rows (#3→#244, #5→#242, #6→#245) | rebased onto #253 |
+| **#258** | `docs/claude-md-crossover-gaps-2026-05-23` | #237 cross-origin headers + #231 gitignore + #227 P0a retraction + docs-stack-rebase recipe | rebased onto #254 |
+
+**Merge order: #253 → #254 → #258.** Each PR was rebased onto the previous PR's tip with `--force-with-lease=<branch>:<expected-tip>` so the line-1844 append conflict is pre-resolved. When the bottom merges to `main`, GitHub auto-rebases the next; the diff collapses to that PR's own additions.
+
+**Do not merge out of order.** If #254 lands before #253, GitHub will rebase #254 onto main correctly, but #258 then has #254's content + an orphan reference to #253 (which has not landed). #253 will then merge cleanly as a separate diff; #258 still needs a final rebase. Lots of churn. Stick to the documented order.
+
+Full recipe + invariants pinned in `CLAUDE.md` under "Docs-PR stack via sequential rebase".

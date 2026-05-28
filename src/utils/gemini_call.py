@@ -44,7 +44,9 @@ from typing import Any
 from src.utils.gemini_budget import check_budget, record_usage
 
 
-def _extract_usage(response: Any, fallback_in: int, fallback_out: int) -> tuple[int, int]:
+def _extract_usage(
+    response: Any, fallback_in: int, fallback_out: int
+) -> tuple[int, int]:
     """Extract ``(prompt_tokens, candidates_tokens)`` from a Gemini
     response.  Defensive: any missing field or non-int value falls
     back to the supplied estimate so the post-call delta is zero
@@ -58,7 +60,9 @@ def _extract_usage(response: Any, fallback_in: int, fallback_out: int) -> tuple[
     except (TypeError, ValueError):
         prompt_tokens = fallback_in
     try:
-        candidates_tokens = int(getattr(meta, "candidates_token_count", None) or fallback_out)
+        candidates_tokens = int(
+            getattr(meta, "candidates_token_count", None) or fallback_out
+        )
     except (TypeError, ValueError):
         candidates_tokens = fallback_out
     return prompt_tokens, candidates_tokens
