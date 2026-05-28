@@ -416,20 +416,44 @@ def test_one_char_over_constr_limit_rejected_422(path, label, body):
 
 
 @pytest.mark.parametrize("ep", BODY_ENDPOINTS, ids=_BODY_IDS)
-def test_unicode_nul_zerowidth_pass_validation(ep):
-    """A string carrying emoji, a NUL byte, ZWSP/ZWJ and a BOM — but under
-    the length cap — must NOT 422. This locks in that the API boundary
-    bounds *length only*; content sanitisation happens downstream (CSV
-    formula guard, `<UNTRUSTED_DATA>` prompt fencing). If someone later
-    adds a Pydantic `pattern=` content rule, this test flags the change so
-    the downstream guards can be re-reviewed."""
+def test_nul_zerowidth_rejected_with_clear_message(ep):
+    """A string carrying emoji, a NUL byte, ZWSP/ZWJ and a BOM — even
+    under the length cap — MUST 422 with the ``control or format
+    character`` message. Contract change 2026-05-28 (PR following QA
+    terminal-6 sweep, ``test-results/06-backend-api.md`` ids API-127 +
+    API-201): the API boundary now rejects NUL + Unicode Cc/Cf
+    (except tab/LF/CR) via ``src.schemas.sanitized_str.safe_constr``
+    so the downstream layer (Postgres TEXT INSERT, Playwright URL
+    encoding) never sees them. The emoji + CJK characters in
+    ``UNICODE_STR`` are still allowed; the NUL + ZWS + ZWJ + BOM are
+    what trips the validator. This test will fail if anyone reverts
+    ``safe_constr`` back to ``constr``.
+
+    See ``src/schemas/sanitized_str.py`` for rationale + the allowed
+    control-char list; pinned more broadly by
+    ``tests/security/test_control_char_rejection.py``.
+    """
     res = _do("POST", ep["path"], api_key=API_KEY, json=ep["unicode"])
-    assert res.status_code != 422, (
-        f"{ep['path']} rejected unicode body with 422 — boundary is no "
-        f"longer length-only: {res.text[:300]}"
+    # Valid key — must never be an auth rejection.
+    assert res.status_code != 403, (
+        f"{ep['path']} returned 403 with a valid API key: {res.text[:300]}"
     )
-    # Valid key — must never be an auth rejection either.
-    assert res.status_code != 403
+    assert res.status_code == 422, (
+        f"{ep['path']} did NOT 422 on adversarial unicode body — boundary "
+        f"sanitisation regressed? Got HTTP {res.status_code}: "
+        f"{res.text[:300]}"
+    )
+    detail = res.json().get("detail")
+    assert isinstance(detail, list), (
+        f"{ep['path']} 422 detail was not a list: {detail!r}"
+    )
+    assert any(
+        "control or format character" in (item.get("msg") or "")
+        for item in detail
+    ), (
+        f"{ep['path']} 422 did NOT include the safe_constr message — "
+        f"another validator may have caught it first: {detail}"
+    )
 
 
 # ──────────────────── H. rate-limit boundary (N+1) ───────────────────
