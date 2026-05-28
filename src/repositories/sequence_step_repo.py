@@ -10,6 +10,7 @@ UNIQUE (sequence_id, step_index) is enforced at the DB level
 on the duplicate path so the caller can recover (e.g. retry with a
 different index) without seeing a 500.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,11 @@ logger = logging.getLogger(__name__)
 StepChannel = Literal["email", "linkedin"]
 # Mirrors sequence_steps_branch_allowed.
 BranchCondition = Literal[
-    "always", "no_reply", "no_open", "connection_accepted", "replied",
+    "always",
+    "no_reply",
+    "no_open",
+    "connection_accepted",
+    "replied",
 ]
 
 
@@ -153,18 +158,20 @@ class SequenceStepRepository:
             res = await asyncio.to_thread(
                 lambda: (
                     self._db.table(self.TABLE_NAME)
-                    .insert({
-                        "sequence_id": sequence_id,
-                        "step_index": step_index,
-                        "channel": channel,
-                        "delay_days": delay_days,
-                        "delay_hours": delay_hours,
-                        "thread_with_prior": thread_with_prior,
-                        "branch_condition": branch_condition,
-                        "send_window_start": send_window_start,
-                        "send_window_end": send_window_end,
-                        "send_days": send_days,
-                    })
+                    .insert(
+                        {
+                            "sequence_id": sequence_id,
+                            "step_index": step_index,
+                            "channel": channel,
+                            "delay_days": delay_days,
+                            "delay_hours": delay_hours,
+                            "thread_with_prior": thread_with_prior,
+                            "branch_condition": branch_condition,
+                            "send_window_start": send_window_start,
+                            "send_window_end": send_window_end,
+                            "send_days": send_days,
+                        }
+                    )
                     .execute()
                 )
             )
@@ -172,7 +179,8 @@ class SequenceStepRepository:
             if _is_unique_violation(exc):
                 logger.info(
                     "SequenceStepRepository.create UNIQUE collision (%s, %d)",
-                    sequence_id, step_index,
+                    sequence_id,
+                    step_index,
                 )
                 return None
             logger.exception("SequenceStepRepository.create failed")
@@ -228,5 +236,8 @@ def _is_unique_violation(exc: Exception) -> bool:
 
 
 __all__ = [
-    "SequenceStep", "StepChannel", "BranchCondition", "SequenceStepRepository",
+    "SequenceStep",
+    "StepChannel",
+    "BranchCondition",
+    "SequenceStepRepository",
 ]

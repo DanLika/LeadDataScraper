@@ -27,6 +27,7 @@ Exit codes:
     1 = at least one query exceeded a threshold
     2 = misconfigured run or extension missing
 """
+
 from __future__ import annotations
 
 import os

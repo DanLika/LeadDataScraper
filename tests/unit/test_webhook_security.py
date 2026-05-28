@@ -4,6 +4,7 @@ HMAC + timestamp gates. Both raise the exact subclass of
 WebhookVerificationError that pins the failure mode, so the handler
 can collapse to a uniform 401 without leaking the cause.
 """
+
 from __future__ import annotations
 
 import hmac

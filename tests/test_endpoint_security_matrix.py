@@ -36,6 +36,7 @@ chosen routes both short-circuit on `if not db.client` so the first N
 requests are cheap 503s. Every other route's `@limiter.limit` decorator
 is verified structurally by `test_every_authed_route_declares_a_limit`.
 """
+
 import asyncio
 import inspect
 import os
@@ -98,10 +99,16 @@ def _hermetic(monkeypatch):
     # No DB: every db-guarded handler short-circuits to 503; no inserts.
     monkeypatch.setattr(main_mod.db, "client", None, raising=False)
     # No Gemini, no Playwright, no orchestrator jobs.
-    monkeypatch.setattr(main_mod.router, "route_instruction", _astub_unknown, raising=False)
+    monkeypatch.setattr(
+        main_mod.router, "route_instruction", _astub_unknown, raising=False
+    )
     monkeypatch.setattr(main_mod.router, "execute_task", _astub_dict, raising=False)
-    monkeypatch.setattr(main_mod.orchestrator, "run_massive_pipeline", _astub_jobid, raising=False)
-    monkeypatch.setattr(main_mod.orchestrator, "run_discovery_job", _astub_jobid, raising=False)
+    monkeypatch.setattr(
+        main_mod.orchestrator, "run_massive_pipeline", _astub_jobid, raising=False
+    )
+    monkeypatch.setattr(
+        main_mod.orchestrator, "run_discovery_job", _astub_jobid, raising=False
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -129,6 +136,7 @@ def _clear_limiter():
 
 # ──────────────────────────── request helper ─────────────────────────
 
+
 def _do(method, path, *, api_key=None, admin_token=None, **kw):
     """Run one request against the in-process ASGI app and return the
     httpx.Response. Sync wrapper so tests stay plainly parametrizable."""
@@ -143,7 +151,9 @@ def _do(method, path, *, api_key=None, admin_token=None, **kw):
         # (handler bug) should surface as the 500 *response* we assert on,
         # not propagate out of httpx and abort the test.
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as c:
             return await c.request(method, path, headers=headers, **kw)
 
     return asyncio.run(_run())
@@ -224,12 +234,18 @@ BODY_ENDPOINTS = [
         "valid": {"task": "STATUS_CHECK"},
         "extra": {"task": "STATUS_CHECK", "injected_field": "x"},
         "maxlen": [
-            ("execute.params.unique_key",
-             {"task": "STATUS_CHECK", "params": {"unique_key": "x" * 129}}),
-            ("execute.params.query",
-             {"task": "STATUS_CHECK", "params": {"query": "x" * 501}}),
-            ("execute.params.filters",
-             {"task": "STATUS_CHECK", "params": {"filters": "x" * 65}}),
+            (
+                "execute.params.unique_key",
+                {"task": "STATUS_CHECK", "params": {"unique_key": "x" * 129}},
+            ),
+            (
+                "execute.params.query",
+                {"task": "STATUS_CHECK", "params": {"query": "x" * 501}},
+            ),
+            (
+                "execute.params.filters",
+                {"task": "STATUS_CHECK", "params": {"filters": "x" * 65}},
+            ),
         ],
         "unicode": {"task": "STATUS_CHECK", "params": {"query_text": UNICODE_STR}},
     },
@@ -263,11 +279,16 @@ BODY_ENDPOINTS = [
         "extra": {"name": "C", "channel": "email", "injected_field": "x"},
         "maxlen": [
             ("campaigns.name", {"name": "x" * 201, "channel": "email"}),
-            ("campaigns.segment_filter",
-             {"name": "C", "channel": "email", "segment_filter": "x" * 201}),
+            (
+                "campaigns.segment_filter",
+                {"name": "C", "channel": "email", "segment_filter": "x" * 201},
+            ),
         ],
-        "unicode": {"name": UNICODE_STR, "channel": "email",
-                    "segment_filter": UNICODE_STR},
+        "unicode": {
+            "name": UNICODE_STR,
+            "channel": "email",
+            "segment_filter": UNICODE_STR,
+        },
     },
 ]
 
@@ -276,8 +297,12 @@ _BODY_IDS = [e["id"] for e in BODY_ENDPOINTS]
 
 # ───────────────────────── A. missing X-API-Key ──────────────────────
 
-@pytest.mark.parametrize("method,path,_admin", AUTHED_ENDPOINTS,
-                         ids=[f"{m} {p}" for m, p, _ in AUTHED_ENDPOINTS])
+
+@pytest.mark.parametrize(
+    "method,path,_admin",
+    AUTHED_ENDPOINTS,
+    ids=[f"{m} {p}" for m, p, _ in AUTHED_ENDPOINTS],
+)
 def test_missing_api_key_returns_403(method, path, _admin):
     """No `X-API-Key` header — every authed route rejects with 403 and the
     generic message. (Spec said 401; app returns 403 — see module docstring.)"""
@@ -288,8 +313,12 @@ def test_missing_api_key_returns_403(method, path, _admin):
 
 # ───────────────────────── B. wrong X-API-Key ────────────────────────
 
-@pytest.mark.parametrize("method,path,_admin", AUTHED_ENDPOINTS,
-                         ids=[f"{m} {p}" for m, p, _ in AUTHED_ENDPOINTS])
+
+@pytest.mark.parametrize(
+    "method,path,_admin",
+    AUTHED_ENDPOINTS,
+    ids=[f"{m} {p}" for m, p, _ in AUTHED_ENDPOINTS],
+)
 def test_wrong_api_key_returns_403(method, path, _admin):
     """A non-matching key is rejected exactly like a missing one — no
     distinguishing status, body, or message."""
@@ -316,6 +345,7 @@ def test_api_key_compare_is_constant_time():
 
 # ─────────────────── C. X-Admin-Token gate (/leads/clear) ────────────
 
+
 def test_clear_leads_valid_api_key_but_missing_admin_token_403():
     """`DELETE /leads/clear` carries a second `verify_admin_token`
     dependency. A valid API key alone must not be enough."""
@@ -332,22 +362,24 @@ def test_clear_leads_wrong_admin_token_403():
 
 # ───────────────────── D. empty body where body required ─────────────
 
+
 @pytest.mark.parametrize("ep", BODY_ENDPOINTS, ids=_BODY_IDS)
 def test_empty_body_403_anon_then_422_authed(ep):
     """An empty request body on a route with a required model. Anonymous
     callers get 403 (the 422-gate hides the schema); authed callers get the
     real 422. Order matters: the schema shape must never leak pre-auth."""
     anon = _do("POST", ep["path"], content=b"")
-    assert anon.status_code == 403, f'{ep["path"]} anon -> {anon.status_code}'
+    assert anon.status_code == 403, f"{ep['path']} anon -> {anon.status_code}"
     assert anon.json() == {"detail": "Invalid or missing API key"}
 
     authed = _do("POST", ep["path"], api_key=API_KEY, content=b"")
-    assert authed.status_code == 422, f'{ep["path"]} authed -> {authed.status_code}'
+    assert authed.status_code == 422, f"{ep['path']} authed -> {authed.status_code}"
     # Authed 422 carries the structured Pydantic detail array.
     assert isinstance(authed.json().get("detail"), list)
 
 
 # ─────────────────── E. extra fields (extra='forbid') ────────────────
+
 
 @pytest.mark.parametrize("ep", BODY_ENDPOINTS, ids=_BODY_IDS)
 def test_extra_field_rejected_422(ep):
@@ -355,7 +387,7 @@ def test_extra_field_rejected_422(ep):
     A body that is otherwise valid but carries one unknown key must 422 —
     proving the unknown key is rejected, not silently dropped."""
     res = _do("POST", ep["path"], api_key=API_KEY, json=ep["extra"])
-    assert res.status_code == 422, f'{ep["path"]} -> {res.status_code}'
+    assert res.status_code == 422, f"{ep['path']} -> {res.status_code}"
     detail = res.json()["detail"]
     # The rejection must specifically name the forbidden extra input.
     assert any(d.get("type") == "extra_forbidden" for d in detail), detail
@@ -364,14 +396,13 @@ def test_extra_field_rejected_422(ep):
 # ──────────────────── F. max-length boundary (+1) ────────────────────
 
 _MAXLEN_CASES = [
-    (ep["path"], label, body)
-    for ep in BODY_ENDPOINTS
-    for (label, body) in ep["maxlen"]
+    (ep["path"], label, body) for ep in BODY_ENDPOINTS for (label, body) in ep["maxlen"]
 ]
 
 
-@pytest.mark.parametrize("path,label,body", _MAXLEN_CASES,
-                         ids=[c[1] for c in _MAXLEN_CASES])
+@pytest.mark.parametrize(
+    "path,label,body", _MAXLEN_CASES, ids=[c[1] for c in _MAXLEN_CASES]
+)
 def test_one_char_over_constr_limit_rejected_422(path, label, body):
     """Each bounded `constr` field, sent at exactly limit+1 characters,
     must 422 — the pre-handler memory-DoS bound is real, not advisory."""
@@ -383,6 +414,7 @@ def test_one_char_over_constr_limit_rejected_422(path, label, body):
 
 # ───────────── G. unicode / NUL / zero-width are length-only ──────────
 
+
 @pytest.mark.parametrize("ep", BODY_ENDPOINTS, ids=_BODY_IDS)
 def test_unicode_nul_zerowidth_pass_validation(ep):
     """A string carrying emoji, a NUL byte, ZWSP/ZWJ and a BOM — but under
@@ -393,7 +425,7 @@ def test_unicode_nul_zerowidth_pass_validation(ep):
     the downstream guards can be re-reviewed."""
     res = _do("POST", ep["path"], api_key=API_KEY, json=ep["unicode"])
     assert res.status_code != 422, (
-        f'{ep["path"]} rejected unicode body with 422 — boundary is no '
+        f"{ep['path']} rejected unicode body with 422 — boundary is no "
         f"longer length-only: {res.text[:300]}"
     )
     # Valid key — must never be an auth rejection either.
@@ -405,13 +437,14 @@ def test_unicode_nul_zerowidth_pass_validation(ep):
 # Curated: both routes hit `if not db.client: return 503` immediately, so
 # the first N requests are cheap and side-effect-free. (limit, body)
 _RATE_LIMIT_CASES = [
-    ("/orchestrator/start", 3, {}),          # @limiter.limit("3/minute")
+    ("/orchestrator/start", 3, {}),  # @limiter.limit("3/minute")
     (f"/campaigns/{PID}/generate", 3, None),  # @limiter.limit("3/minute")
 ]
 
 
-@pytest.mark.parametrize("path,limit,body", _RATE_LIMIT_CASES,
-                         ids=[c[0] for c in _RATE_LIMIT_CASES])
+@pytest.mark.parametrize(
+    "path,limit,body", _RATE_LIMIT_CASES, ids=[c[0] for c in _RATE_LIMIT_CASES]
+)
 def test_rate_limit_boundary_returns_429(path, limit, body):
     """The first `limit` authed requests within the window pass the limiter;
     request `limit + 1` is rejected with 429. The autouse fixture clears the
@@ -422,7 +455,9 @@ def test_rate_limit_boundary_returns_429(path, limit, body):
         assert res.status_code != 429, f"req {i + 1}/{limit} hit 429 early"
 
     over = _do("POST", path, api_key=API_KEY, **kw)
-    assert over.status_code == 429, f"req {limit + 1} -> {over.status_code} (expected 429)"
+    assert over.status_code == 429, (
+        f"req {limit + 1} -> {over.status_code} (expected 429)"
+    )
 
 
 def test_every_authed_route_declares_a_limit():
@@ -450,6 +485,7 @@ def test_every_authed_route_declares_a_limit():
 
 
 # ───────────────────────── sanity: public root ───────────────────────
+
 
 def test_root_is_public_and_metadata_free():
     """`/` is the only unauthenticated route. It must answer 200 with no

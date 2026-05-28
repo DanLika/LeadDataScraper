@@ -34,6 +34,7 @@ Exit codes:
     1 = soft warn (70%+) OR anomalous growth (>2x WoW any table)
     2 = misconfigured run
 """
+
 from __future__ import annotations
 
 import json
@@ -44,10 +45,13 @@ from pathlib import Path
 import psycopg
 
 TABLES: tuple[str, ...] = (
-    "leads", "campaigns", "campaign_messages", "orchestration_jobs",
+    "leads",
+    "campaigns",
+    "campaign_messages",
+    "orchestration_jobs",
 )
 TABLE_LIST = list(TABLES)
-DEFAULT_QUOTA_BYTES = 8 * 1024 ** 3  # 8 GiB — Supabase Pro base disk
+DEFAULT_QUOTA_BYTES = 8 * 1024**3  # 8 GiB — Supabase Pro base disk
 SOFT_WARN_RATIO = 0.70
 HARD_FAIL_RATIO = 0.90
 WOW_ANOMALY_MULTIPLIER = 2.0  # >2x growth WoW = suspicious
@@ -69,9 +73,7 @@ def main() -> int:
         return 2
 
     quota = int(os.environ.get("STORAGE_QUOTA_BYTES", DEFAULT_QUOTA_BYTES))
-    baseline_path = Path(
-        os.environ.get("STORAGE_BASELINE_PATH", DEFAULT_BASELINE_PATH)
-    )
+    baseline_path = Path(os.environ.get("STORAGE_BASELINE_PATH", DEFAULT_BASELINE_PATH))
 
     try:
         conn = psycopg.connect(url, autocommit=True)
@@ -123,9 +125,7 @@ def main() -> int:
             try:
                 with baseline_path.open() as fh:
                     raw = json.load(fh)
-                baseline = {
-                    k: int(v) for k, v in raw.get("tables", {}).items()
-                }
+                baseline = {k: int(v) for k, v in raw.get("tables", {}).items()}
             except (json.JSONDecodeError, ValueError, OSError):
                 report.append(
                     f"  (baseline at {baseline_path} unreadable — "
@@ -150,8 +150,7 @@ def main() -> int:
                         f"missed cleanup"
                     )
             report.append(
-                f"  {table:<22} {_human_bytes(bytes_now):>12} "
-                f"{delta_str:>16}"
+                f"  {table:<22} {_human_bytes(bytes_now):>12} {delta_str:>16}"
             )
 
         # Persist new baseline for next run

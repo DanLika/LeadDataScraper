@@ -20,6 +20,7 @@ NEVER swap ``hmac.compare_digest`` for ``==``. Even a microsecond
 side-channel leaks ~1 bit per probe to an attacker with enough request
 budget. The standard library primitive is safe by construction.
 """
+
 from __future__ import annotations
 
 import hmac
@@ -108,7 +109,7 @@ def verify_hmac_sha256(
     candidate = signature_header.strip().lower()
     scheme = (signature_scheme or "").lower()
     if scheme and candidate.startswith(scheme):
-        candidate = candidate[len(scheme):]
+        candidate = candidate[len(scheme) :]
 
     try:
         expected = hmac.new(secret.encode("utf-8"), payload, sha256).hexdigest()

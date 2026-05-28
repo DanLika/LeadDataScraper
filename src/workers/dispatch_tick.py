@@ -41,6 +41,7 @@ that makes ``'dispatching'`` legal. Stale-claim sweeper safety net is
 critical because Render Cron has a 60-second hard timeout — any tick
 that crosses that boundary leaves the claim stuck.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -138,14 +139,29 @@ async def _run_tick_inner(
     never returns a value. Outer wrapper finalizes
     ``elapsed_seconds`` + summary log inside its ``finally`` so every
     early exit remains observable (Issue #367)."""
-    bs = batch_size if batch_size is not None else _env_int(
-        "DISPATCH_TICK_BATCH_SIZE", _DEFAULT_BATCH_SIZE,
+    bs = (
+        batch_size
+        if batch_size is not None
+        else _env_int(
+            "DISPATCH_TICK_BATCH_SIZE",
+            _DEFAULT_BATCH_SIZE,
+        )
     )
-    timeout = claim_timeout_min if claim_timeout_min is not None else _env_int(
-        "DISPATCH_CLAIM_TIMEOUT_MIN", _DEFAULT_CLAIM_TIMEOUT_MIN,
+    timeout = (
+        claim_timeout_min
+        if claim_timeout_min is not None
+        else _env_int(
+            "DISPATCH_CLAIM_TIMEOUT_MIN",
+            _DEFAULT_CLAIM_TIMEOUT_MIN,
+        )
     )
-    runtime_cap = max_runtime_sec if max_runtime_sec is not None else _env_int(
-        "DISPATCH_TICK_MAX_RUNTIME_SEC", _DEFAULT_MAX_RUNTIME_SEC,
+    runtime_cap = (
+        max_runtime_sec
+        if max_runtime_sec is not None
+        else _env_int(
+            "DISPATCH_TICK_MAX_RUNTIME_SEC",
+            _DEFAULT_MAX_RUNTIME_SEC,
+        )
     )
 
     db = db_client
@@ -165,7 +181,8 @@ async def _run_tick_inner(
     #    the partial index — no waiting for a follow-up tick.
     try:
         result.swept_stale = await msg_repo.sweep_stale_claims(
-            timeout_minutes=timeout, now_iso=now_iso,
+            timeout_minutes=timeout,
+            now_iso=now_iso,
         )
         if result.swept_stale:
             logger.info(
@@ -215,14 +232,8 @@ async def _run_tick_inner(
     step_repo = SequenceStepRepository(db)
     variant_repo = SequenceVariantRepository(db)
 
-    lead_uks = {
-        str(r["lead_unique_key"])
-        for r in claimed
-        if r.get("lead_unique_key")
-    }
-    step_ids = {
-        str(r["step_id"]) for r in claimed if r.get("step_id")
-    }
+    lead_uks = {str(r["lead_unique_key"]) for r in claimed if r.get("lead_unique_key")}
+    step_ids = {str(r["step_id"]) for r in claimed if r.get("step_id")}
     prior_msg_ids = {
         str(r["in_reply_to_message_id"])
         for r in claimed
@@ -255,7 +266,8 @@ async def _run_tick_inner(
     if emails_by_msg_id:
         try:
             _, blocked = await sup_repo.filter_suppressed(
-                list(set(emails_by_msg_id.values())), "email",
+                list(set(emails_by_msg_id.values())),
+                "email",
             )
             suppressed_set = set(blocked)
         except Exception:
@@ -302,7 +314,8 @@ async def _run_tick_inner(
         lead = leads_by_uk.get(uk)
         if not email or not lead:
             await _release_claim(
-                msg_repo, msg_id,
+                msg_repo,
+                msg_id,
                 target_status="failed",
                 reason="no_email_or_lead_row",
             )
@@ -312,7 +325,8 @@ async def _run_tick_inner(
         if email in suppressed_set:
             result.skipped_suppressed += 1
             await _release_claim(
-                msg_repo, msg_id,
+                msg_repo,
+                msg_id,
                 reason="suppressed_post_schedule",
                 target_status="cancelled",
             )
@@ -322,7 +336,8 @@ async def _run_tick_inner(
         step = steps_by_id.get(step_id) if step_id else None
         if not step:
             await _release_claim(
-                msg_repo, msg_id,
+                msg_repo,
+                msg_id,
                 target_status="failed",
                 reason="missing_step",
             )
@@ -330,15 +345,15 @@ async def _run_tick_inner(
             continue
 
         in_window, next_start = _window_check_for_step(
-            step, lead_timezone=lead.get("timezone"),
+            step,
+            lead_timezone=lead.get("timezone"),
         )
         if not in_window:
             result.skipped_window += 1
             await _release_claim(
-                msg_repo, msg_id,
-                next_scheduled_at=(
-                    next_start.isoformat() if next_start else None
-                ),
+                msg_repo,
+                msg_id,
+                next_scheduled_at=(next_start.isoformat() if next_start else None),
                 target_status="pending",
             )
             continue
@@ -350,7 +365,8 @@ async def _run_tick_inner(
         )
         if not chosen_variant:
             await _release_claim(
-                msg_repo, msg_id,
+                msg_repo,
+                msg_id,
                 target_status="failed",
                 reason="no_variants",
             )
@@ -382,11 +398,11 @@ async def _run_tick_inner(
             # Step N+1 scheduled before step N's webhook landed —
             # bump +1h, leave pending. Sweeper handles longer outages.
             from datetime import datetime, timedelta, timezone
-            bumped = (
-                datetime.now(timezone.utc) + timedelta(hours=1)
-            ).isoformat()
+
+            bumped = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
             await _release_claim(
-                msg_repo, msg_id,
+                msg_repo,
+                msg_id,
                 next_scheduled_at=bumped,
                 target_status="pending",
             )
@@ -394,10 +410,12 @@ async def _run_tick_inner(
             continue
         except (TemplateError, ThreadBuildError) as exc:
             logger.exception(
-                "dispatch_tick payload build failed for msg=%s", msg_id,
+                "dispatch_tick payload build failed for msg=%s",
+                msg_id,
             )
             await _release_claim(
-                msg_repo, msg_id,
+                msg_repo,
+                msg_id,
                 target_status="failed",
                 reason=f"render_error:{type(exc).__name__}",
             )
@@ -511,7 +529,8 @@ async def _handle_per_lead_errors(
             logger.warning(
                 "dispatch_tick push_leads error email %r not in claimed "
                 "batch; single-message fallback assigns to %s",
-                err_email, uk_match,
+                err_email,
+                uk_match,
                 extra={
                     "err_email": err_email,
                     "claimed_emails": list(email_to_uk.keys()),
@@ -605,7 +624,8 @@ async def _release_claim(
     except Exception:
         logger.exception(
             "release_claim failed for msg_id=%s target=%s",
-            msg_id, target_status,
+            msg_id,
+            target_status,
         )
 
 
@@ -639,6 +659,7 @@ def _resolve_db_client() -> Optional[Any]:
     when env isn't configured — CLI exits cleanly + logs."""
     try:
         from src.utils.supabase_helper import SupabaseHelper
+
         helper = SupabaseHelper()
         return getattr(helper, "client", None)
     except Exception:
@@ -651,6 +672,7 @@ def _resolve_dispatcher() -> Optional[Any]:
     multi-provider routing (Phase 17) splits by step.channel here."""
     try:
         from src.integrations.instantly_sender import InstantlyDispatcher
+
         return InstantlyDispatcher()
     except Exception:
         logger.exception("dispatch_tick failed to resolve dispatcher")
@@ -674,6 +696,7 @@ def _monotonic_now() -> float:
     """Wall-clock for elapsed_seconds; monotonic source so back-NTP
     skews don't produce negative durations."""
     import time
+
     return time.monotonic()
 
 

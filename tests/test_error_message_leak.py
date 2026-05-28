@@ -51,6 +51,7 @@ def _set_api_key(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
     from main import limiter
+
     try:
         limiter._storage.storage.clear()  # type: ignore[attr-defined]
     except Exception:
@@ -87,7 +88,7 @@ SENSITIVE_BODY_PATTERNS = [
     re.compile(r"UPDATE\s+\w+\s+SET", re.IGNORECASE),
     re.compile(r"DELETE FROM", re.IGNORECASE),
     re.compile(r"DROP TABLE", re.IGNORECASE),
-    re.compile(r"PGRST\d{3}", re.IGNORECASE),    # PostgREST error codes
+    re.compile(r"PGRST\d{3}", re.IGNORECASE),  # PostgREST error codes
     re.compile(r"\bduplicate key value\b", re.IGNORECASE),
     re.compile(r"\brelation \".+\" does not exist\b", re.IGNORECASE),
     # Gemini / LLM internals
@@ -102,8 +103,13 @@ SENSITIVE_BODY_PATTERNS = [
 ]
 
 SENSITIVE_HEADERS = (
-    "server", "x-powered-by", "x-aspnet-version", "x-runtime",
-    "x-django-version", "x-rails", "via",
+    "server",
+    "x-powered-by",
+    "x-aspnet-version",
+    "x-runtime",
+    "x-django-version",
+    "x-rails",
+    "via",
 )
 
 
@@ -120,9 +126,7 @@ def _scan_headers(headers, path: str) -> list[str]:
     findings = []
     for name in SENSITIVE_HEADERS:
         if name in {k.lower() for k in headers.keys()}:
-            findings.append(
-                f"{path}: leaked header {name} = {headers[name]!r}"
-            )
+            findings.append(f"{path}: leaked header {name} = {headers[name]!r}")
     return findings
 
 
@@ -131,8 +135,10 @@ def _scan_headers(headers, path: str) -> list[str]:
 # raise specific exception shapes.
 # ---------------------------------------------------------------------------
 
+
 class _BoomDB:
     """Raises with sensitive substrings — verify these are NEVER echoed."""
+
     def __init__(self, message: str):
         self.client = MagicMock()
         # Common access patterns in the handlers
@@ -145,12 +151,14 @@ class _BoomDB:
 
 def _inject_lazy(name: str, value):
     import main as backend_main
+
     backend_main.__dict__.pop(name, None)
     setattr(backend_main, name, value)
 
 
 def _restore_lazy(name: str):
     import main as backend_main
+
     backend_main.__dict__.pop(name, None)
 
 
@@ -165,7 +173,7 @@ DB_FAULT_MESSAGES = [
     # Filesystem path inside error
     "OSError(2, 'No such file or directory', '/etc/supabase/config.toml')",
     # Stack-trace-style
-    'Traceback (most recent call last):\n  '
+    "Traceback (most recent call last):\n  "
     'File "/opt/homebrew/lib/python3.14/site-packages/supabase/client.py", '
     'line 42, in execute\n  raise APIError("relation \\"leads\\" does not exist")',
     # SQL fragment
@@ -173,8 +181,11 @@ DB_FAULT_MESSAGES = [
 ]
 
 
-@pytest.mark.parametrize("fault_msg", DB_FAULT_MESSAGES,
-                         ids=[f"db-fault-{i}" for i in range(len(DB_FAULT_MESSAGES))])
+@pytest.mark.parametrize(
+    "fault_msg",
+    DB_FAULT_MESSAGES,
+    ids=[f"db-fault-{i}" for i in range(len(DB_FAULT_MESSAGES))],
+)
 def test_db_fault_does_not_leak_internals(fault_msg):
     """Inject a DB exception with sensitive content; assert no fragment
     leaks into the response body."""
@@ -213,8 +224,11 @@ GEMINI_FAULT_MESSAGES = [
 ]
 
 
-@pytest.mark.parametrize("fault_msg", GEMINI_FAULT_MESSAGES,
-                         ids=[f"gemini-fault-{i}" for i in range(len(GEMINI_FAULT_MESSAGES))])
+@pytest.mark.parametrize(
+    "fault_msg",
+    GEMINI_FAULT_MESSAGES,
+    ids=[f"gemini-fault-{i}" for i in range(len(GEMINI_FAULT_MESSAGES))],
+)
 def test_gemini_fault_does_not_leak_prompt_or_model(fault_msg):
     """`/ask` and `/draft-outreach` route through the AgenticRouter. Inject
     a router exception with sensitive content; assert no fragment leaks."""
@@ -249,6 +263,7 @@ def test_gemini_fault_does_not_leak_prompt_or_model(fault_msg):
 # 3) Validation errors — field names OK, raw values must not leak.
 # ---------------------------------------------------------------------------
 
+
 def test_validation_error_response_does_not_leak_raw_input():
     """Pydantic's `detail[].input` would normally echo the offending value
     — including potentially huge attacker-controlled blobs. The
@@ -274,13 +289,12 @@ def test_validation_error_response_does_not_leak_raw_input():
 # 4) 500 responses — generic body only.
 # ---------------------------------------------------------------------------
 
+
 def test_uncaught_exception_returns_generic_500():
     """Force an uncaught exception through one of the handlers; the global
     `_json_exception_handler` must convert to `{"error": "Internal server
     error"}` — no stack trace, no exception class name."""
-    leaky_msg = (
-        "super-secret leaky message with /Users/operator/.ssh/id_rsa contents"
-    )
+    leaky_msg = "super-secret leaky message with /Users/operator/.ssh/id_rsa contents"
     db_mock = MagicMock()
     db_mock.client = MagicMock()
     # `/stats` awaits `db.get_stats_rows()` — use AsyncMock so the
@@ -319,15 +333,16 @@ def test_uncaught_exception_returns_generic_500():
 # 5) Headers — no `Server`, no `X-Powered-By`.
 # ---------------------------------------------------------------------------
 
+
 def test_no_server_or_powered_by_headers():
     """Across a representative sweep of endpoints, response headers must
     not include the standard fingerprint banners."""
     client = TestClient(app)
     paths = [
-        ("GET", "/"),                       # public liveness probe
-        ("GET", "/stats"),                  # authed read
-        ("GET", "/leads"),                  # authed read
-        ("POST", "/process-lead"),          # validation 422
+        ("GET", "/"),  # public liveness probe
+        ("GET", "/stats"),  # authed read
+        ("GET", "/leads"),  # authed read
+        ("POST", "/process-lead"),  # validation 422
     ]
     leaks: list[str] = []
     for method, path in paths:
@@ -340,6 +355,7 @@ def test_no_server_or_powered_by_headers():
 # 6) Status-code distinguishability — 401 / 403 / 404 distinct, but not
 #    so distinct that they enumerate the auth ladder.
 # ---------------------------------------------------------------------------
+
 
 def test_anon_404_and_403_are_distinguishable_but_dont_leak_route_shape():
     """Hit a non-existent route + a protected route, both without auth.
@@ -382,9 +398,7 @@ def test_liveness_probe_does_not_leak_version_or_product():
     assert r.status_code == 200
     body = r.json()
     # The only acceptable key is `status`.
-    assert set(body.keys()) <= {"status"}, (
-        f"liveness probe leaked extra fields: {body}"
-    )
+    assert set(body.keys()) <= {"status"}, f"liveness probe leaked extra fields: {body}"
     assert body.get("status") == "ok", f"unexpected liveness body: {body}"
     # No product / version anywhere.
     for sensitive in ("LeadDataScraper", "version", "build", "git", "v1.", "v2."):
@@ -396,6 +410,7 @@ def test_liveness_probe_does_not_leak_version_or_product():
 # ---------------------------------------------------------------------------
 # 7) Docs disabled in default config.
 # ---------------------------------------------------------------------------
+
 
 def test_openapi_and_docs_disabled_by_default():
     """`/docs`, `/redoc`, `/openapi.json` enumerate every endpoint +
@@ -411,6 +426,7 @@ def test_openapi_and_docs_disabled_by_default():
 # ---------------------------------------------------------------------------
 # 8) Method-not-allowed body doesn't echo schema.
 # ---------------------------------------------------------------------------
+
 
 def test_method_not_allowed_response_does_not_leak_schema():
     """GET on a POST-only endpoint returns 405. The body must be the

@@ -7,6 +7,7 @@ dry-run behaviour, response-shape parsing for 200/400/401/429.
 Live tier (`@pytest.mark.live`) requires real INSTANTLY_API_KEY +
 sandbox campaign ID — exercises the actual v2 API. Skipped by default.
 """
+
 from __future__ import annotations
 
 import os
@@ -44,7 +45,9 @@ class TestInstantlyLeadPayload:
             "lead_source": "google_maps",
         }
         p = InstantlyLeadPayload.from_lds_lead(
-            lead, personalization="Quick note about Acme.", dispatched_at="2026-05-25T13:00:00+00:00",
+            lead,
+            personalization="Quick note about Acme.",
+            dispatched_at="2026-05-25T13:00:00+00:00",
         )
         assert p.email == "a@example.com"
         assert p.first_name == "Ana"
@@ -76,11 +79,17 @@ class TestInstantlyLeadPayload:
         # Phase 14.3: lds_message_id (campaign_messages.id) so the
         # email_sent webhook handler can do a targeted first-hit-wins
         # UPDATE.
-        assert InstantlyLeadPayload.LDS_KEYS == frozenset({
-            "lds_lead_id", "lds_message_id",
-            "lds_audit_score", "lds_discovery_source", "lds_dispatched_at",
-            "list_unsubscribe", "list_unsubscribe_post",
-        })
+        assert InstantlyLeadPayload.LDS_KEYS == frozenset(
+            {
+                "lds_lead_id",
+                "lds_message_id",
+                "lds_audit_score",
+                "lds_discovery_source",
+                "lds_dispatched_at",
+                "list_unsubscribe",
+                "list_unsubscribe_post",
+            }
+        )
 
     def test_from_lds_lead_threads_list_unsubscribe(self):
         # Caller passes the angle-bracketed value Instantly expects per
@@ -112,8 +121,9 @@ class TestInstantlyPushResult:
 
     def test_extra_forbid(self):
         with pytest.raises(ValueError):
-            InstantlyPushResult(success_count=1, skipped_suppressed=0,
-                                failed_count=0, junk="x")  # type: ignore[call-arg]
+            InstantlyPushResult(
+                success_count=1, skipped_suppressed=0, failed_count=0, junk="x"
+            )  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +139,7 @@ class _FakeQuery:
     captured eq/in_ filters surface in ``captured`` so tests can assert
     the precheck SQL shape.
     """
+
     def __init__(self, data: list[dict[str, Any]]):
         self._data = data
         self.captured: dict[str, Any] = {}
@@ -175,9 +186,11 @@ class _FakeDB:
             q = _FakeQuery([])
             # Capture ledger inserts.
             orig_insert = q.insert
+
             def insert(rows: list[dict[str, Any]]) -> _FakeQuery:  # type: ignore[no-redef]
                 self.inserted_ledger.extend(rows)
                 return orig_insert(rows)
+
             q.insert = insert  # type: ignore[assignment]
         else:
             q = _FakeQuery([])
@@ -198,7 +211,8 @@ class TestDispatcherConstruction:
             InstantlyDispatcher(api_key="k", default_campaign_id="c", batch_size=0)
         with pytest.raises(ValueError):
             InstantlyDispatcher(
-                api_key="k", default_campaign_id="c",
+                api_key="k",
+                default_campaign_id="c",
                 batch_size=INSTANTLY_BULK_HARD_LIMIT + 1,
             )
 
@@ -233,8 +247,9 @@ class TestSuppressionPrecheck:
     @pytest.mark.asyncio
     async def test_suppressed_emails_skipped_in_dry_run(self):
         db = _FakeDB(suppressed=["sup@example.com"])
-        d = InstantlyDispatcher(api_key="k", default_campaign_id="c",
-                                dry_run=True, db=db)
+        d = InstantlyDispatcher(
+            api_key="k", default_campaign_id="c", dry_run=True, db=db
+        )
         leads = [
             {"email": "ok@example.com", "unique_key": "u1"},
             {"email": "sup@example.com", "unique_key": "u2"},
@@ -248,10 +263,12 @@ class TestSuppressionPrecheck:
     @pytest.mark.asyncio
     async def test_suppression_precheck_batch_query_single_round_trip(self):
         db = _FakeDB(suppressed=[])
-        d = InstantlyDispatcher(api_key="k", default_campaign_id="c",
-                                dry_run=True, db=db)
-        leads = [{"email": f"u{i}@example.com", "unique_key": f"u{i}"}
-                 for i in range(50)]
+        d = InstantlyDispatcher(
+            api_key="k", default_campaign_id="c", dry_run=True, db=db
+        )
+        leads = [
+            {"email": f"u{i}@example.com", "unique_key": f"u{i}"} for i in range(50)
+        ]
         await d.push_leads(leads)
         assert db.last_query is not None
         assert len(db.last_query.captured["values"]) == 50
@@ -261,10 +278,13 @@ class TestDryRunBehavior:
     @pytest.mark.asyncio
     async def test_dry_run_does_not_touch_api_or_ledger(self):
         db = _FakeDB()
-        d = InstantlyDispatcher(api_key="k", default_campaign_id="c",
-                                dry_run=True, db=db)
-        leads = [{"email": "a@x.com", "unique_key": "u1"},
-                 {"email": "b@x.com", "unique_key": "u2"}]
+        d = InstantlyDispatcher(
+            api_key="k", default_campaign_id="c", dry_run=True, db=db
+        )
+        leads = [
+            {"email": "a@x.com", "unique_key": "u1"},
+            {"email": "b@x.com", "unique_key": "u2"},
+        ]
         result = await d.push_leads(leads)
         assert result.dry_run is True
         assert result.success_count == 2
@@ -281,7 +301,8 @@ class TestListUnsubscribeThreading:
 
     @pytest.mark.asyncio
     async def test_push_leads_wraps_and_threads_unsubscribe(
-        self, monkeypatch,
+        self,
+        monkeypatch,
     ):
         captured: list[dict[str, Any]] = []
         original_from_lds_lead = InstantlyLeadPayload.from_lds_lead
@@ -291,12 +312,15 @@ class TestListUnsubscribeThreading:
             return original_from_lds_lead(lead, **kwargs)
 
         monkeypatch.setattr(
-            InstantlyLeadPayload, "from_lds_lead", classmethod(_spy),
+            InstantlyLeadPayload,
+            "from_lds_lead",
+            classmethod(_spy),
         )
 
         db = _FakeDB()
-        d = InstantlyDispatcher(api_key="k", default_campaign_id="c",
-                                dry_run=True, db=db)
+        d = InstantlyDispatcher(
+            api_key="k", default_campaign_id="c", dry_run=True, db=db
+        )
         leads = [
             {"email": "a@x.com", "unique_key": "u1"},
             {"email": "b@x.com", "unique_key": "u2"},
@@ -317,7 +341,8 @@ class TestListUnsubscribeThreading:
 
     @pytest.mark.asyncio
     async def test_push_leads_no_unsub_kwarg_keeps_existing_behavior(
-        self, monkeypatch,
+        self,
+        monkeypatch,
     ):
         captured: list[dict[str, Any]] = []
         original = InstantlyLeadPayload.from_lds_lead
@@ -327,11 +352,14 @@ class TestListUnsubscribeThreading:
             return original(lead, **kwargs)
 
         monkeypatch.setattr(
-            InstantlyLeadPayload, "from_lds_lead", classmethod(_spy),
+            InstantlyLeadPayload,
+            "from_lds_lead",
+            classmethod(_spy),
         )
 
-        d = InstantlyDispatcher(api_key="k", default_campaign_id="c",
-                                dry_run=True, db=_FakeDB())
+        d = InstantlyDispatcher(
+            api_key="k", default_campaign_id="c", dry_run=True, db=_FakeDB()
+        )
         await d.push_leads([{"email": "a@x.com", "unique_key": "u1"}])
         # Backwards compat: callers that omit list_unsubscribe_urls see
         # the same behaviour as before — no list_unsubscribe in vars.
@@ -344,7 +372,8 @@ class TestListUnsubscribeThreading:
 
 
 live = pytest.mark.skipif(
-    not os.environ.get("INSTANTLY_API_KEY") or not os.environ.get("INSTANTLY_DEFAULT_CAMPAIGN_ID"),
+    not os.environ.get("INSTANTLY_API_KEY")
+    or not os.environ.get("INSTANTLY_DEFAULT_CAMPAIGN_ID"),
     reason="Set INSTANTLY_API_KEY + INSTANTLY_DEFAULT_CAMPAIGN_ID for live tests",
 )
 
@@ -356,9 +385,11 @@ class TestLiveSandbox:
     async def test_single_lead_push_to_sandbox(self):
         d = InstantlyDispatcher()
         try:
-            result = await d.push_leads([
-                {"email": "smoke-test@invalid.example", "unique_key": "smoke-1"},
-            ])
+            result = await d.push_leads(
+                [
+                    {"email": "smoke-test@invalid.example", "unique_key": "smoke-1"},
+                ]
+            )
             # Sandbox accepts the row (probably as 200 with success=1) OR
             # rejects with a domain-specific error code; either way the
             # result shape is what we contract for.

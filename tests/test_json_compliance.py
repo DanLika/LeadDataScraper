@@ -29,6 +29,7 @@ Per-endpoint protocol:
 
 Live test — requires GEMINI_API_KEY. Skipped otherwise. Supabase mocked.
 """
+
 import asyncio
 import json
 import os
@@ -48,22 +49,42 @@ CONCURRENCY = 8
 # Mapper allowlist mirrors ai_mapper.py:47-54 — kept in sync intentionally
 # (this list is small and worth duplicating to surface schema drift).
 STANDARD_COLUMNS = {
-    "name", "company_name", "website", "email", "phone", "address",
-    "facebook", "instagram", "linkedin", "tiktok", "pinterest",
-    "company_size", "leadership_team", "key_offerings", "business_details",
-    "target_clients", "pain_points", "segment",
-    "rating", "reviews", "seo_score", "outreach_score",
-    "email_hook", "linkedin_hook",
+    "name",
+    "company_name",
+    "website",
+    "email",
+    "phone",
+    "address",
+    "facebook",
+    "instagram",
+    "linkedin",
+    "tiktok",
+    "pinterest",
+    "company_size",
+    "leadership_team",
+    "key_offerings",
+    "business_details",
+    "target_clients",
+    "pain_points",
+    "segment",
+    "rating",
+    "reviews",
+    "seo_score",
+    "outreach_score",
+    "email_hook",
+    "linkedin_hook",
 }
 
 
 # ---- Response capture --------------------------------------------------------
+
 
 class _ResponseCapture:
     """
     Wraps client.models.generate_content / aio.models.generate_content. Each
     call records (label, response.text) before the production code parses it.
     """
+
     def __init__(self):
         self.records: list[tuple[str, str]] = []
         self._label = "unlabelled"
@@ -81,6 +102,7 @@ class _ResponseCapture:
             resp = outer._orig_sync(*args, **kwargs)
             outer.records.append((outer._label, getattr(resp, "text", "") or ""))
             return resp
+
         self._target_sync.generate_content = _wrap_sync
 
         if has_aio:
@@ -91,6 +113,7 @@ class _ResponseCapture:
                 resp = await outer._orig_async(*args, **kwargs)
                 outer.records.append((outer._label, getattr(resp, "text", "") or ""))
                 return resp
+
             self._target_async.generate_content = _wrap_async
 
     def restore(self):
@@ -107,6 +130,7 @@ class _ResponseCapture:
 
 
 # ---- Schema validators -------------------------------------------------------
+
 
 def _try_parse(raw: str) -> tuple[bool, Any, str]:
     """
@@ -139,11 +163,12 @@ def _try_parse(raw: str) -> tuple[bool, Any, str]:
             obj_start = text.index("{")
             depth = 0
             for i in range(obj_start, len(text)):
-                if text[i] == "{": depth += 1
+                if text[i] == "{":
+                    depth += 1
                 elif text[i] == "}":
                     depth -= 1
                     if depth == 0:
-                        return True, json.loads(text[obj_start:i + 1]), ""
+                        return True, json.loads(text[obj_start : i + 1]), ""
         except (ValueError, json.JSONDecodeError):
             pass
         return False, None, f"json.JSONDecodeError: {e.msg}"
@@ -198,17 +223,25 @@ def _validate_insights(parsed: Any) -> list[str]:
         else:
             for i, p in enumerate(tp):
                 if not isinstance(p, dict):
-                    errs.append(f"top_priorities[{i}] is {type(p).__name__}, expected dict")
+                    errs.append(
+                        f"top_priorities[{i}] is {type(p).__name__}, expected dict"
+                    )
                     continue
                 tp_required = {"name", "reason"}
                 tp_keys = set(p.keys())
                 if tp_required - tp_keys:
-                    errs.append(f"top_priorities[{i}] missing: {sorted(tp_required - tp_keys)}")
+                    errs.append(
+                        f"top_priorities[{i}] missing: {sorted(tp_required - tp_keys)}"
+                    )
                 if tp_keys - tp_required:
-                    errs.append(f"top_priorities[{i}] extra: {sorted(tp_keys - tp_required)}")
+                    errs.append(
+                        f"top_priorities[{i}] extra: {sorted(tp_keys - tp_required)}"
+                    )
                 for k in ("name", "reason"):
                     if k in p and not isinstance(p[k], str):
-                        errs.append(f"top_priorities[{i}].{k} is {type(p[k]).__name__}, expected str")
+                        errs.append(
+                            f"top_priorities[{i}].{k} is {type(p[k]).__name__}, expected str"
+                        )
     return errs
 
 
@@ -246,7 +279,10 @@ def _validate_enrich(parsed: Any) -> list[str]:
 
 # ---- Per-endpoint runners ----------------------------------------------------
 
-def _aggregate_failures(label: str, raws: list[str], validator) -> tuple[int, list[str]]:
+
+def _aggregate_failures(
+    label: str, raws: list[str], validator
+) -> tuple[int, list[str]]:
     """Return (failure_count, sample_messages). Samples capped at 3 for readability."""
     failures: list[str] = []
     samples: list[str] = []
@@ -286,38 +322,76 @@ ENRICH_PAGE_TEXT = (
 ENRICH_BUSINESS_NAME = "Acme Dental Clinic"
 
 INSIGHTS_LEADS = [
-    {"name": "Acme Dental", "company_name": "Acme Dental Clinic",
-     "audit_status": "Completed", "seo_score": 38, "lead_source": "google_maps"},
-    {"name": "BlueWave Plumbing", "company_name": "BlueWave Plumbing",
-     "audit_status": "Completed", "seo_score": 22, "lead_source": "csv"},
-    {"name": "Studio Vesta", "company_name": "Studio Vesta Architects",
-     "audit_status": "Completed", "seo_score": 41, "lead_source": "google_maps"},
-    {"name": "NorthStar", "company_name": "NorthStar Logistics",
-     "audit_status": "Completed", "seo_score": 19, "lead_source": "csv"},
-    {"name": "Petit Café", "company_name": "Petit Café Mostar",
-     "audit_status": "Completed", "seo_score": 47, "lead_source": "google_maps"},
+    {
+        "name": "Acme Dental",
+        "company_name": "Acme Dental Clinic",
+        "audit_status": "Completed",
+        "seo_score": 38,
+        "lead_source": "google_maps",
+    },
+    {
+        "name": "BlueWave Plumbing",
+        "company_name": "BlueWave Plumbing",
+        "audit_status": "Completed",
+        "seo_score": 22,
+        "lead_source": "csv",
+    },
+    {
+        "name": "Studio Vesta",
+        "company_name": "Studio Vesta Architects",
+        "audit_status": "Completed",
+        "seo_score": 41,
+        "lead_source": "google_maps",
+    },
+    {
+        "name": "NorthStar",
+        "company_name": "NorthStar Logistics",
+        "audit_status": "Completed",
+        "seo_score": 19,
+        "lead_source": "csv",
+    },
+    {
+        "name": "Petit Café",
+        "company_name": "Petit Café Mostar",
+        "audit_status": "Completed",
+        "seo_score": 47,
+        "lead_source": "google_maps",
+    },
 ]
 
 
 # ---- Fake Supabase (for insights only) --------------------------------------
 
+
 class _FakeExecResult:
-    def __init__(self, rows): self.data = rows
+    def __init__(self, rows):
+        self.data = rows
 
 
 class _FakeQuery:
-    def __init__(self, leads): self._leads = leads
-    def select(self, *_a, **_k): return self
-    def limit(self, _n): return self
-    def execute(self): return _FakeExecResult(self._leads)
+    def __init__(self, leads):
+        self._leads = leads
+
+    def select(self, *_a, **_k):
+        return self
+
+    def limit(self, _n):
+        return self
+
+    def execute(self):
+        return _FakeExecResult(self._leads)
 
 
 class _FakeSupabase:
-    def __init__(self, leads): self._leads = leads
-    def table(self, _name): return _FakeQuery(self._leads)
+    def __init__(self, leads):
+        self._leads = leads
+
+    def table(self, _name):
+        return _FakeQuery(self._leads)
 
 
 # ---- Test --------------------------------------------------------------------
+
 
 @pytest.mark.live
 @unittest.skipUnless(GEMINI_KEY, "Requires GEMINI_API_KEY for live Gemini calls")
@@ -344,16 +418,21 @@ class TestJSONCompliance(unittest.IsolatedAsyncioTestCase):
         self.sb_patcher = sb_patcher
 
         self.router = AgenticRouter()
-        for name, c in (("mapper", self.mapper.client),
-                        ("hunter", self.hunter.client),
-                        ("router", self.router.client)):
+        for name, c in (
+            ("mapper", self.mapper.client),
+            ("hunter", self.hunter.client),
+            ("router", self.router.client),
+        ):
             self.assertIsNotNone(c, f"{name} Gemini client must initialize")
 
         # Install capture on each client. mapper + router use sync only;
         # hunter uses aio (its calls are async).
-        self.cap_mapper = _ResponseCapture(); self.cap_mapper.install(self.mapper.client, has_aio=False)
-        self.cap_hunter = _ResponseCapture(); self.cap_hunter.install(self.hunter.client, has_aio=True)
-        self.cap_router = _ResponseCapture(); self.cap_router.install(self.router.client, has_aio=False)
+        self.cap_mapper = _ResponseCapture()
+        self.cap_mapper.install(self.mapper.client, has_aio=False)
+        self.cap_hunter = _ResponseCapture()
+        self.cap_hunter.install(self.hunter.client, has_aio=True)
+        self.cap_router = _ResponseCapture()
+        self.cap_router.install(self.router.client, has_aio=False)
 
         sem = asyncio.Semaphore(CONCURRENCY)
 
@@ -363,33 +442,51 @@ class TestJSONCompliance(unittest.IsolatedAsyncioTestCase):
 
         # MAPPER — sync; bridge via to_thread.
         self.cap_mapper.set_label("mapper")
-        await asyncio.gather(*[
-            gated(lambda: asyncio.to_thread(self.mapper.get_column_mapping, list(MAPPER_HEADERS)))
-            for _ in range(N_RUNS)
-        ])
+        await asyncio.gather(
+            *[
+                gated(
+                    lambda: asyncio.to_thread(
+                        self.mapper.get_column_mapping, list(MAPPER_HEADERS)
+                    )
+                )
+                for _ in range(N_RUNS)
+            ]
+        )
 
         # INSIGHTS — already an async coroutine; await directly.
         self.cap_router.set_label("insights")
-        await asyncio.gather(*[
-            gated(lambda: self.router._get_strategic_insights())
-            for _ in range(N_RUNS)
-        ])
+        await asyncio.gather(
+            *[
+                gated(lambda: self.router._get_strategic_insights())
+                for _ in range(N_RUNS)
+            ]
+        )
 
         # HOOKS — already async; semaphore protects concurrency.
         self.cap_hunter.set_label("hooks")
-        await asyncio.gather(*[
-            gated(lambda: self.hunter.generate_outreach_hooks_async(
-                HOOKS_PAIN_POINTS, HOOKS_BUSINESS_NAME))
-            for _ in range(N_RUNS)
-        ])
+        await asyncio.gather(
+            *[
+                gated(
+                    lambda: self.hunter.generate_outreach_hooks_async(
+                        HOOKS_PAIN_POINTS, HOOKS_BUSINESS_NAME
+                    )
+                )
+                for _ in range(N_RUNS)
+            ]
+        )
 
         # ENRICH — also async.
         self.cap_hunter.set_label("enrich")
-        await asyncio.gather(*[
-            gated(lambda: self.hunter.enrich_business_data_async(
-                ENRICH_PAGE_TEXT, ENRICH_BUSINESS_NAME))
-            for _ in range(N_RUNS)
-        ])
+        await asyncio.gather(
+            *[
+                gated(
+                    lambda: self.hunter.enrich_business_data_async(
+                        ENRICH_PAGE_TEXT, ENRICH_BUSINESS_NAME
+                    )
+                )
+                for _ in range(N_RUNS)
+            ]
+        )
 
     async def asyncTearDown(self):
         self.cap_mapper.restore()
@@ -402,8 +499,9 @@ class TestJSONCompliance(unittest.IsolatedAsyncioTestCase):
 
     def _assert_endpoint(self, label: str, raws: list[str], validator):
         self.assertEqual(
-            len(raws), N_RUNS,
-            f"{label}: captured {len(raws)} responses, expected {N_RUNS}"
+            len(raws),
+            N_RUNS,
+            f"{label}: captured {len(raws)} responses, expected {N_RUNS}",
         )
         fail_count, samples = _aggregate_failures(label, raws, validator)
         if fail_count > 0:
@@ -418,7 +516,8 @@ class TestJSONCompliance(unittest.IsolatedAsyncioTestCase):
     def test_mapper_100_percent_compliant(self):
         raws = self.cap_mapper.by_label("mapper")
         self._assert_endpoint(
-            "mapper", raws,
+            "mapper",
+            raws,
             lambda parsed: _validate_mapper(parsed, MAPPER_HEADERS),
         )
 

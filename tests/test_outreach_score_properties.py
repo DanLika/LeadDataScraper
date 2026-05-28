@@ -30,6 +30,7 @@ still run.
 
 Install hypothesis: `pip install hypothesis`
 """
+
 import os
 import sys
 import unittest
@@ -39,30 +40,41 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from hypothesis import given, strategies as st, settings, HealthCheck, assume
+
     HAS_HYPOTHESIS = True
 except ImportError:
     HAS_HYPOTHESIS = False
+
     # No-op stand-ins so the decorator expressions in the property-test class
     # still resolve at import time. The whole class is unittest.skipUnless'd,
     # so the stubs are never actually executed.
     def given(**_kwargs):
-        def _wrap(fn): return fn
+        def _wrap(fn):
+            return fn
+
         return _wrap
 
     def settings(**_kwargs):
-        def _wrap(fn): return fn
+        def _wrap(fn):
+            return fn
+
         return _wrap
 
     class _StStub:
         def __getattr__(self, _name):
-            def _any(*_a, **_kw): return None
+            def _any(*_a, **_kw):
+                return None
+
             return _any
+
     st = _StStub()  # type: ignore[assignment]
 
     class HealthCheck:  # noqa: N801 — mirrors real class name
         function_scoped_fixture = None
 
-    def assume(_cond): pass
+    def assume(_cond):
+        pass
+
 
 # Suppress LeadHunter's "GEMINI_API_KEY not found" warning at construction —
 # calculate_outreach_score is pure-Python, doesn't need the client.
@@ -77,6 +89,7 @@ def _hunter() -> LeadHunter:
 
 
 # ---- Fixed-fixture tests (always run) ---------------------------------------
+
 
 class TestOutreachScoreFixedFixtures(unittest.TestCase):
     """The user-specified properties expressed as concrete asserts."""
@@ -100,10 +113,10 @@ class TestOutreachScoreFixedFixtures(unittest.TestCase):
             "linkedin": "https://linkedin.com/in/example",
             "leadership_team": "Jane Doe (CEO)",
             "company_size": "10-50",
-            "rating": 3.5,       # < 4.0 → +15
-            "reviews": 12,        # < 20  → +10
+            "rating": 3.5,  # < 4.0 → +15
+            "reviews": 12,  # < 20  → +10
             "high_risk_flag": True,
-            "seo_score": 90,      # irrelevant — see module docstring
+            "seo_score": 90,  # irrelevant — see module docstring
         }
         score = self.hunter.calculate_outreach_score(lead)
         self.assertGreaterEqual(score, 70, f"got {score} for fully-equipped lead")
@@ -132,11 +145,13 @@ class TestOutreachScoreFixedFixtures(unittest.TestCase):
         s_low = self.hunter.calculate_outreach_score({**base, "seo_score": 10})
         s_high = self.hunter.calculate_outreach_score({**base, "seo_score": 90})
         self.assertEqual(
-            s_absent, s_low,
+            s_absent,
+            s_low,
             "Adding seo_score=10 changed the score — formula may have been refactored. See module docstring.",
         )
         self.assertEqual(
-            s_absent, s_high,
+            s_absent,
+            s_high,
             "Adding seo_score=90 changed the score — formula may have been refactored. See module docstring.",
         )
 
@@ -156,18 +171,24 @@ class TestOutreachScoreFixedFixtures(unittest.TestCase):
         first = self.hunter.calculate_outreach_score(deepcopy(lead))
         for _ in range(9):
             self.assertEqual(
-                self.hunter.calculate_outreach_score(deepcopy(lead)), first,
+                self.hunter.calculate_outreach_score(deepcopy(lead)),
+                first,
                 "calculate_outreach_score is not deterministic across repeated calls",
             )
 
 
 # ---- Hypothesis property-based tests (skipped if hypothesis missing) --------
 
+
 def _social_strategy():
     """Either absent (None → key dropped post-build) or a plausible URL/handle."""
     return st.one_of(
         st.none(),
-        st.text(min_size=1, max_size=40, alphabet=st.characters(min_codepoint=33, max_codepoint=126)),
+        st.text(
+            min_size=1,
+            max_size=40,
+            alphabet=st.characters(min_codepoint=33, max_codepoint=126),
+        ),
     )
 
 
@@ -177,34 +198,44 @@ def _lead_strategy():
     None — we drop None keys in the wrapping helper so the scorer sees a
     "field absent" lead, not "field present with None".
     """
-    return st.fixed_dictionaries({}, optional={
-        "email": st.one_of(st.none(), st.emails()),
-        "EXTRACTED_EMAIL": st.one_of(st.none(), st.emails()),
-        "phone": st.one_of(st.none(), st.text(min_size=1, max_size=20)),
-        "facebook": _social_strategy(),
-        "instagram": _social_strategy(),
-        "linkedin": _social_strategy(),
-        "rating": st.one_of(st.none(), st.floats(min_value=0, max_value=5, allow_nan=False, allow_infinity=False)),
-        "reviews": st.one_of(st.none(), st.integers(min_value=0, max_value=100_000)),
-        "leadership_team": st.one_of(
-            st.none(),
-            st.just(""),
-            st.just("Unknown"),
-            st.text(min_size=1, max_size=30),
-        ),
-        "company_size": st.one_of(
-            st.none(),
-            st.just(""),
-            st.just("Unknown"),
-            st.sampled_from(["1-10", "10-50", "50-200", "200+"]),
-        ),
-        "high_risk_flag": st.booleans(),
-        "pain_points": st.one_of(
-            st.none(),
-            st.just(""),
-            st.text(min_size=1, max_size=200),
-        ),
-    })
+    return st.fixed_dictionaries(
+        {},
+        optional={
+            "email": st.one_of(st.none(), st.emails()),
+            "EXTRACTED_EMAIL": st.one_of(st.none(), st.emails()),
+            "phone": st.one_of(st.none(), st.text(min_size=1, max_size=20)),
+            "facebook": _social_strategy(),
+            "instagram": _social_strategy(),
+            "linkedin": _social_strategy(),
+            "rating": st.one_of(
+                st.none(),
+                st.floats(
+                    min_value=0, max_value=5, allow_nan=False, allow_infinity=False
+                ),
+            ),
+            "reviews": st.one_of(
+                st.none(), st.integers(min_value=0, max_value=100_000)
+            ),
+            "leadership_team": st.one_of(
+                st.none(),
+                st.just(""),
+                st.just("Unknown"),
+                st.text(min_size=1, max_size=30),
+            ),
+            "company_size": st.one_of(
+                st.none(),
+                st.just(""),
+                st.just("Unknown"),
+                st.sampled_from(["1-10", "10-50", "50-200", "200+"]),
+            ),
+            "high_risk_flag": st.booleans(),
+            "pain_points": st.one_of(
+                st.none(),
+                st.just(""),
+                st.text(min_size=1, max_size=200),
+            ),
+        },
+    )
 
 
 def _strip_none(lead: dict) -> dict:
@@ -220,14 +251,18 @@ def _add_contact(lead: dict, field: str) -> dict:
     return out
 
 
-@unittest.skipUnless(HAS_HYPOTHESIS, "hypothesis not installed — `pip install hypothesis`")
+@unittest.skipUnless(
+    HAS_HYPOTHESIS, "hypothesis not installed — `pip install hypothesis`"
+)
 class TestOutreachScoreProperties(unittest.TestCase):
     """Hypothesis-fuzzed properties over the input surface."""
 
     def setUp(self):
         self.hunter = _hunter()
 
-    @settings(max_examples=200, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=200, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(lead=_lead_strategy())
     def test_score_within_bounds(self, lead):
         """Score must be int in [0, 100] for every valid input shape."""
@@ -237,7 +272,9 @@ class TestOutreachScoreProperties(unittest.TestCase):
         self.assertGreaterEqual(score, 0, f"negative score {score} for {clean}")
         self.assertLessEqual(score, 100, f"score {score} above 100 for {clean}")
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(lead=_lead_strategy())
     def test_deterministic_under_fuzz(self, lead):
         """Same input dict → same score across 10 fresh calls."""
@@ -246,11 +283,14 @@ class TestOutreachScoreProperties(unittest.TestCase):
         for i in range(9):
             again = self.hunter.calculate_outreach_score(deepcopy(clean))
             self.assertEqual(
-                again, first,
+                again,
+                first,
                 f"non-deterministic on iter {i}: {again} != {first}  input={clean}",
             )
 
-    @settings(max_examples=300, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=300, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(lead=_lead_strategy(), addition=st.sampled_from(CONTACT_FIELDS))
     def test_adding_contact_is_monotone(self, lead, addition):
         """
@@ -271,11 +311,14 @@ class TestOutreachScoreProperties(unittest.TestCase):
         enriched = _add_contact(clean, addition)
         after = self.hunter.calculate_outreach_score(enriched)
         self.assertGreaterEqual(
-            after, before,
+            after,
+            before,
             f"adding {addition!r} decreased score: {before} → {after}  base={clean}",
         )
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
     @given(lead=_lead_strategy(), seo=st.integers(min_value=0, max_value=100))
     def test_seo_score_is_invariant_under_fuzz(self, lead, seo):
         """
@@ -287,7 +330,8 @@ class TestOutreachScoreProperties(unittest.TestCase):
         baseline = self.hunter.calculate_outreach_score(deepcopy(clean))
         with_seo = self.hunter.calculate_outreach_score({**clean, "seo_score": seo})
         self.assertEqual(
-            baseline, with_seo,
+            baseline,
+            with_seo,
             f"seo_score={seo} changed score {baseline} → {with_seo}  base={clean}",
         )
 

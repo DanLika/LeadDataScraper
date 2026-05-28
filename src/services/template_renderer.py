@@ -34,6 +34,7 @@ raise ``SecurityError`` (translated from Jinja2's internal exceptions).
 Both subclass ``TemplateError`` so callers can collapse to one error
 path.
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,23 +52,25 @@ logger = logging.getLogger(__name__)
 
 ContentType = Literal["text", "html"]
 
-ALLOWED_VARS: frozenset[str] = frozenset({
-    # Lead-derived (joined at dispatch_tick time from the leads table)
-    "first_name",
-    "last_name",
-    "company",
-    "website",
-    "city",
-    "industry",
-    "audit_score",
-    "pain_point",
-    # Operator-derived (env-set; injected by the worker)
-    "operator_name",
-    "operator_signature",
-    # System-injected (auto-populated by the dispatcher payload
-    # builder — operators reference but don't supply)
-    "unsubscribe_url",
-})
+ALLOWED_VARS: frozenset[str] = frozenset(
+    {
+        # Lead-derived (joined at dispatch_tick time from the leads table)
+        "first_name",
+        "last_name",
+        "company",
+        "website",
+        "city",
+        "industry",
+        "audit_score",
+        "pain_point",
+        # Operator-derived (env-set; injected by the worker)
+        "operator_name",
+        "operator_signature",
+        # System-injected (auto-populated by the dispatcher payload
+        # builder — operators reference but don't supply)
+        "unsubscribe_url",
+    }
+)
 
 
 # ----- Errors ---------------------------------------------------------------

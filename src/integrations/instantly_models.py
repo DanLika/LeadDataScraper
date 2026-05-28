@@ -8,6 +8,7 @@ unbounded payloads to the upstream API.
 See ``src/integrations/instantly_sender.py`` for the dispatcher that
 consumes these.
 """
+
 from __future__ import annotations
 
 import re
@@ -49,6 +50,7 @@ class InstantlyLeadPayload(BaseModel):
         if not _EMAIL_REGEX.match(v):
             raise ValueError("Invalid email format")
         return v
+
     last_name: Optional[str] = Field(default=None, max_length=128)
     company_name: Optional[str] = Field(default=None, max_length=256)
     website: Optional[HttpUrl] = None

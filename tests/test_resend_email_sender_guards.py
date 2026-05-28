@@ -177,9 +177,7 @@ def test_subject_crlf_rejected():
 
 def test_from_name_crlf_rejected():
     s = _configured_sender()
-    r = _run(
-        s.send("ok@example.com", "Clean", "Body", from_name="Evil\r\nBcc: x")
-    )
+    r = _run(s.send("ok@example.com", "Clean", "Body", from_name="Evil\r\nBcc: x"))
     assert r["status"] == "error"
     assert "CRLF" in r["error"]
 
@@ -201,7 +199,10 @@ def test_success_200_returns_provider_message_id():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(200, {"id": "msg_abc123"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("lead@example.com", "Quick question", "Hello"))
 
     assert r["status"] == "sent"
@@ -224,7 +225,10 @@ def test_idempotency_key_passed_to_provider():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(200, {"id": "msg_x"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         _run(s.send("ok@example.com", "S", "B", idempotency_key="campaign-msg-42"))
 
     assert fake.captured[0]["headers"]["Idempotency-Key"] == "campaign-msg-42"
@@ -234,7 +238,10 @@ def test_idempotency_key_absent_when_not_provided():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(200, {"id": "msg_x"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         _run(s.send("ok@example.com", "S", "B"))
 
     assert "Idempotency-Key" not in fake.captured[0]["headers"]
@@ -245,7 +252,10 @@ def test_reply_to_added_to_payload_when_set():
     s.reply_to = "ops@bookbed.io"
     fake = _FakeSession(_FakeResponse(200, {"id": "msg_x"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         _run(s.send("ok@example.com", "S", "B"))
 
     assert fake.captured[0]["json"]["reply_to"] == "ops@bookbed.io"
@@ -255,7 +265,10 @@ def test_reply_to_absent_when_unset():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(200, {"id": "msg_x"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         _run(s.send("ok@example.com", "S", "B"))
 
     assert "reply_to" not in fake.captured[0]["json"]
@@ -266,7 +279,10 @@ def test_list_unsubscribe_headers_added_when_set():
     s.list_unsubscribe = "<mailto:unsub@bookbed.io>"
     fake = _FakeSession(_FakeResponse(200, {"id": "msg_x"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         _run(s.send("ok@example.com", "S", "B"))
 
     payload_headers = fake.captured[0]["json"].get("headers", {})
@@ -278,7 +294,10 @@ def test_list_unsubscribe_absent_when_unset():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(200, {"id": "msg_x"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         _run(s.send("ok@example.com", "S", "B"))
 
     assert "headers" not in fake.captured[0]["json"]
@@ -289,9 +308,14 @@ def test_list_unsubscribe_absent_when_unset():
 
 def test_401_maps_to_auth_failed():
     s = _configured_sender()
-    fake = _FakeSession(_FakeResponse(401, {"name": "invalid_api_key", "message": "Invalid"}))
+    fake = _FakeSession(
+        _FakeResponse(401, {"name": "invalid_api_key", "message": "Invalid"})
+    )
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -301,10 +325,15 @@ def test_401_maps_to_auth_failed():
 def test_422_maps_to_validation_with_message():
     s = _configured_sender()
     fake = _FakeSession(
-        _FakeResponse(422, {"name": "validation_error", "message": "domain not verified"})
+        _FakeResponse(
+            422, {"name": "validation_error", "message": "domain not verified"}
+        )
     )
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -316,7 +345,10 @@ def test_422_with_no_message_falls_back_to_unknown():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(422, {}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -327,7 +359,10 @@ def test_429_maps_to_rate_limited():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(429, {"name": "rate_limit_exceeded"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "rate_limited"
@@ -337,7 +372,10 @@ def test_500_maps_to_provider_error():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(500))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -348,7 +386,10 @@ def test_503_maps_to_provider_error():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(503))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -359,7 +400,10 @@ def test_unexpected_3xx_maps_to_unexpected():
     s = _configured_sender()
     fake = _FakeSession(_FakeResponse(302))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -370,7 +414,10 @@ def test_timeout_maps_to_timeout_error():
     s = _configured_sender()
     fake = _FakeSession(post_exception=asyncio.TimeoutError())
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -381,7 +428,10 @@ def test_network_error_maps_to_provider_unreachable():
     s = _configured_sender()
     fake = _FakeSession(post_exception=aiohttp.ClientConnectionError("conn refused"))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert r["status"] == "error"
@@ -398,7 +448,10 @@ def test_error_strings_never_echo_api_key():
     s.api_key = "re_super_secret_key_xyz"
     fake = _FakeSession(_FakeResponse(500, {"message": "internal"}))
 
-    with _patch_session(fake), patch.object(s, "_wait_for_rate_limit", _noop_rate_limit):
+    with (
+        _patch_session(fake),
+        patch.object(s, "_wait_for_rate_limit", _noop_rate_limit),
+    ):
         r = _run(s.send("ok@example.com", "S", "B"))
 
     assert "re_super_secret_key_xyz" not in str(r)

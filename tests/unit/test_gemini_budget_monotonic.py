@@ -16,6 +16,7 @@ Includes a concurrent-writer probe — 50 parallel ``check_budget +
 record_usage`` cycles on a temp DB, final value must equal the sum
 (no lost updates).
 """
+
 from __future__ import annotations
 
 import os
@@ -83,8 +84,10 @@ class TestMonotonicCounter:
         gemini_budget.check_budget(estimated_input=500, estimated_output=200)
         s_before = gemini_budget.get_state()
         gemini_budget.record_usage(
-            actual_input=500, actual_output=200,
-            estimated_input=500, estimated_output=200,
+            actual_input=500,
+            actual_output=200,
+            estimated_input=500,
+            estimated_output=200,
         )
         s_after = gemini_budget.get_state()
         assert s_after == s_before
@@ -100,16 +103,16 @@ class TestMonotonicCounter:
 
     def test_over_estimate_emits_warning(self, temp_db, caplog):
         import logging
+
         caplog.set_level(logging.WARNING, logger="src.utils.gemini_budget")
         gemini_budget.check_budget(estimated_input=10_000, estimated_output=5_000)
         gemini_budget.record_usage(
-            actual_input=4_000, actual_output=1_000,
-            estimated_input=10_000, estimated_output=5_000,
+            actual_input=4_000,
+            actual_output=1_000,
+            estimated_input=10_000,
+            estimated_output=5_000,
         )
-        assert any(
-            "estimate exceeded actual" in rec.message
-            for rec in caplog.records
-        )
+        assert any("estimate exceeded actual" in rec.message for rec in caplog.records)
 
 
 class TestConcurrentIncrements:
@@ -126,13 +129,18 @@ class TestConcurrentIncrements:
 
         # Bump the ceiling high enough that none of the parallel
         # check_budget calls trips it.
-        os.environ["GEMINI_DAILY_TOKEN_CEILING"] = str(10 * N * (PER_CALL_INPUT + PER_CALL_OUTPUT))
+        os.environ["GEMINI_DAILY_TOKEN_CEILING"] = str(
+            10 * N * (PER_CALL_INPUT + PER_CALL_OUTPUT)
+        )
         try:
+
             def worker():
                 gemini_budget.check_budget(PER_CALL_INPUT, PER_CALL_OUTPUT)
                 gemini_budget.record_usage(
-                    PER_CALL_INPUT, PER_CALL_OUTPUT,
-                    PER_CALL_INPUT, PER_CALL_OUTPUT,
+                    PER_CALL_INPUT,
+                    PER_CALL_OUTPUT,
+                    PER_CALL_INPUT,
+                    PER_CALL_OUTPUT,
                 )
 
             threads = [threading.Thread(target=worker) for _ in range(N)]

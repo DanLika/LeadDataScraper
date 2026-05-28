@@ -17,6 +17,7 @@ Exits:
 Stdout is a single JSON line so Render's log aggregator / any grep
 pipeline can compute per-stage tallies without parsing prose.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,15 +42,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="LDS dispatch tick worker (Phase 15.2)",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=None,
+        "--batch-size",
+        type=int,
+        default=None,
         help="How many due messages to claim per tick (default: env DISPATCH_TICK_BATCH_SIZE or 100)",
     )
     parser.add_argument(
-        "--claim-timeout-min", type=int, default=None,
+        "--claim-timeout-min",
+        type=int,
+        default=None,
         help="Minutes after which a stuck 'dispatching' row resets to 'pending' (default: env DISPATCH_CLAIM_TIMEOUT_MIN or 15)",
     )
     parser.add_argument(
-        "--max-runtime-sec", type=int, default=None,
+        "--max-runtime-sec",
+        type=int,
+        default=None,
         help="Bail-out wall-clock cap (default: env DISPATCH_TICK_MAX_RUNTIME_SEC or 50)",
     )
     return parser.parse_args(argv)
@@ -66,8 +73,10 @@ async def _amain(args: argparse.Namespace) -> int:
         max_runtime_sec=args.max_runtime_sec,
     )
     print(json.dumps(result.as_dict(), default=str), flush=True)
-    if any(e.startswith("db_client_unavailable") or e.startswith("dispatcher_unavailable")
-           for e in result.errors):
+    if any(
+        e.startswith("db_client_unavailable") or e.startswith("dispatcher_unavailable")
+        for e in result.errors
+    ):
         return 1
     if result.errors and any(e.startswith("runtime_cap") for e in result.errors):
         return 2

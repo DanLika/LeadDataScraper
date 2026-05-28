@@ -12,6 +12,7 @@ Critical coverage:
 - run_tick: runtime cap honoured
 - run_tick: dispatcher unavailable → 'dispatcher_unavailable' error
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -46,9 +47,7 @@ def _build_db(
     table.update.side_effect = lambda values, t=table: (
         setattr(t, "_set", dict(values)) or t
     )
-    table.eq.side_effect = lambda col, val, t=table: (
-        t._where.__setitem__(col, val) or t
-    )
+    table.eq.side_effect = lambda col, val, t=table: t._where.__setitem__(col, val) or t
     table.in_.side_effect = lambda col, vals, t=table: (
         t._where.__setitem__(f"{col}__in", list(vals)) or t
     )
@@ -101,10 +100,13 @@ class TestClaimDueBatch(unittest.TestCase):
         ]
         # Mock the UPDATE returning both rows (== both claimed).
         client, table, captures = _build_db(
-            fetch_due_rows=due, update_returns=due,
+            fetch_due_rows=due,
+            update_returns=due,
         )
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.claim_due_batch(limit=10, now_iso="2026-05-26T10:00:00+00:00"))
+        result = asyncio.run(
+            repo.claim_due_batch(limit=10, now_iso="2026-05-26T10:00:00+00:00")
+        )
         self.assertEqual(len(result), 2)
         # Exactly one UPDATE captured: SET status='dispatching', dispatched_at,
         # WHERE id IN [msg-1, msg-2] AND status='pending'.
@@ -123,7 +125,8 @@ class TestClaimDueBatch(unittest.TestCase):
         due = [{"id": "msg-1"}]
         # UPDATE returns 0 rows (already-claimed by winner).
         client, _, captures = _build_db(
-            fetch_due_rows=due, update_returns=[],
+            fetch_due_rows=due,
+            update_returns=[],
         )
         repo = CampaignMessageRepository(client)
         result = asyncio.run(repo.claim_due_batch(limit=10))
@@ -150,9 +153,12 @@ class TestSweepStaleClaims(unittest.TestCase):
         stale = [{"id": "msg-stuck-1"}, {"id": "msg-stuck-2"}]
         client, _, captures = _build_db(update_returns=stale)
         repo = CampaignMessageRepository(client)
-        result = asyncio.run(repo.sweep_stale_claims(
-            timeout_minutes=15, now_iso="2026-05-26T10:00:00+00:00",
-        ))
+        result = asyncio.run(
+            repo.sweep_stale_claims(
+                timeout_minutes=15,
+                now_iso="2026-05-26T10:00:00+00:00",
+            )
+        )
         self.assertEqual(result, 2)
         self.assertEqual(len(captures["updates"]), 1)
         set_clause, where = captures["updates"][0]
@@ -189,11 +195,16 @@ class TestRunTick(unittest.TestCase):
         client, _, _ = _build_db(fetch_due_rows=[], update_returns=[])
         dispatcher = MagicMock()  # Never called.
 
-        result = asyncio.run(run_tick(
-            db_client=client, dispatcher=dispatcher,
-            batch_size=10, claim_timeout_min=15, max_runtime_sec=10,
-            now_iso="2026-05-26T10:00:00+00:00",
-        ))
+        result = asyncio.run(
+            run_tick(
+                db_client=client,
+                dispatcher=dispatcher,
+                batch_size=10,
+                claim_timeout_min=15,
+                max_runtime_sec=10,
+                now_iso="2026-05-26T10:00:00+00:00",
+            )
+        )
         self.assertEqual(result.claimed, 0)
         self.assertEqual(result.dispatched, 0)
         self.assertEqual(result.errors, [])
@@ -201,20 +212,32 @@ class TestRunTick(unittest.TestCase):
 
     def test_dispatcher_unavailable_errors_out(self) -> None:
         from src.workers.dispatch_tick import run_tick
+
         client, _, _ = _build_db(
-            fetch_due_rows=[{"id": "msg-1", "lead_unique_key": "uk-1",
-                            "recipient_email": "r@x.com"}],
-            update_returns=[{"id": "msg-1", "lead_unique_key": "uk-1",
-                            "recipient_email": "r@x.com",
-                            "scheduled_at": "2026-05-26T10:00:00Z"}],
+            fetch_due_rows=[
+                {"id": "msg-1", "lead_unique_key": "uk-1", "recipient_email": "r@x.com"}
+            ],
+            update_returns=[
+                {
+                    "id": "msg-1",
+                    "lead_unique_key": "uk-1",
+                    "recipient_email": "r@x.com",
+                    "scheduled_at": "2026-05-26T10:00:00Z",
+                }
+            ],
         )
 
         with patch("src.workers.dispatch_tick._resolve_dispatcher", return_value=None):
-            result = asyncio.run(run_tick(
-                db_client=client, dispatcher=None,
-                batch_size=10, claim_timeout_min=15, max_runtime_sec=10,
-                now_iso="2026-05-26T10:00:00+00:00",
-            ))
+            result = asyncio.run(
+                run_tick(
+                    db_client=client,
+                    dispatcher=None,
+                    batch_size=10,
+                    claim_timeout_min=15,
+                    max_runtime_sec=10,
+                    now_iso="2026-05-26T10:00:00+00:00",
+                )
+            )
         # Tue 10:00 UTC matches default Mon-Fri 09-17 window → eligible.
         # Dispatcher fails to resolve → tick records the error.
         self.assertIn("dispatcher_unavailable", result.errors)
@@ -228,15 +251,19 @@ class TestRunTick(unittest.TestCase):
 
 def _aret(value):
     """Wrap a value in an async-returning callable for mock side_effect."""
+
     async def _f(*a, **kw):
         return value
+
     return _f
 
 
 def _araise(exc):
     """Wrap an exception in an async-raising callable for mock side_effect."""
+
     async def _f(*a, **kw):
         raise exc
+
     return _f
 
 
@@ -251,7 +278,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
         mark_send_failed called with concatenated error code+message;
         swallowed counter stays 0 and result.errors stays empty."""
         from src.workers.dispatch_tick import (
-            TickResult, _handle_per_lead_errors,
+            TickResult,
+            _handle_per_lead_errors,
         )
         from src.repositories.campaign_message_repo import MarkResult
 
@@ -281,7 +309,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
         )
 
         msg_repo.mark_send_failed.assert_called_once_with(
-            "msg-1", error="http_400:invalid recipient",
+            "msg-1",
+            error="http_400:invalid recipient",
         )
         self.assertEqual(result.swallowed, 0)
         self.assertEqual(result.errors, [])
@@ -294,7 +323,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
         any other failure bucket. WARNING surfaces the orphaned
         claim so operators see it without a wrapper script."""
         from src.workers.dispatch_tick import (
-            TickResult, _handle_per_lead_errors,
+            TickResult,
+            _handle_per_lead_errors,
         )
 
         push_result = MagicMock()
@@ -313,7 +343,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
 
         result = TickResult()
         with self.assertLogs(
-            "src.workers.dispatch_tick", level="WARNING",
+            "src.workers.dispatch_tick",
+            level="WARNING",
         ) as logs:
             await _handle_per_lead_errors(
                 push_result=push_result,
@@ -327,10 +358,7 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.swallowed, 1)
         self.assertEqual(result.errors, ["push_leads_unmatched:http_422"])
         self.assertTrue(
-            any(
-                "unknown email" in r.getMessage()
-                for r in logs.records
-            ),
+            any("unknown email" in r.getMessage() for r in logs.records),
             msg=f"records={[r.getMessage() for r in logs.records]}",
         )
 
@@ -341,7 +369,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
         logged about the fallback. Mirrors the Issue #367 evidence
         scenario."""
         from src.workers.dispatch_tick import (
-            TickResult, _handle_per_lead_errors,
+            TickResult,
+            _handle_per_lead_errors,
         )
         from src.repositories.campaign_message_repo import MarkResult
 
@@ -363,7 +392,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
 
         result = TickResult()
         with self.assertLogs(
-            "src.workers.dispatch_tick", level="WARNING",
+            "src.workers.dispatch_tick",
+            level="WARNING",
         ) as logs:
             await _handle_per_lead_errors(
                 push_result=push_result,
@@ -374,15 +404,13 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
             )
 
         msg_repo.mark_send_failed.assert_called_once_with(
-            "msg-1", error="http_402:paid plan required",
+            "msg-1",
+            error="http_402:paid plan required",
         )
         self.assertEqual(result.swallowed, 0)
         self.assertEqual(result.errors, [])
         self.assertTrue(
-            any(
-                "single-message fallback" in r.getMessage()
-                for r in logs.records
-            ),
+            any("single-message fallback" in r.getMessage() for r in logs.records),
             msg=f"records={[r.getMessage() for r in logs.records]}",
         )
 
@@ -393,7 +421,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
         DISTINCT from ``push_leads_unmatched``. ``swallowed`` stays
         0 — we DID find the row, just couldn't update it."""
         from src.workers.dispatch_tick import (
-            TickResult, _handle_per_lead_errors,
+            TickResult,
+            _handle_per_lead_errors,
         )
         from src.repositories.campaign_message_repo import MarkResult
 
@@ -431,7 +460,8 @@ class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
         """``push_result.errors`` empty → no DB calls, no log lines,
         no result mutations."""
         from src.workers.dispatch_tick import (
-            TickResult, _handle_per_lead_errors,
+            TickResult,
+            _handle_per_lead_errors,
         )
 
         push_result = MagicMock()
@@ -513,33 +543,43 @@ class TestRunTickExceptionPath(unittest.IsolatedAsyncioTestCase):
             side_effect=_araise(RuntimeError("boom")),
         )
 
-        with patch(
-            "src.repositories.campaign_message_repo.CampaignMessageRepository",
-            return_value=fake_msg_repo,
-        ), patch(
-            "src.repositories.suppression_repo.SuppressionRepository",
-            return_value=fake_sup_repo,
-        ), patch(
-            "src.repositories.lead_repo.LeadRepository",
-            return_value=fake_lead_repo,
-        ), patch(
-            "src.repositories.sequence_step_repo.SequenceStepRepository",
-            return_value=fake_step_repo,
-        ), patch(
-            "src.repositories.sequence_variant_repo.SequenceVariantRepository",
-            return_value=fake_variant_repo,
-        ), patch(
-            "src.workers.dispatch_tick._window_check_for_step",
-            return_value=(True, None),
-        ), patch(
-            "src.services.variant_selector.select_variant",
-            return_value=var_obj,
-        ), patch(
-            "src.services.thread_builder.build_send_payload",
-            return_value=payload,
-        ), patch(
-            "src.utils.unsubscribe_tokens.build_unsubscribe_url",
-            return_value="",
+        with (
+            patch(
+                "src.repositories.campaign_message_repo.CampaignMessageRepository",
+                return_value=fake_msg_repo,
+            ),
+            patch(
+                "src.repositories.suppression_repo.SuppressionRepository",
+                return_value=fake_sup_repo,
+            ),
+            patch(
+                "src.repositories.lead_repo.LeadRepository",
+                return_value=fake_lead_repo,
+            ),
+            patch(
+                "src.repositories.sequence_step_repo.SequenceStepRepository",
+                return_value=fake_step_repo,
+            ),
+            patch(
+                "src.repositories.sequence_variant_repo.SequenceVariantRepository",
+                return_value=fake_variant_repo,
+            ),
+            patch(
+                "src.workers.dispatch_tick._window_check_for_step",
+                return_value=(True, None),
+            ),
+            patch(
+                "src.services.variant_selector.select_variant",
+                return_value=var_obj,
+            ),
+            patch(
+                "src.services.thread_builder.build_send_payload",
+                return_value=payload,
+            ),
+            patch(
+                "src.utils.unsubscribe_tokens.build_unsubscribe_url",
+                return_value="",
+            ),
         ):
             result = await run_tick(
                 db_client=MagicMock(),
@@ -578,17 +618,16 @@ class TestSummaryLogOnEveryReturn(unittest.IsolatedAsyncioTestCase):
             return_value=None,
         ):
             with self.assertLogs(
-                "src.workers.dispatch_tick", level="INFO",
+                "src.workers.dispatch_tick",
+                level="INFO",
             ) as logs:
                 result = await run_tick(db_client=None, dispatcher=None)
 
         self.assertIn("db_client_unavailable", result.errors)
-        summary = [
-            r for r in logs.records
-            if r.getMessage() == "dispatch_tick summary"
-        ]
+        summary = [r for r in logs.records if r.getMessage() == "dispatch_tick summary"]
         self.assertEqual(
-            len(summary), 1,
+            len(summary),
+            1,
             msg=f"expected 1 summary log, got {len(summary)}",
         )
         # Summary attaches result.as_dict() as record attributes via

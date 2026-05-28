@@ -2,6 +2,7 @@
 Live integration tests for backend endpoints using FastAPI TestClient.
 Tests CORS, file upload, and error handling without requiring external services.
 """
+
 import os
 import sys
 import unittest
@@ -16,12 +17,15 @@ class TestBackendCORS(unittest.TestCase):
     def _create_app_with_origins(self, origins_env: str):
         """Create a fresh FastAPI app with specific ALLOWED_ORIGINS."""
         # We need to reimport with patched env vars
-        with patch.dict(os.environ, {
-            "ALLOWED_ORIGINS": origins_env,
-            "SUPABASE_URL": "",
-            "SUPABASE_ANON_KEY": "",
-            "API_SECRET_KEY": "test-key-123",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "ALLOWED_ORIGINS": origins_env,
+                "SUPABASE_URL": "",
+                "SUPABASE_ANON_KEY": "",
+                "API_SECRET_KEY": "test-key-123",
+            },
+        ):
             # Import FastAPI and build a minimal app that mirrors the CORS logic
             from fastapi import FastAPI
             from fastapi.middleware.cors import CORSMiddleware
@@ -53,7 +57,9 @@ class TestBackendCORS(unittest.TestCase):
 
     def test_normal_origins_preserve_credentials(self):
         """Normal origins should keep credentials enabled."""
-        app, creds = self._create_app_with_origins("http://localhost:3000,https://app.example.com")
+        app, creds = self._create_app_with_origins(
+            "http://localhost:3000,https://app.example.com"
+        )
         self.assertTrue(creds)
 
     def test_wildcard_disables_credentials(self):
@@ -63,19 +69,25 @@ class TestBackendCORS(unittest.TestCase):
 
     def test_wildcard_mixed_disables_credentials(self):
         """Wildcard mixed with other origins should disable credentials."""
-        app, creds = self._create_app_with_origins("http://localhost:3000,*,https://app.example.com")
+        app, creds = self._create_app_with_origins(
+            "http://localhost:3000,*,https://app.example.com"
+        )
         self.assertFalse(creds)
 
     def test_cors_headers_with_normal_origin(self):
         """CORS preflight with a normal origin should include credentials."""
         from fastapi.testclient import TestClient
+
         app, _ = self._create_app_with_origins("http://localhost:3000")
         client = TestClient(app)
 
-        response = client.options("/test", headers={
-            "Origin": "http://localhost:3000",
-            "Access-Control-Request-Method": "GET",
-        })
+        response = client.options(
+            "/test",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
 
         self.assertIn("access-control-allow-credentials", response.headers)
         self.assertEqual(response.headers["access-control-allow-credentials"], "true")
@@ -83,18 +95,25 @@ class TestBackendCORS(unittest.TestCase):
     def test_cors_headers_with_wildcard(self):
         """CORS preflight with wildcard should NOT include credentials."""
         from fastapi.testclient import TestClient
+
         app, _ = self._create_app_with_origins("*")
         client = TestClient(app)
 
-        response = client.options("/test", headers={
-            "Origin": "http://evil-site.com",
-            "Access-Control-Request-Method": "GET",
-        })
+        response = client.options(
+            "/test",
+            headers={
+                "Origin": "http://evil-site.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
 
         # With wildcard + no credentials, the allow-credentials header should not be "true"
         cred_header = response.headers.get("access-control-allow-credentials", "")
-        self.assertNotEqual(cred_header, "true",
-            "Credentials enabled with wildcard origin — CORS vulnerability!")
+        self.assertNotEqual(
+            cred_header,
+            "true",
+            "Credentials enabled with wildcard origin — CORS vulnerability!",
+        )
 
 
 class TestFileUploadSecurity(unittest.TestCase):
@@ -130,6 +149,7 @@ class TestAutoMigrateSecurity(unittest.TestCase):
         # Even with a None client, we can test the validation logic
         # by checking the regex directly
         import re
+
         pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 
         # These should be rejected
@@ -153,7 +173,10 @@ class TestSEOAuditSSLBehavior(unittest.TestCase):
         # Test with a URL that would trigger SSL issues
         # Since we can't simulate actual SSL errors easily, verify with HTML bypass
         result = asyncio.run(
-            perform_seo_audit_async("https://test.example.com", html="<html><head><title>Test Company Official Website Homepage</title><meta name='description' content='Test Company is a leading provider of quality services and products for businesses worldwide since 2020'><meta name='viewport' content='width=device-width'></head><body><h1>Welcome to Test Company</h1></body></html>")
+            perform_seo_audit_async(
+                "https://test.example.com",
+                html="<html><head><title>Test Company Official Website Homepage</title><meta name='description' content='Test Company is a leading provider of quality services and products for businesses worldwide since 2020'><meta name='viewport' content='width=device-width'></head><body><h1>Welcome to Test Company</h1></body></html>",
+            )
         )
 
         # When HTML is provided, SSL check is skipped but url prefix sets has_ssl
@@ -168,7 +191,9 @@ class TestSEOAuditSSLBehavior(unittest.TestCase):
         from src.scrapers.seo_audit import perform_seo_audit_async
 
         result = asyncio.run(
-            perform_seo_audit_async("http://insecure-site.com", html="<html><body>test</body></html>")
+            perform_seo_audit_async(
+                "http://insecure-site.com", html="<html><body>test</body></html>"
+            )
         )
 
         self.assertFalse(result["has_ssl"])
@@ -180,64 +205,75 @@ class TestLeadSegmentationEndToEnd(unittest.TestCase):
     def test_realistic_lead_segmentation(self):
         """Test segmentation with realistic production-like lead data."""
         from src.processors.leadhunter import LeadHunter
+
         hunter = LeadHunter()
 
         # Simulated dentist lead
         dentist_lead = {
-            'name': 'Miami Smiles Dental',
-            'company_name': 'Miami Smiles Dental',
-            'website': 'https://miamismilesdental.com',
-            'rating': '4.7',
-            'reviews': '45',
-            'seo_score': 65,
-            'outreach_score': 70,
-            'pain_points': 'The website lacks Google Analytics and Facebook Pixel tracking.',
-            'target_clients': 'Local families and adults seeking dental care',
-            'email': 'info@miamismilesdental.com'
+            "name": "Miami Smiles Dental",
+            "company_name": "Miami Smiles Dental",
+            "website": "https://miamismilesdental.com",
+            "rating": "4.7",
+            "reviews": "45",
+            "seo_score": 65,
+            "outreach_score": 70,
+            "pain_points": "The website lacks Google Analytics and Facebook Pixel tracking.",
+            "target_clients": "Local families and adults seeking dental care",
+            "email": "info@miamismilesdental.com",
         }
         segment = hunter.segment_lead(dentist_lead)
-        self.assertEqual(segment, "Marketing Analytics",
-            f"Dentist with tracking gap should be 'Marketing Analytics', got '{segment}'")
+        self.assertEqual(
+            segment,
+            "Marketing Analytics",
+            f"Dentist with tracking gap should be 'Marketing Analytics', got '{segment}'",
+        )
 
         # Low-rated restaurant
         restaurant_lead = {
-            'name': 'Quick Bites Diner',
-            'rating': '3.2',
-            'reviews': '150',
-            'outreach_score': 45,
-            'pain_points': 'Website design looks outdated.',
+            "name": "Quick Bites Diner",
+            "rating": "3.2",
+            "reviews": "150",
+            "outreach_score": 45,
+            "pain_points": "Website design looks outdated.",
         }
         segment = hunter.segment_lead(restaurant_lead)
-        self.assertEqual(segment, "Reputation Repair",
-            f"Low-rated restaurant should be 'Reputation Repair', got '{segment}'")
+        self.assertEqual(
+            segment,
+            "Reputation Repair",
+            f"Low-rated restaurant should be 'Reputation Repair', got '{segment}'",
+        )
 
         # New business with few reviews
         new_business = {
-            'name': 'Fresh Cuts Barbershop',
-            'rating': '5.0',
-            'reviews': '4',
-            'outreach_score': 30,
-            'pain_points': 'No online booking system detected.',
+            "name": "Fresh Cuts Barbershop",
+            "rating": "5.0",
+            "reviews": "4",
+            "outreach_score": 30,
+            "pain_points": "No online booking system detected.",
         }
         segment = hunter.segment_lead(new_business)
-        self.assertEqual(segment, "New Business / Growth",
-            f"New business with 4 reviews should be 'New Business / Growth', got '{segment}'")
+        self.assertEqual(
+            segment,
+            "New Business / Growth",
+            f"New business with 4 reviews should be 'New Business / Growth', got '{segment}'",
+        )
 
     def test_outreach_score_calculation(self):
         """Test that outreach score calculation still works correctly."""
         from src.processors.leadhunter import LeadHunter
+
         hunter = LeadHunter()
 
         # Lead with lots of data should score high
         rich_lead = {
-            'email': 'owner@company.com',
-            'phone': '+1-305-555-1234',
-            'facebook': 'https://facebook.com/company',
-            'rating': '3.5',
-            'reviews': '15',
-            'leadership_team': 'John Smith, CEO',
-            'company_size': 'Small, 10-20 employees',
-            'high_risk_flag': True,
+            "email": "owner@company.com",
+            "phone": "+1-305-555-1234",
+            "facebook": "https://facebook.com/company",
+            "rating": "3.5",
+            "reviews": "15",
+            "leadership_team": "John Smith, CEO",
+            "company_size": "Small, 10-20 employees",
+            "high_risk_flag": True,
         }
         score = hunter.calculate_outreach_score(rich_lead)
         self.assertGreater(score, 50, f"Rich lead should score > 50, got {score}")
@@ -248,5 +284,5 @@ class TestLeadSegmentationEndToEnd(unittest.TestCase):
         self.assertEqual(score, 0, f"Empty lead should score 0, got {score}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main(verbosity=2)

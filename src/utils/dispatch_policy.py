@@ -12,6 +12,7 @@ Tests that need to override may call ``_reload_for_testing()`` — never
 mutate ``os.environ`` mid-request (multi-worker uvicorn races; see the
 canonical "AI-client constructors" rule in CLAUDE.md).
 """
+
 from __future__ import annotations
 
 import os

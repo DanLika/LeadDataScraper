@@ -8,6 +8,7 @@ Covers:
 - Seed without env gate logs warning + falls through to random
 - Different seeds → different (probable) picks; same seed → same pick
 """
+
 from __future__ import annotations
 
 import os
@@ -77,8 +78,9 @@ class TestDeterministicSeed(unittest.TestCase):
             }
         # 20 SystemRandom picks of 3 weighted variants → almost
         # certainly covers ≥2 distinct results.
-        self.assertGreater(len(picks), 1,
-                           "seed was honored without env gate — A/B testing broken")
+        self.assertGreater(
+            len(picks), 1, "seed was honored without env gate — A/B testing broken"
+        )
 
     def test_seed_with_env_gate_pins_pick(self) -> None:
         with patch.dict(os.environ, {"VARIANT_SELECTOR_ALLOW_SEED": "1"}):
@@ -93,8 +95,9 @@ class TestDeterministicSeed(unittest.TestCase):
                 select_variant(VARIANTS, deterministic_seed=f"seed-{i}").id
                 for i in range(40)
             }
-        self.assertGreater(len(picks), 1,
-                           "different seeds should produce different picks")
+        self.assertGreater(
+            len(picks), 1, "different seeds should produce different picks"
+        )
 
     def test_env_gate_non_one_value_does_not_enable(self) -> None:
         """``VARIANT_SELECTOR_ALLOW_SEED=true`` / ``=yes`` / ``=anything``
@@ -107,7 +110,8 @@ class TestDeterministicSeed(unittest.TestCase):
                     for _ in range(20)
                 }
             self.assertGreater(
-                len(picks), 1,
+                len(picks),
+                1,
                 f"VARIANT_SELECTOR_ALLOW_SEED={falsy_one!r} should NOT enable the gate",
             )
 

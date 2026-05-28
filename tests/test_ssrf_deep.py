@@ -62,6 +62,7 @@ SRC_ROOTS = [REPO_ROOT / "src", REPO_ROOT / "backend"]
 # 1) DNS rebinding — connection-time check sees the rebound private IP.
 # ---------------------------------------------------------------------------
 
+
 class TestDnsRebinding(unittest.IsolatedAsyncioTestCase):
     """Two consecutive resolve() calls return different IPs. Pre-flight
     sees a public address; the second (made by aiohttp inside the
@@ -72,10 +73,26 @@ class TestDnsRebinding(unittest.IsolatedAsyncioTestCase):
     async def test_second_resolve_rejects_rebound_loopback(self):
         # Sequenced results: first call → public, second call → loopback.
         rebind_sequence = [
-            [{"host": "8.8.8.8", "port": 80, "family": socket.AF_INET,
-              "hostname": "rebind.example", "flags": 0, "proto": 6}],
-            [{"host": "127.0.0.1", "port": 80, "family": socket.AF_INET,
-              "hostname": "rebind.example", "flags": 0, "proto": 6}],
+            [
+                {
+                    "host": "8.8.8.8",
+                    "port": 80,
+                    "family": socket.AF_INET,
+                    "hostname": "rebind.example",
+                    "flags": 0,
+                    "proto": 6,
+                }
+            ],
+            [
+                {
+                    "host": "127.0.0.1",
+                    "port": 80,
+                    "family": socket.AF_INET,
+                    "hostname": "rebind.example",
+                    "flags": 0,
+                    "proto": 6,
+                }
+            ],
         ]
         super_resolve = AsyncMock(side_effect=rebind_sequence)
 
@@ -94,10 +111,26 @@ class TestDnsRebinding(unittest.IsolatedAsyncioTestCase):
         """Pre-flight passes; rebind points the same hostname at the EC2
         metadata IP. Connection-time resolver must raise."""
         rebind_sequence = [
-            [{"host": "104.21.0.1", "port": 80, "family": socket.AF_INET,
-              "hostname": "rebind.example", "flags": 0, "proto": 6}],
-            [{"host": "169.254.169.254", "port": 80, "family": socket.AF_INET,
-              "hostname": "rebind.example", "flags": 0, "proto": 6}],
+            [
+                {
+                    "host": "104.21.0.1",
+                    "port": 80,
+                    "family": socket.AF_INET,
+                    "hostname": "rebind.example",
+                    "flags": 0,
+                    "proto": 6,
+                }
+            ],
+            [
+                {
+                    "host": "169.254.169.254",
+                    "port": 80,
+                    "family": socket.AF_INET,
+                    "hostname": "rebind.example",
+                    "flags": 0,
+                    "proto": 6,
+                }
+            ],
         ]
         super_resolve = AsyncMock(side_effect=rebind_sequence)
 
@@ -115,6 +148,7 @@ class TestDnsRebinding(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # 2 + 3) IPv6: IPv4-mapped + pure IPv6 internal ranges.
 # ---------------------------------------------------------------------------
+
 
 class TestIPv6Classification(unittest.TestCase):
     """Python's `ipaddress.IPv6Address.is_global` correctly returns False
@@ -201,6 +235,7 @@ class TestAssertSafeUrlWithIPv6(unittest.IsolatedAsyncioTestCase):
 # 4) Redirect-target rejected — resolver still re-checks for IP literals.
 # ---------------------------------------------------------------------------
 
+
 class TestRedirectTargetGuard(unittest.IsolatedAsyncioTestCase):
     """aiohttp's `DefaultResolver.resolve('<ip-literal>')` returns a
     synthetic entry (`AI_NUMERICHOST`) without real DNS. `SSRFGuardResolver`
@@ -230,6 +265,7 @@ class TestRedirectTargetGuard(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # 5) Bounded redirect chain — default aiohttp max_redirects=10.
 # ---------------------------------------------------------------------------
+
 
 class TestProductionRedirectsBounded(unittest.TestCase):
     """`seo_audit.py` and `enrichment_engine.py` must not override
@@ -268,7 +304,8 @@ class TestProductionRedirectsBounded(unittest.TestCase):
                     except ValueError:
                         pass
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "Unbounded / oversized max_redirects overrides found:\n  "
             + "\n  ".join(offenders),
         )
@@ -277,6 +314,7 @@ class TestProductionRedirectsBounded(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 6) HTTP/0.9 smuggling — aiohttp's parser refuses HTTP/0.9.
 # ---------------------------------------------------------------------------
+
 
 class TestHttp09Refused(unittest.IsolatedAsyncioTestCase):
     """HTTP/0.9 responses have no status line and no headers — body only.
@@ -304,9 +342,7 @@ class TestHttp09Refused(unittest.IsolatedAsyncioTestCase):
             except Exception:
                 pass
 
-        server = await asyncio.start_server(
-            http09_responder, "127.0.0.1", 0
-        )
+        server = await asyncio.start_server(http09_responder, "127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
 
         try:
@@ -316,9 +352,7 @@ class TestHttp09Refused(unittest.IsolatedAsyncioTestCase):
                     (aiohttp.ClientError, asyncio.TimeoutError),
                     msg="HTTP/0.9 must not silently parse as success",
                 ):
-                    async with session.get(
-                        f"http://127.0.0.1:{port}/"
-                    ) as resp:
+                    async with session.get(f"http://127.0.0.1:{port}/") as resp:
                         await resp.text()
         finally:
             server.close()
@@ -328,6 +362,7 @@ class TestHttp09Refused(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # 7) SNI / Host-header confusion — no manual Host override on outbound fetches.
 # ---------------------------------------------------------------------------
+
 
 class TestNoManualHostHeaderOverride(unittest.TestCase):
     """If a production aiohttp / Playwright call manually sets the
@@ -375,7 +410,8 @@ class TestNoManualHostHeaderOverride(unittest.TestCase):
                         f"manual Host header set: {stripped[:120]}"
                     )
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "Manual Host header overrides — TLS SNI may diverge from "
             "HTTP Host. Found:\n  " + "\n  ".join(offenders),
         )
@@ -384,6 +420,7 @@ class TestNoManualHostHeaderOverride(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 8) TXT-record exfil — no DNS TXT/MX lookups in SSRF-sensitive code.
 # ---------------------------------------------------------------------------
+
 
 class TestNoTxtRecordExfil(unittest.TestCase):
     """An attacker who can supply a hostname could exfil data through
@@ -395,8 +432,12 @@ class TestNoTxtRecordExfil(unittest.TestCase):
 
     def test_no_dnspython_imports(self):
         offenders: list[str] = []
-        forbidden = ("import dns.resolver", "from dns import resolver",
-                     "from dns.resolver", "import dnspython")
+        forbidden = (
+            "import dns.resolver",
+            "from dns import resolver",
+            "from dns.resolver",
+            "import dnspython",
+        )
         for root in SRC_ROOTS:
             for path in root.rglob("*.py"):
                 if "test" in path.parts:
@@ -411,7 +452,8 @@ class TestNoTxtRecordExfil(unittest.TestCase):
                                 f"{path.relative_to(REPO_ROOT)}:{line_num} {line.strip()}"
                             )
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "DNS-query-issuing modules imported in SSRF-sensitive code:\n  "
             + "\n  ".join(offenders),
         )
@@ -437,7 +479,8 @@ class TestNoTxtRecordExfil(unittest.TestCase):
                             f"{path.relative_to(REPO_ROOT)}:{line_num} {line.strip()}"
                         )
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             "Explicit DNS TXT/MX/NS/CNAME/SRV lookups found:\n  "
             + "\n  ".join(offenders),
         )

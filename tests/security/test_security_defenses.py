@@ -30,7 +30,7 @@ class TestFencedJson(unittest.TestCase):
         out = _fenced_json({"name": "ACME"})
         self.assertTrue(out.startswith("<UNTRUSTED_DATA>"))
         self.assertTrue(out.endswith("</UNTRUSTED_DATA>"))
-        inner = out[len("<UNTRUSTED_DATA>"):-len("</UNTRUSTED_DATA>")]
+        inner = out[len("<UNTRUSTED_DATA>") : -len("</UNTRUSTED_DATA>")]
         self.assertEqual(json.loads(inner), {"name": "ACME"})
 
     def test_neutralises_literal_closing_tag_breakout(self):
@@ -165,12 +165,13 @@ class TestExtractPageContentPreflightSsrf(unittest.IsolatedAsyncioTestCase):
         engine = EnrichmentEngine.__new__(EnrichmentEngine)
         engine.client = None  # bypass GEMINI key init
 
-        with patch(
-            "src.scrapers.enrichment_engine.assert_safe_url",
-            new=AsyncMock(side_effect=SSRFError("private IP")),
-        ), patch(
-            "src.scrapers.enrichment_engine.async_playwright"
-        ) as mock_playwright:
+        with (
+            patch(
+                "src.scrapers.enrichment_engine.assert_safe_url",
+                new=AsyncMock(side_effect=SSRFError("private IP")),
+            ),
+            patch("src.scrapers.enrichment_engine.async_playwright") as mock_playwright,
+        ):
             result = await engine.extract_page_content("http://127.0.0.1/")
 
         self.assertEqual(result, "")

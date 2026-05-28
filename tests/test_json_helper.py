@@ -3,6 +3,7 @@ pulls a JSON object out of a raw LLM reply (markdown fences, surrounding
 prose, greedy-brace edge cases). Every assertion checks an actual
 parse outcome, not a coverage line.
 """
+
 from src.utils.json_helper import extract_json_from_response
 
 
@@ -12,7 +13,9 @@ def test_none_and_empty_return_none():
 
 
 def test_plain_json_object_parses():
-    assert extract_json_from_response('{"task": "STATUS_CHECK"}') == {"task": "STATUS_CHECK"}
+    assert extract_json_from_response('{"task": "STATUS_CHECK"}') == {
+        "task": "STATUS_CHECK"
+    }
 
 
 def test_json_inside_markdown_json_fence():
@@ -32,7 +35,10 @@ def test_json_embedded_in_prose_extracted_by_brace_balance():
 
 def test_nested_braces_balanced_correctly():
     text = 'noise {"outer": {"inner": {"deep": 9}}, "k": "v"} trailing'
-    assert extract_json_from_response(text) == {"outer": {"inner": {"deep": 9}}, "k": "v"}
+    assert extract_json_from_response(text) == {
+        "outer": {"inner": {"deep": 9}},
+        "k": "v",
+    }
 
 
 def test_first_valid_object_wins_when_multiple_present():

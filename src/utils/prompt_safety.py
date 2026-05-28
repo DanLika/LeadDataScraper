@@ -17,6 +17,7 @@ See CLAUDE.md "Gemini call hardening" section + the
 `tests/test_prompt_injection_corpus.py` 15-payload suite that
 exercises this surface end-to-end.
 """
+
 import json
 
 

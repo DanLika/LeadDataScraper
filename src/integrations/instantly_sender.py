@@ -13,6 +13,7 @@ Phase 14.1 — bulk-push endpoint only. Webhook handler ships in Phase
 
 API reference: https://developer.instantly.ai/api/v2
 """
+
 from __future__ import annotations
 
 import logging
@@ -190,12 +191,12 @@ class InstantlyDispatcher(EmailDispatcher):
                 "default_campaign_id="
             )
         if not self.api_key:
-            raise ValueError(
-                "INSTANTLY_API_KEY not configured (env or constructor)"
-            )
+            raise ValueError("INSTANTLY_API_KEY not configured (env or constructor)")
         if not leads:
             return InstantlyPushResult(
-                success_count=0, skipped_suppressed=0, failed_count=0,
+                success_count=0,
+                skipped_suppressed=0,
+                failed_count=0,
                 dry_run=self.dry_run,
             )
 
@@ -232,7 +233,9 @@ class InstantlyDispatcher(EmailDispatcher):
         if self.dry_run:
             logger.info(
                 "InstantlyDispatcher.dry_run: would push %d leads to campaign %s (skipped %d suppressed)",
-                len(payloads), target_campaign, skipped_count,
+                len(payloads),
+                target_campaign,
+                skipped_count,
                 extra={"campaign_id": target_campaign, "skipped": skipped_count},
             )
             return InstantlyPushResult(
@@ -291,7 +294,9 @@ class InstantlyDispatcher(EmailDispatcher):
                 .in_("identifier_value", emails)
                 .execute()
             )
-            return {(r.get("identifier_value") or "").lower() for r in (rows.data or [])}
+            return {
+                (r.get("identifier_value") or "").lower() for r in (rows.data or [])
+            }
         except Exception:
             logger.exception("InstantlyDispatcher: suppression precheck failed")
             # Fail-OPEN intentionally: a transient PostgREST blip should
@@ -306,7 +311,9 @@ class InstantlyDispatcher(EmailDispatcher):
             return
         rows = [
             {
-                "recipient_domain": email.rsplit("@", 1)[-1].lower() if "@" in email else None,
+                "recipient_domain": email.rsplit("@", 1)[-1].lower()
+                if "@" in email
+                else None,
                 "provider": self.PROVIDER_NAME,
             }
             for email in emails
@@ -321,9 +328,7 @@ class InstantlyDispatcher(EmailDispatcher):
     def _session_context(self) -> Any:
         if self._injected_session is not None:
             return _AsyncSessionPassthrough(self._injected_session)
-        return aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self.timeout)
-        )
+        return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout))
 
     async def _post_batch(
         self,
@@ -347,34 +352,50 @@ class InstantlyDispatcher(EmailDispatcher):
         # this gate prevents a misconfig from redirecting the dispatch call
         # (carrying Authorization: Bearer) at a private-IP / metadata host.
         from src.utils.ssrf_guard import assert_safe_url
+
         await assert_safe_url(url)
         try:
             async with session.post(url, json=payload, headers=headers) as resp:
                 body = await _safe_json(resp)
                 if resp.status == 401:
-                    return 0, [
-                        InstantlyError(
-                            email=p.email,
-                            error_code="auth",
-                            error_message="Instantly auth failed (401)",
-                        ) for p in batch
-                    ], body
+                    return (
+                        0,
+                        [
+                            InstantlyError(
+                                email=p.email,
+                                error_code="auth",
+                                error_message="Instantly auth failed (401)",
+                            )
+                            for p in batch
+                        ],
+                        body,
+                    )
                 if resp.status == 429:
-                    return 0, [
-                        InstantlyError(
-                            email=p.email,
-                            error_code="rate_limit",
-                            error_message="Instantly rate-limited (429)",
-                        ) for p in batch
-                    ], body
+                    return (
+                        0,
+                        [
+                            InstantlyError(
+                                email=p.email,
+                                error_code="rate_limit",
+                                error_message="Instantly rate-limited (429)",
+                            )
+                            for p in batch
+                        ],
+                        body,
+                    )
                 if resp.status >= 400:
-                    return 0, [
-                        InstantlyError(
-                            email=p.email,
-                            error_code=f"http_{resp.status}",
-                            error_message=str(body.get("message") or body)[:512],
-                        ) for p in batch
-                    ], body
+                    return (
+                        0,
+                        [
+                            InstantlyError(
+                                email=p.email,
+                                error_code=f"http_{resp.status}",
+                                error_message=str(body.get("message") or body)[:512],
+                            )
+                            for p in batch
+                        ],
+                        body,
+                    )
 
                 # 2xx — Instantly returns
                 #   {"success": <int>, "errors": [{email, code, message}, ...]}
@@ -391,13 +412,18 @@ class InstantlyDispatcher(EmailDispatcher):
                 return success_count, errors, body
         except aiohttp.ClientError as exc:
             logger.exception("InstantlyDispatcher: HTTP transport error")
-            return 0, [
-                InstantlyError(
-                    email=p.email,
-                    error_code="transport",
-                    error_message=str(exc)[:512],
-                ) for p in batch
-            ], {}
+            return (
+                0,
+                [
+                    InstantlyError(
+                        email=p.email,
+                        error_code="transport",
+                        error_message=str(exc)[:512],
+                    )
+                    for p in batch
+                ],
+                {},
+            )
 
 
 # --- helpers --------------------------------------------------------------
@@ -405,6 +431,7 @@ class InstantlyDispatcher(EmailDispatcher):
 
 def _utc_iso_now() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 
