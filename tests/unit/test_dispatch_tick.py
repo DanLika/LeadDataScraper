@@ -221,5 +221,384 @@ class TestRunTick(unittest.TestCase):
         self.assertEqual(result.dispatched, 0)
 
 
+# ---------------------------------------------------------------------------
+# Issue #367 — per-lead error fan-out telemetry
+# ---------------------------------------------------------------------------
+
+
+def _aret(value):
+    """Wrap a value in an async-returning callable for mock side_effect."""
+    async def _f(*a, **kw):
+        return value
+    return _f
+
+
+def _araise(exc):
+    """Wrap an exception in an async-raising callable for mock side_effect."""
+    async def _f(*a, **kw):
+        raise exc
+    return _f
+
+
+class TestHandlePerLeadErrors(unittest.IsolatedAsyncioTestCase):
+    """Issue #367: per-lead error fan-out emits distinct telemetry
+    buckets — matched, single-batch fallback, unmatched (swallowed),
+    mark_send_failed no-op. None of them get merged into a single
+    catch-all counter."""
+
+    async def test_matched_email_marks_send_failed(self) -> None:
+        """Standard path: err.email matches a claimed message →
+        mark_send_failed called with concatenated error code+message;
+        swallowed counter stays 0 and result.errors stays empty."""
+        from src.workers.dispatch_tick import (
+            TickResult, _handle_per_lead_errors,
+        )
+        from src.repositories.campaign_message_repo import MarkResult
+
+        push_result = MagicMock()
+        push_result.errors = [
+            MagicMock(
+                email="a@x.com",
+                error_code="http_400",
+                error_message="invalid recipient",
+            ),
+        ]
+        message_ids = {"uk-1": "msg-1", "uk-2": "msg-2"}
+        emails = {"msg-1": "a@x.com", "msg-2": "b@x.com"}
+
+        msg_repo = MagicMock()
+        msg_repo.mark_send_failed = MagicMock(
+            side_effect=_aret(MarkResult(matched=True)),
+        )
+
+        result = TickResult()
+        await _handle_per_lead_errors(
+            push_result=push_result,
+            message_ids=message_ids,
+            emails_by_msg_id=emails,
+            msg_repo=msg_repo,
+            result=result,
+        )
+
+        msg_repo.mark_send_failed.assert_called_once_with(
+            "msg-1", error="http_400:invalid recipient",
+        )
+        self.assertEqual(result.swallowed, 0)
+        self.assertEqual(result.errors, [])
+
+    async def test_unmatched_multi_batch_counts_swallowed(self) -> None:
+        """Multi-claim batch + error with unknown email →
+        ``result.swallowed += 1`` AND ``result.errors`` gets a
+        ``push_leads_unmatched:<code>`` entry. mark_send_failed is
+        NOT called (we don't know which row failed). Distinct from
+        any other failure bucket. WARNING surfaces the orphaned
+        claim so operators see it without a wrapper script."""
+        from src.workers.dispatch_tick import (
+            TickResult, _handle_per_lead_errors,
+        )
+
+        push_result = MagicMock()
+        push_result.errors = [
+            MagicMock(
+                email="ghost@nowhere.com",
+                error_code="http_422",
+                error_message="validation failed",
+            ),
+        ]
+        message_ids = {"uk-1": "msg-1", "uk-2": "msg-2"}
+        emails = {"msg-1": "a@x.com", "msg-2": "b@x.com"}
+
+        msg_repo = MagicMock()
+        msg_repo.mark_send_failed = MagicMock()
+
+        result = TickResult()
+        with self.assertLogs(
+            "src.workers.dispatch_tick", level="WARNING",
+        ) as logs:
+            await _handle_per_lead_errors(
+                push_result=push_result,
+                message_ids=message_ids,
+                emails_by_msg_id=emails,
+                msg_repo=msg_repo,
+                result=result,
+            )
+
+        msg_repo.mark_send_failed.assert_not_called()
+        self.assertEqual(result.swallowed, 1)
+        self.assertEqual(result.errors, ["push_leads_unmatched:http_422"])
+        self.assertTrue(
+            any(
+                "unknown email" in r.getMessage()
+                for r in logs.records
+            ),
+            msg=f"records={[r.getMessage() for r in logs.records]}",
+        )
+
+    async def test_unmatched_single_batch_fallback_marks(self) -> None:
+        """Single claim + single error with unknown email →
+        fallback assigns the error to the lone claimed msg,
+        mark_send_failed IS called, swallowed stays 0, WARNING
+        logged about the fallback. Mirrors the Issue #367 evidence
+        scenario."""
+        from src.workers.dispatch_tick import (
+            TickResult, _handle_per_lead_errors,
+        )
+        from src.repositories.campaign_message_repo import MarkResult
+
+        push_result = MagicMock()
+        push_result.errors = [
+            MagicMock(
+                email="DIFFERENT@x.com",
+                error_code="http_402",
+                error_message="paid plan required",
+            ),
+        ]
+        message_ids = {"uk-1": "msg-1"}
+        emails = {"msg-1": "actual@x.com"}
+
+        msg_repo = MagicMock()
+        msg_repo.mark_send_failed = MagicMock(
+            side_effect=_aret(MarkResult(matched=True)),
+        )
+
+        result = TickResult()
+        with self.assertLogs(
+            "src.workers.dispatch_tick", level="WARNING",
+        ) as logs:
+            await _handle_per_lead_errors(
+                push_result=push_result,
+                message_ids=message_ids,
+                emails_by_msg_id=emails,
+                msg_repo=msg_repo,
+                result=result,
+            )
+
+        msg_repo.mark_send_failed.assert_called_once_with(
+            "msg-1", error="http_402:paid plan required",
+        )
+        self.assertEqual(result.swallowed, 0)
+        self.assertEqual(result.errors, [])
+        self.assertTrue(
+            any(
+                "single-message fallback" in r.getMessage()
+                for r in logs.records
+            ),
+            msg=f"records={[r.getMessage() for r in logs.records]}",
+        )
+
+    async def test_mark_send_failed_no_match_distinct_bucket(self) -> None:
+        """Matched email but ``mark_send_failed`` returns
+        ``matched=False`` (row already transitioned mid-tick) →
+        ``result.errors`` gets ``mark_send_failed_noop:<code>``,
+        DISTINCT from ``push_leads_unmatched``. ``swallowed`` stays
+        0 — we DID find the row, just couldn't update it."""
+        from src.workers.dispatch_tick import (
+            TickResult, _handle_per_lead_errors,
+        )
+        from src.repositories.campaign_message_repo import MarkResult
+
+        push_result = MagicMock()
+        push_result.errors = [
+            MagicMock(
+                email="a@x.com",
+                error_code="http_429",
+                error_message="rate limit",
+            ),
+        ]
+        message_ids = {"uk-1": "msg-1"}
+        emails = {"msg-1": "a@x.com"}
+
+        msg_repo = MagicMock()
+        msg_repo.mark_send_failed = MagicMock(
+            side_effect=_aret(
+                MarkResult(matched=False, error="not_dispatching"),
+            ),
+        )
+
+        result = TickResult()
+        await _handle_per_lead_errors(
+            push_result=push_result,
+            message_ids=message_ids,
+            emails_by_msg_id=emails,
+            msg_repo=msg_repo,
+            result=result,
+        )
+
+        self.assertEqual(result.swallowed, 0)
+        self.assertEqual(result.errors, ["mark_send_failed_noop:http_429"])
+
+    async def test_no_errors_no_op(self) -> None:
+        """``push_result.errors`` empty → no DB calls, no log lines,
+        no result mutations."""
+        from src.workers.dispatch_tick import (
+            TickResult, _handle_per_lead_errors,
+        )
+
+        push_result = MagicMock()
+        push_result.errors = []
+
+        msg_repo = MagicMock()
+        msg_repo.mark_send_failed = MagicMock()
+
+        result = TickResult()
+        await _handle_per_lead_errors(
+            push_result=push_result,
+            message_ids={"uk-1": "msg-1"},
+            emails_by_msg_id={"msg-1": "a@x.com"},
+            msg_repo=msg_repo,
+            result=result,
+        )
+        msg_repo.mark_send_failed.assert_not_called()
+        self.assertEqual(result.swallowed, 0)
+        self.assertEqual(result.errors, [])
+
+
+class TestRunTickExceptionPath(unittest.IsolatedAsyncioTestCase):
+    """Issue #367: push_leads RAISES (network/transport) →
+    ``dispatch_failed:X`` bucket in ``result.errors``, ``swallowed``
+    stays 0, per-lead fan-out NOT reached so ``mark_send_failed``
+    never called."""
+
+    async def test_push_leads_raise_dispatch_failed_distinct_from_swallowed(
+        self,
+    ) -> None:
+        from src.workers.dispatch_tick import run_tick
+
+        claim_row = {
+            "id": "msg-1",
+            "lead_unique_key": "uk-1",
+            "step_id": "step-1",
+            "tracking_id": "trk-1",
+        }
+
+        fake_msg_repo = MagicMock()
+        fake_msg_repo.sweep_stale_claims = MagicMock(side_effect=_aret(0))
+        fake_msg_repo.claim_due_batch = MagicMock(side_effect=_aret([claim_row]))
+        fake_msg_repo.fetch_many = MagicMock(side_effect=_aret({}))
+        fake_msg_repo.mark_send_failed = MagicMock()
+
+        fake_lead_repo = MagicMock()
+        fake_lead_repo.fetch_many = MagicMock(
+            side_effect=_aret(
+                {"uk-1": {"email": "a@x.com", "timezone": "UTC"}},
+            ),
+        )
+
+        step_obj = MagicMock()
+        step_obj.send_window_start = "09:00"
+        step_obj.send_window_end = "17:00"
+        step_obj.send_days = "mon,tue,wed,thu,fri,sat,sun"
+        fake_step_repo = MagicMock()
+        fake_step_repo.fetch_many = MagicMock(
+            side_effect=_aret({"step-1": step_obj}),
+        )
+
+        var_obj = MagicMock(content_type="text")
+        fake_variant_repo = MagicMock()
+        fake_variant_repo.fetch_many_for_steps = MagicMock(
+            side_effect=_aret({"step-1": [var_obj]}),
+        )
+
+        fake_sup_repo = MagicMock()
+        fake_sup_repo.filter_suppressed = MagicMock(
+            side_effect=_aret(([], [])),
+        )
+
+        payload = MagicMock()
+        payload.as_lead_dict.return_value = {"email": "a@x.com"}
+        payload.list_unsubscribe_url = ""
+
+        dispatcher = MagicMock()
+        dispatcher.push_leads = MagicMock(
+            side_effect=_araise(RuntimeError("boom")),
+        )
+
+        with patch(
+            "src.repositories.campaign_message_repo.CampaignMessageRepository",
+            return_value=fake_msg_repo,
+        ), patch(
+            "src.repositories.suppression_repo.SuppressionRepository",
+            return_value=fake_sup_repo,
+        ), patch(
+            "src.repositories.lead_repo.LeadRepository",
+            return_value=fake_lead_repo,
+        ), patch(
+            "src.repositories.sequence_step_repo.SequenceStepRepository",
+            return_value=fake_step_repo,
+        ), patch(
+            "src.repositories.sequence_variant_repo.SequenceVariantRepository",
+            return_value=fake_variant_repo,
+        ), patch(
+            "src.workers.dispatch_tick._window_check_for_step",
+            return_value=(True, None),
+        ), patch(
+            "src.services.variant_selector.select_variant",
+            return_value=var_obj,
+        ), patch(
+            "src.services.thread_builder.build_send_payload",
+            return_value=payload,
+        ), patch(
+            "src.utils.unsubscribe_tokens.build_unsubscribe_url",
+            return_value="",
+        ):
+            result = await run_tick(
+                db_client=MagicMock(),
+                dispatcher=dispatcher,
+                batch_size=10,
+                claim_timeout_min=15,
+                max_runtime_sec=10,
+                now_iso="2026-05-27T10:00:00+00:00",
+            )
+
+        # Exception path → distinct dispatch_failed:X bucket.
+        self.assertTrue(
+            any(e.startswith("dispatch_failed:") for e in result.errors),
+            msg=f"expected dispatch_failed:* in errors, got {result.errors}",
+        )
+        # NOT merged into swallowed — that bucket only fills from
+        # unmatched per-lead errors after a successful push_leads call.
+        self.assertEqual(result.swallowed, 0)
+        # Per-lead fan-out skipped on exception path.
+        fake_msg_repo.mark_send_failed.assert_not_called()
+
+
+class TestSummaryLogOnEveryReturn(unittest.IsolatedAsyncioTestCase):
+    """Issue #367: ``dispatch_tick summary`` INFO log emitted on EVERY
+    return path (try/finally), even early exits like
+    ``db_client_unavailable``. Operator sees the tick outcome
+    without instrumenting a wrapper script."""
+
+    async def test_summary_log_emitted_on_db_unavailable_early_return(
+        self,
+    ) -> None:
+        from src.workers.dispatch_tick import run_tick
+
+        with patch(
+            "src.workers.dispatch_tick._resolve_db_client",
+            return_value=None,
+        ):
+            with self.assertLogs(
+                "src.workers.dispatch_tick", level="INFO",
+            ) as logs:
+                result = await run_tick(db_client=None, dispatcher=None)
+
+        self.assertIn("db_client_unavailable", result.errors)
+        summary = [
+            r for r in logs.records
+            if r.getMessage() == "dispatch_tick summary"
+        ]
+        self.assertEqual(
+            len(summary), 1,
+            msg=f"expected 1 summary log, got {len(summary)}",
+        )
+        # Summary attaches result.as_dict() as record attributes via
+        # ``extra=``; check the key fields propagated.
+        rec = summary[0]
+        self.assertEqual(getattr(rec, "claimed", None), 0)
+        self.assertEqual(getattr(rec, "dispatched", None), 0)
+        self.assertEqual(getattr(rec, "swallowed", None), 0)
+        self.assertIn("db_client_unavailable", getattr(rec, "errors", []))
+
+
 if __name__ == "__main__":
     unittest.main()
