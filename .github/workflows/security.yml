@@ -403,7 +403,12 @@ jobs:
             | sudo tar -xz -C /usr/local/bin gitleaks
           gitleaks version
       - name: Scan full history
-        run: gitleaks detect --no-banner --redact --verbose --exit-code 1
+        # `--baseline-path` mirrors ci.yml: suppresses already-triaged
+        # findings (rotated tokens + test fixtures) while keeping the
+        # exit-1-on-new-finding gate. Daily cron still catches drift.
+        run: |
+          gitleaks detect --no-banner --redact --verbose --exit-code 1 \
+            --baseline-path .gitleaks-baseline.json
 
   semgrep:
     name: semgrep (SAST)
