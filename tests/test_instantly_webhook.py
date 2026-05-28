@@ -594,6 +594,184 @@ class TestEventTransitions:
 
 
 # ---------------------------------------------------------------------------
+# Transport-error mid-processing (Issue #368)
+# ---------------------------------------------------------------------------
+
+
+class TestTransportErrorMidProcessing:
+    """Issue #368: when a handler hits an httpx/httpcore transport error
+    DURING side-effect work (e.g. supabase-py drops the response on a
+    ``campaign_messages`` UPDATE), the row in ``webhook_events`` must
+    keep ``processed_at NULL`` so the sweeper's
+    ``idx_webhook_events_unprocessed`` scan re-claims it.
+
+    Pre-fix behavior: the broad ``except Exception`` always stamped
+    ``processed_at`` + ``processing_error``, marking the event "done"
+    while the side-effect may or may not have committed → permanent
+    state loss.
+
+    Distinction pinned here:
+      * Transport-class exception → leave ``processed_at`` NULL.
+        Handlers are predicate-idempotent, so sweeper re-fire is safe
+        even when the original write DID commit.
+      * Genuine handler-logic exception → still stamp ``processed_at``
+        + ``processing_error``. Poison messages must not loop.
+    """
+
+    def test_transport_error_during_handler_leaves_processed_at_null(
+        self, client, _patch_db_and_limiter, monkeypatch,
+    ):
+        import httpx
+        import main as backend_main
+
+        async def boom(*_args, **_kwargs):
+            raise httpx.RemoteProtocolError("Server disconnected mid-UPDATE")
+
+        monkeypatch.setattr(
+            backend_main, "_instantly_handle_sent", boom, raising=True,
+        )
+
+        body = _body(
+            "evt-transport-proc", "email_sent",
+            provider_message_id="instantly-msg-tp",
+            recipient_email="r@x.com",
+            sent_at="2026-05-27T12:00:00Z",
+            custom_variables={"lds_message_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
+        )
+        resp = client.post(
+            "/webhooks/instantly",
+            content=body,
+            headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
+        )
+        # Inbound INSERT succeeds; BackgroundTask runs in TestClient.
+        assert resp.status_code == 200
+
+        webhook_updates = [
+            u for u in _patch_db_and_limiter.updates
+            if u[0] == "webhook_events"
+        ]
+        # The checkpoint UPDATE on webhook_events MUST be skipped for
+        # transport-class errors. Any update stamping processed_at
+        # would mask the row from the sweeper.
+        assert not any(
+            "processed_at" in u[1] for u in webhook_updates
+        ), (
+            "transport error mid-processing must NOT stamp processed_at; "
+            f"got updates={webhook_updates}"
+        )
+
+    def test_non_transport_error_still_checkpoints_processed_at(
+        self, client, _patch_db_and_limiter, monkeypatch,
+    ):
+        """Counter-pin: genuine handler bug (poison message) MUST still
+        checkpoint, otherwise it would loop forever through the sweeper."""
+        import main as backend_main
+
+        async def boom(*_args, **_kwargs):
+            raise ValueError("malformed payload field")
+
+        monkeypatch.setattr(
+            backend_main, "_instantly_handle_sent", boom, raising=True,
+        )
+
+        body = _body(
+            "evt-poison-1", "email_sent",
+            provider_message_id="instantly-msg-poison",
+            recipient_email="r@x.com",
+            custom_variables={"lds_message_id": "11111111-2222-3333-4444-555555555555"},
+        )
+        resp = client.post(
+            "/webhooks/instantly",
+            content=body,
+            headers={"X-Signature": _sign(body), "X-Timestamp": _now_ts()},
+        )
+        assert resp.status_code == 200
+
+        webhook_updates = [
+            u for u in _patch_db_and_limiter.updates
+            if u[0] == "webhook_events"
+        ]
+        stamping = [u for u in webhook_updates if "processed_at" in u[1]]
+        assert len(stamping) == 1, (
+            f"non-transport handler error must still checkpoint; got {webhook_updates}"
+        )
+        # processing_error captured so the row carries the poison cause.
+        assert "ValueError" in (stamping[0][1].get("processing_error") or "")
+
+    @pytest.mark.asyncio
+    async def test_sweeper_reclaims_unstamped_row_after_transport_error(
+        self, monkeypatch,
+    ):
+        """End-to-end: a row left ``processed_at IS NULL`` by the
+        transport-error path is what the sweeper's
+        ``.is_("processed_at", "null")`` predicate picks up. Pins that
+        the sweeper actually re-fires ``_process_instantly_event`` for
+        such rows so the side-effect gets another shot."""
+        from datetime import datetime, timedelta, timezone
+        from src.workers.webhook_sweeper import sweep_once
+
+        # Row simulating a transport-stranded webhook_events entry:
+        # past the grace window + processed_at NULL.
+        stranded = {
+            "id": 42,
+            "provider": "instantly",
+            "event_id": "evt-transport-stranded",
+            "event_type": "email_sent",
+            "payload": {
+                "event_id": "evt-transport-stranded",
+                "event_type": "email_sent",
+                "recipient_email": "r@x.com",
+                "custom_variables": {"lds_message_id": "ccc"},
+            },
+            "received_at": (
+                datetime.now(timezone.utc) - timedelta(seconds=180)
+            ).isoformat(),
+        }
+
+        chain = MagicMock()
+        chain.select.return_value = chain
+        captured: dict[str, Any] = {}
+
+        def _is(col, val, c=chain):
+            captured.setdefault("is_", []).append((col, val))
+            return c
+
+        def _lt(col, val, c=chain):
+            captured.setdefault("lt", []).append((col, val))
+            return c
+
+        chain.is_.side_effect = _is
+        chain.lt.side_effect = _lt
+        chain.order.return_value = chain
+        chain.limit.return_value = chain
+        chain.execute.return_value = MagicMock(data=[stranded])
+
+        db = MagicMock()
+        db.client = MagicMock()
+        db.client.table.return_value = chain
+
+        recorder: list[tuple[str, dict]] = []
+
+        async def fake_proc(*, event_id: str, payload: dict) -> None:
+            recorder.append((event_id, dict(payload)))
+
+        result = await sweep_once(
+            db=db,
+            process_instantly_event=fake_proc,
+            grace_seconds=60,
+        )
+
+        # Sweeper's claim predicate matched ``processed_at IS NULL``.
+        assert ("processed_at", "null") in captured.get("is_", []), (
+            f"sweeper must filter by processed_at IS NULL; got {captured}"
+        )
+        # Stranded row dispatched back to the handler.
+        assert result.scanned == 1
+        assert result.processed == 1
+        assert recorder == [("evt-transport-stranded", stranded["payload"])]
+
+
+# ---------------------------------------------------------------------------
 # Malformed input
 # ---------------------------------------------------------------------------
 
