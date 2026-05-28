@@ -18,7 +18,10 @@
 #   make lock-python   # regenerates requirements.txt with hashes
 
 pandas==2.3.3
-numpy==2.4.6
+# numpy >=2.3 requires Python >=3.11; production Dockerfile runs py3.10.
+# Cap floor + ceiling so future Dependabot bumps cannot exceed the runtime.
+# Lift this cap if/when the Dockerfile base image moves to py3.11+.
+numpy>=2.2.3,<2.3
 requests==2.34.2
 beautifulsoup4==4.13.3
 lxml==6.1.1
