@@ -75,6 +75,45 @@ WHERE ns.nspname='public'
 -- expect campaign_messages_status_allowed to include 'cancelled' + 'failed_render' + 'failed_dispatch'
 ```
 
+## Post-apply CHECK-constraint verification (MANDATORY for regex / IN-list CHECKs)
+
+Any migration that lands regex or IN-list literal CHECKs MUST be followed by:
+
+```bash
+SUPABASE_ACCESS_TOKEN=sbp_... make verify-prod-constraints
+```
+
+This catches the **apostrophe-double-escape bug class** (PR #366,
+`scripts/migrations/2026-05-27_apostrophe-fix-and-leads-last-name.sql`)
+where the apply path silently doubles `'` inside CHECK literals →
+stored predicate becomes `'''pattern'''` → rejects every valid INSERT,
+including the column default. Discovered post-Phase 14+15 apply when
+`sequence_steps_send_days_format` rejected `mon,tue,wed,thu,fri` and
+`sequence_variants_content_type_allowed` rejected `'text'`, stranding
+the entire dispatcher pipeline.
+
+The verifier (`scripts/migrations/_verify_constraints.py`) has two
+layers:
+
+1. **Stored-DEF inspection** — pulls `pg_get_constraintdef(oid)` for
+   each tracked CHECK, asserts (a) no triple-apostrophe smell `'''`
+   in the DEF and (b) the canonical form matches an expected regex.
+   Zero side effects.
+2. **INSERT probe** — for each constraint, attempts a positive value
+   that MUST pass + a negative that MUST reject, inside a
+   `DO $$ ... RAISE EXCEPTION` block so the whole txn rolls back —
+   no row ever commits.
+
+First-time setup: run `make verify-prod-constraints-canary` to confirm
+the Management API echoes `RAISE EXCEPTION` messages verbatim. If it
+doesn't, Layer 2 degrades to SKIP and Layer 1 carries the load
+alone — still sufficient for the apostrophe-double-escape bug class.
+
+Adding a new constraint? Append a `Probe` entry to the `PROBES` list
+in `_verify_constraints.py` with the positive / negative test values
+and the expected DEF regex. Update only when the source migration
+also changes — never to silence a finding.
+
 ## Down-migration (rollback)
 
 The Phase 14.2 rename `email_suppression → suppressions` is destructive (no easy revert if rows were written under the new name). All other adds are reversible via:
