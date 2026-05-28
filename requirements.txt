@@ -471,6 +471,10 @@ deprecation==2.1.0 \
     # via
     #   postgrest
     #   storage3
+distro==1.9.0 \
+    --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
+    --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
+    # via google-genai
 exceptiongroup==1.3.1 \
     --hash=sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219 \
     --hash=sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598
@@ -626,9 +630,9 @@ google-auth==2.53.0 \
     --hash=sha256:6e7449917c599b35126a99ec268ec6880301f2fea41dce198fe8fd83ff642b68 \
     --hash=sha256:e7e6aa16f6bee7b2b264830fd04f08087a1d5a836df516251a5d15327b246c9c
     # via google-genai
-google-genai==1.12.1 \
-    --hash=sha256:5c7eda422360643ce602a3f6b23152470ec1039310ef40080cbe4e71237f6391 \
-    --hash=sha256:7cbc1bc029712946ce41bcf80c0eaa89eb8c09c308efbbfe30fd491f402c258a
+google-genai==2.6.0 \
+    --hash=sha256:272b6f6320f5d355735241ad441f972af095ec80dc10cb075cb430d96721648a \
+    --hash=sha256:7d4f777234002f2e94be499dbdfb43b506a6aca9dbbec13e61d3dc6ce640ffa7
     # via -r requirements.in
 greenlet==3.5.1 \
     --hash=sha256:001775efe7b8e758861294c7a27c28af87f3f3f1c20468a2bc618c45b346c061 \
@@ -1845,6 +1849,7 @@ requests==2.34.2 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
     # via
     #   -r requirements.in
+    #   google-auth
     #   google-genai
     #   pyiceberg
 rich==14.3.4 \
@@ -1863,6 +1868,10 @@ slowapi==0.1.9 \
     --hash=sha256:639192d0f1ca01b1c6d95bf6c71d794c3a9ee189855337b4821f7f457dddad77 \
     --hash=sha256:cfad116cfb84ad9d763ee155c1e5c5cbf00b0d47399a769b227865f5df576e36
     # via -r requirements.in
+sniffio==1.3.1 \
+    --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2 \
+    --hash=sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc
+    # via google-genai
 soupsieve==2.8.4 \
     --hash=sha256:e121fd02e975c695e4e9e8774a5ee35d74714b59307868dcc5319ad2d9e3328e \
     --hash=sha256:e7e6b0769c8f51ed59acab6e994b00621096cfb1c640a7509295987388fbaf65
@@ -1902,7 +1911,9 @@ supabase-functions==2.30.0 \
 tenacity==9.1.4 \
     --hash=sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55 \
     --hash=sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a
-    # via pyiceberg
+    # via
+    #   google-genai
+    #   pyiceberg
 tomli==2.4.1 \
     --hash=sha256:01f520d4f53ef97964a240a035ec2a869fe1a37dde002b57ebc4417a27ccd853 \
     --hash=sha256:0d85819802132122da43cb86656f8d1f8c6587d54ae7dcaf30e90533028b49fe \
