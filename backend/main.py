@@ -1376,6 +1376,7 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
     )[:64] or datetime.now(timezone.utc).isoformat()
 
     error_message: Optional[str] = None
+    transport_error = False
     try:
         if event_type == "email_sent":
             await _instantly_handle_sent(
@@ -1393,11 +1394,40 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
             await _instantly_handle_replied(provider_msg_id)
         # Else: unhandled type — already logged at handler entry.
     except Exception as exc:  # noqa: BLE001 — record + skip; sweeper retries
-        logger.exception("instantly event %s processing failed", event_type)
-        error_message = f"{type(exc).__name__}: {exc!s}"[:1024]
+        if _is_transport_error(exc):
+            # Issue #368: side-effect (campaign_messages UPDATE,
+            # suppression INSERT) may or may not have committed before
+            # the response was dropped. Leaving processed_at NULL lets
+            # the sweeper re-claim the row; handlers are predicate-
+            # idempotent (mark_sent gates on provider_message_id IS
+            # NULL; suppression upsert ignore_duplicates), so re-firing
+            # is safe even when the original write DID commit.
+            transport_error = True
+            logger.warning(
+                "instantly event %s transport error mid-processing; "
+                "leaving processed_at NULL for sweeper retry",
+                event_type,
+                extra={
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+        else:
+            logger.exception("instantly event %s processing failed", event_type)
+            error_message = f"{type(exc).__name__}: {exc!s}"[:1024]
 
-    # Checkpoint processing on the event row regardless of branch
-    # outcome. Failure mode: processed_at NULL + error stored.
+    if transport_error:
+        # Skip the checkpoint UPDATE entirely so the sweeper's
+        # idx_webhook_events_unprocessed scan picks the row back up.
+        # Genuine handler-logic errors still fall through to stamp
+        # (processed_at + processing_error) — poison messages should
+        # NOT retry indefinitely.
+        return
+
+    # Checkpoint processing on the event row. On success: processed_at
+    # set + error_message NULL. On non-transport handler error:
+    # processed_at set + processing_error populated (poison-pill gate).
     try:
         await asyncio.to_thread(
             lambda: (
