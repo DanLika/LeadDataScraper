@@ -101,3 +101,13 @@ frontend/.cx_*.config.mjs
 # Mutation testing (mutmut)
 .mutmut-cache
 html/
+
+# Test harness (parallel-terminal QA sweep)
+# _test_account.md may contain operator credentials — never commit.
+# _auth_method.md holds the magic-link mint recipe + session-cookie format;
+#   also references live tokens via /tmp paths — keep local-only.
+# _summary.json + TEST_RESULTS.md are aggregator outputs regenerated per run.
+test-results/_test_account.md
+test-results/_auth_method.md
+test-results/_summary.json
+TEST_RESULTS.md
