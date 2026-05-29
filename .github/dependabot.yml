@@ -19,9 +19,40 @@ version: 2
 
 updates:
   # Python — pip resolves requirements.txt + the transitive tree.
-  # The pip-audit job in ci.yml + security.yml will already block any
-  # bump that introduces a known CVE, so even an auto-merged patch
-  # update can't ship a vulnerable dep.
+  # The pip-audit job in ci.yml + security.yml blocks any bump that
+  # introduces a known CVE, so an auto-merged patch can't ship a CVE.
+  #
+  # KNOWN LIMITATION (PR #220 numpy 2.4.6 incident, 2026-05-28):
+  # Dependabot's pip ecosystem only knows about requirements.txt — it
+  # cannot read or write requirements.in. Bumps therefore land in the
+  # LOCKFILE only, leaving the source-of-truth (requirements.in) stale.
+  # numpy 2.4 dropped Python 3.10 support, the bot bumped requirements.txt
+  # while requirements.in still said "numpy>=2.2", and 5 Render deploys
+  # failed before the rollback.
+  #
+  # MITIGATION (two gates, defense-in-depth):
+  #   1. `requirements.txt ↔ requirements.in sync` job in ci.yml re-runs
+  #      pip-compile on every PR touching requirements.{in,txt} and fails
+  #      when the regenerated lockfile differs from the committed one.
+  #      Catches Dependabot bumps that requirements.in's pins refuse.
+  #   2. `dependabot-pip-route-check.yml` enforces the upstream invariant:
+  #      a PR that edits requirements.txt MUST also edit requirements.in
+  #      (or include `[skip-route-check]` in a commit message). Catches
+  #      Dependabot bumps that drift would coincidentally green-light
+  #      because requirements.in's pins are too loose.
+  #
+  # Both gates block auto-merge via branch protection on `main`. Operator
+  # workflow on a red Dependabot pip PR: apply the same version pin to
+  # requirements.in, run `make lock-python`, force-push — or reject.
+  #
+  # WARNING: do NOT bypass these gates via admin-merge. PR #220
+  # (numpy 2.4.6 / Py3.10) shipped via that path and broke 5 deploys.
+  # The gates exist BECAUSE manual review missed Py-compat regression.
+  #
+  # Future improvement: a workflow that auto-mirrors Dependabot's
+  # requirements.txt bump into requirements.in + regenerates the lockfile,
+  # so the gate becomes self-healing. Not wired yet — manual rebase is
+  # acceptable for ~5 pip PRs/week.
   - package-ecosystem: pip
     directory: /
     schedule:
