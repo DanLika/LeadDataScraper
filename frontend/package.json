@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test utils/supabase/cookie-floor.test.mjs utils/url.test.mjs",
+    "test": "node --test app/lib/supabase/cookie-floor.test.mjs app/lib/url.test.mjs",
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium firefox webkit",
     "e2e:trace": "playwright show-trace test-results/.last-run/trace.zip || playwright show-report",
