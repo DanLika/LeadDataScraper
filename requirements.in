@@ -82,7 +82,7 @@ pytest-asyncio>=1.0,<2.0
 # pinned for --require-hashes to succeed.
 # pytest 9.0.3 closes CVE-2025-71176; dev-only (no runtime exposure).
 pytest==9.0.3
-iniconfig==2.0.0
+iniconfig==2.3.0
 pluggy==1.6.0
 # pytest-asyncio 1.4.0+ added a conditional transitive that resolves on
 # python<3.11 (our Render Docker base = python:3.10). The dep spec is a
