@@ -941,28 +941,84 @@ async def submit_web_vitals(request: Request, metric: WebVitalsMetric):
 #                                   the same 90-day TTL.
 # ---------------------------------------------------------------------------
 
+# Shared style block for the three unsubscribe pages. Inline `<style>` is
+# explicitly allowed by `_UNSUB_HTML_HEADERS` (`style-src 'unsafe-inline'`);
+# no external resources, no JS — matches the tight `default-src 'none'` floor.
+# Recipients land here from a transactional email link, often on phones;
+# fontSize ≥ 16 px (root) avoids iOS Safari auto-zoom-on-focus, button
+# min-height 48 px ≥ WCAG 2.5.5 + Apple HIG 44 px floor, viewport meta turns
+# the page from "1995 raw HTML" into a responsive shell. Honours
+# `prefers-color-scheme: dark` and `prefers-reduced-motion`.
+_UNSUB_BASE_STYLE = (
+    "*,*::before,*::after{box-sizing:border-box}"
+    "html,body{margin:0;padding:0}"
+    "body{min-height:100dvh;display:grid;place-items:center;"
+    "padding:clamp(1rem,4vw,2rem);"
+    "background:#f5f4ef;color:#1a1a22;"
+    "font:16px/1.55 -apple-system,BlinkMacSystemFont,\"Segoe UI\","
+    "Roboto,Helvetica,Arial,sans-serif}"
+    "main{width:min(440px,100%);background:#fff;border:1px solid #e6e4dc;"
+    "border-left:4px solid hsl(234,89%,64%);border-radius:14px;"
+    "padding:clamp(1.5rem,4vw,2.5rem);"
+    "box-shadow:0 1px 2px rgba(20,20,30,.04),0 8px 24px -16px rgba(20,20,30,.12)}"
+    "h1{margin:0;letter-spacing:-.01em;"
+    "font:600 clamp(1.5rem,4vw,1.875rem)/1.15 Georgia,Cambria,"
+    "\"Liberation Serif\",serif}"
+    "p{margin:.875rem 0 0;color:#52525e;font-size:.9375rem;line-height:1.6}"
+    "form{margin-top:1.5rem}"
+    "button{width:100%;min-height:48px;padding:.75rem 1.25rem;"
+    "font:600 16px/1.2 inherit;color:#fff;"
+    "background:hsl(234,89%,64%);border:0;border-radius:10px;"
+    "cursor:pointer;-webkit-tap-highlight-color:transparent;"
+    "transition:background-color .15s ease}"
+    "button:hover{background:hsl(234,89%,58%)}"
+    "button:focus-visible{outline:2px solid hsl(234,89%,64%);outline-offset:3px}"
+    "@media (prefers-color-scheme:dark){"
+    "body{background:#0e0e16;color:#e8e8ee}"
+    "main{background:#16161f;border-color:#23232d;"
+    "box-shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -16px rgba(0,0,0,.6)}"
+    "p{color:#a8a8b3}}"
+    "@media (prefers-reduced-motion:reduce){"
+    "*,*::before,*::after{transition:none!important;animation:none!important}}"
+)
+
+
+def _unsub_page(title: str, h1: str, body_html: str) -> str:
+    return (
+        '<!doctype html><html lang="en"><head>'
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{title}</title>"
+        f"<style>{_UNSUB_BASE_STYLE}</style>"
+        "</head>"
+        f"<body><main><h1>{h1}</h1>{body_html}</main></body></html>"
+    )
+
+
 # Generic body for every failure — operator can grep logs for the specific
 # stage that failed without leaking it to attackers via response text.
-_UNSUB_FAILURE_HTML = (
-    '<!doctype html><html><head><meta charset="utf-8"><title>Unsubscribe</title></head>'
-    "<body><h1>Link expired</h1>"
+_UNSUB_FAILURE_HTML = _unsub_page(
+    "Unsubscribe",
+    "Link expired",
     "<p>This unsubscribe link is no longer valid. If you continue to receive "
-    "messages, reply STOP to the next one or contact the sender directly.</p>"
-    "</body></html>"
+    "messages, reply STOP to the next one or contact the sender directly.</p>",
 )
 
 # Confirmation page rendered on GET. POSTs back to the same URL.
-_UNSUB_CONFIRM_HTML = (
-    '<!doctype html><html><head><meta charset="utf-8"><title>Unsubscribe</title></head>'
-    "<body><h1>Confirm unsubscribe</h1>"
-    '<form method="post" action=""><button type="submit">Unsubscribe me</button></form>'
-    "</body></html>"
+_UNSUB_CONFIRM_HTML = _unsub_page(
+    "Unsubscribe",
+    "Confirm unsubscribe",
+    "<p>Click the button below to stop receiving messages from this sender. "
+    "You can close this tab afterwards.</p>"
+    '<form method="post" action="">'
+    '<button type="submit">Unsubscribe me</button>'
+    "</form>",
 )
 
-_UNSUB_SUCCESS_HTML = (
-    '<!doctype html><html><head><meta charset="utf-8"><title>Unsubscribed</title></head>'
-    "<body><h1>You have been unsubscribed</h1>"
-    "<p>You will not receive further messages from this sender.</p></body></html>"
+_UNSUB_SUCCESS_HTML = _unsub_page(
+    "Unsubscribed",
+    "You have been unsubscribed",
+    "<p>You will not receive further messages from this sender.</p>",
 )
 
 # Tight CSP for the only HTML route the backend serves. XFO=DENY (stamped
