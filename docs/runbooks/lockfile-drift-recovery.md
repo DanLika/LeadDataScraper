@@ -91,7 +91,9 @@ lockfile lines).
   `app/lib/supabase/`. Trivial 1-line `package.json` fix; bundle separately
   from any lockfile change to keep diff atomic.
 - **Quality ratchet** — `mypy_strict 637 → 638 (+1)`. Pre-existing main drift.
-  See [quality-baseline-drift-exception](./quality-baseline-drift-exception.md).
+  See `tests/quality/` + operator memory
+  `quality_baseline_drift_exception_template.md` for the documented refresh
+  procedure.
 - **pre-commit (local-CI parity)** — `end-of-files` / `trailing-whitespace` /
   `ruff` on `backend/main.py`. Cluster #2 territory. Real investigation
   needed, not admin-merge bypass.
