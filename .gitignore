@@ -101,3 +101,5 @@ frontend/.cx_*.config.mjs
 # Mutation testing (mutmut)
 .mutmut-cache
 html/
+
+# (throwaway CI-proof marker — close this PR after CI runs)
