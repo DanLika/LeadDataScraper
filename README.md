@@ -44,5 +44,5 @@ browser automation. Designed for one operator end-to-end.
   Gemini · aiohttp · slowapi
 - **Frontend:** Next.js 16 (App Router) · React 19 · TypeScript · Recharts ·
   Tanstack Virtual · Lucide icons
-- **Hosting:** Render (both services) · GHCR (Docker registry) · SLSA3
+- **Hosting:** Render (both services) · GHCR (container registry) · SLSA3
   provenance · cosign verify before rollout
