@@ -469,7 +469,11 @@ wiring + verification procedure: [docs/observability.md](docs/observability.md).
   `withSentryConfig(...)` so the webpack plugin uploads source maps
   at build (`SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT`)
   with `sourcemaps: { deleteSourcemapsAfterUpload: true }` — maps
-  resolve in Sentry, not on the CDN.
+  resolve in Sentry, not on the CDN. Browser SDK is dynamic-imported
+  inside `requestIdleCallback` (PR #419, `a55149b3`); the 142 KB gz
+  chunk no longer ships in `rootMainFiles`. Synchronous wrapper
+  export of `onRouterTransitionStart` satisfies Next 16's framework
+  contract — full pattern + tradeoff in `docs/observability.md` §1c.
 - **Release tag = git SHA**. Backend: `Dockerfile ARG GIT_SHA` →
   `ENV RELEASE_SHA`. `.github/workflows/deploy-backend.yml` passes
   `--build-arg GIT_SHA=${{ github.sha }}`. Frontend: build-time
