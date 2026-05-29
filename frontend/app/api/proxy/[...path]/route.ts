@@ -62,24 +62,11 @@ const PUBLIC_PROXY_PATHS = new Set<string>([
 // Next.js process to buffer them in memory while waiting on upstream.
 const MAX_PROXY_BODY_BYTES = 50 * 1024 * 1024;
 
-const HOP_BY_HOP = new Set([
-  'host',
-  'connection',
-  'content-length',
-  'transfer-encoding',
-  'upgrade',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailers',
-  'accept-encoding',
-  'x-forwarded-for',
-  'x-forwarded-host',
-  'x-forwarded-proto',
-  'x-real-ip',
-  'forwarded',
-]);
+// HOP_BY_HOP + STRIPPED_AUTH live in `frontend/app/lib/proxyHeaderFilter.mjs`
+// so the Node built-in test runner (`npm test`) can import them without a
+// TypeScript toolchain — see `proxyHeaderFilter.test.mjs` for the strip
+// invariant pin. Single source of truth + audit-friendly.
+import { HOP_BY_HOP, STRIPPED_AUTH } from '@/app/lib/proxyHeaderFilter.mjs';
 
 // Common no-store headers for all early returns so error responses can't be cached.
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
@@ -139,7 +126,9 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
 
   const headers = new Headers();
   req.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) headers.set(key, value);
+    const k = key.toLowerCase();
+    if (HOP_BY_HOP.has(k) || STRIPPED_AUTH.has(k)) return;
+    headers.set(key, value);
   });
   headers.set('X-API-Key', API_SECRET_KEY);
 
