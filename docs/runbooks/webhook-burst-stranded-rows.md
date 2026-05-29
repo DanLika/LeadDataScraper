@@ -1,11 +1,13 @@
 # Webhook burst → stranded `webhook_events` rows
 
-**Status**: RESOLVED 2026-05-27/28. Multiple PRs:
-- #357 — Path B+C (replay protection + idempotency)
-- #361 — Path A sweeper cron
-- #364 — import hotfix (sweeper crashed on missing module)
-- #394 — sweeper PEP-562 prime (see
-  [pep562-cron-path-trap](./pep562-cron-path-trap.md))
+**Status**: RESOLVED. Multiple PRs:
+- #357 — Path B+C (replay protection + idempotency) — 2026-05-27
+- #361 — Path A sweeper cron — 2026-05-27
+- #364 — import hotfix (sweeper crashed on missing module) — 2026-05-27
+- **#415** — sweeper PEP-562 prime (`d922b334`, **2026-05-29T14:34:51Z**) —
+  supersedes the never-merged #394 referenced in earlier session memos.
+  See [pep562-cron-path-trap](./pep562-cron-path-trap.md) for the canonical
+  fix description.
 
 ## Symptom
 

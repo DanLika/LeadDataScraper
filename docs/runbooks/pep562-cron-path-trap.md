@@ -1,8 +1,23 @@
 # PEP 562 trap — lazy singletons missing in cron / standalone entrypoints
 
-**Status**: RESOLVED for `webhook_sweeper`. PR #394 primed `db` at handler
-entry. Pattern documented; every new cron / standalone script that imports
-from `backend.main` must apply it.
+**Status**: **RESOLVED** for `webhook_sweeper` at 2026-05-29T14:34:51Z via
+**PR #415** (squash commit `d922b334`), which superseded the never-merged
+PR #394 with a clean +19-LoC prime + subprocess-isolated regression test.
+Render auto-deploy live at 14:36:36Z. First post-deploy cron tick at 14:36:10Z
+returned `{scanned: 2, processed: 2, failed: 0}` — both qatest_unknown_type
+rows that had been replaying ~540 ticks since 2026-05-28T10:15Z were finally
+stamped `processed_at`. NameError count in post-deploy window: **0**.
+
+Pattern documented; every new cron / standalone script that imports from
+`backend.main` must apply it.
+
+> **Memory drift note** — earlier session memory (`session_2026-05-28_final_arc`)
+> claimed PR #394 shipped on 2026-05-28. That claim was wrong; #394 was OPEN
+> with 12 stale CI fails until #415 superseded it. See
+> `pr394_status_reality_2026-05-29.md` + `pr394_finally_shipped_2026-05-29.md`
+> memory entries for the evidence chain. The actual fix on `origin/main` is
+> `d922b334`, not the previously-cited `23482ba` (which lived only on the
+> abandoned `fix/webhook-cron-pep562-db-prime` branch).
 
 ## Symptom
 
@@ -111,8 +126,10 @@ When adding any new lazy global to `backend/main.py`:
 
 ## Related
 
-- Memory: `feedback_pep562_cron_path.md`, `session_2026-05-28_final_arc.md`
-- PR: #394 (`23482ba` admin-merged 2026-05-28 in final-arc bundle)
+- Memory: `feedback_pep562_cron_path.md`, `pr394_status_reality_2026-05-29.md`
+  (RESOLVED), `pr394_finally_shipped_2026-05-29.md`,
+  `session_2026-05-28_final_arc.md` (contains corrected banner)
+- PR: **#415** (`d922b334` admin-merged 2026-05-29T14:34:51Z, supersedes #394)
 - Code: `backend/main.py` lifespan priming loop, `_process_instantly_event`,
   `src/workers/dispatch_tick.py`, `tests/test_webhook_cron_pep562.py`
 - Related runbook: [webhook-burst-stranded-rows](./webhook-burst-stranded-rows.md)
