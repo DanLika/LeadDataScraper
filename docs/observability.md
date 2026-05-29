@@ -7,6 +7,18 @@ is enough headroom for a single-operator pipeline at current volume — see
 
 This doc tells you how to wire it, verify it, alert on it, and tear it down.
 
+> **Status — Sentry is LIVE in prod (2026-05-29).** DSNs wired to all three
+> Render services at 12:46Z; canonical tunnel handler shipped via PR #413
+> at 14:14Z; round-trip event verified by Sentry-EU ingest accepting
+> event_id `5ed56e453b164604b31201e7f57bf1a4` at 14:47:53Z (release tag
+> `d922b334a732ed1a62f86bd5136d856119c3ea4c`). Projects:
+> `lds-backend` (project_id `4511473178574928`) + `lds-frontend`
+> (project_id `4511473196925008`). Org `o4511473167695873`, EU region
+> (`.ingest.de.sentry.io`). Source-map upload (`SENTRY_AUTH_TOKEN`) still
+> unwired — frontend stack traces stay minified until the operator
+> populates it. Memory: `sentry_enabled_2026-05-29.md` +
+> `sentry_tunnel_415_fix_2026-05-29.md`.
+
 ## At a glance
 
 | Component | Init location | DSN env var | Default sample rates |
@@ -368,22 +380,36 @@ path.
 injection) so the client SDK uses the tunnel even if the build-time env
 shim drops the value.
 
+> **Implementation rewritten 2026-05-29 (PR #413, commit `4366ece9`)**:
+> the route now delegates to `@sentry/core`'s canonical `handleTunnelRequest`.
+> The original bespoke handler rejected every real envelope with HTTP 415
+> because (1) Sentry's tunnel transport sends `text/plain;charset=UTF-8`
+> (deliberate — skips CORS preflight), not `application/x-sentry-envelope`;
+> and (2) the upstream URL was built without `?sentry_key=…` auth query
+> params that ingest requires. Verified end-to-end at 2026-05-29T14:47:53Z:
+> Sentry ingest accepted event_id `5ed56e453b164604b31201e7f57bf1a4` from a
+> browser-triggered test error. Memory: `sentry_tunnel_415_fix_2026-05-29.md`.
+
 Handler behaviour (`POST /monitoring`):
 
 | Condition | Response |
 |---|---|
 | `NEXT_PUBLIC_SENTRY_DSN` unset at build time | `204 No Content` (silent no-op — keeps dev/preview clean) |
-| `Content-Type` not `application/x-sentry-envelope` | `415 Unsupported Media Type` |
-| Body > 1 MB | `413 Payload Too Large` |
-| Envelope header missing `dsn` field or unparseable | `400 Bad Request` |
-| Envelope `dsn` host or projectId ≠ configured DSN | `403 Forbidden` (anti-abuse — prevents tunnel being used to ferry envelopes to arbitrary Sentry projects) |
-| Upstream Sentry ingest reject | `502 Bad Gateway` |
-| Upstream timeout (5 s `AbortSignal.timeout`) | `502 Bad Gateway` |
+| `Content-Length` > 1 MB | `413 Payload Too Large` (fast-path DoS guard) |
+| Body fails envelope-header JSON parse | `400 Bad Request` (delegated to `handleTunnelRequest`) |
+| Envelope `dsn` ≠ `NEXT_PUBLIC_SENTRY_DSN` | `403 Forbidden` (anti-SSRF — `allowedDsns` list mismatch) |
+| Upstream Sentry ingest reject | upstream Response forwarded verbatim |
+| Otherwise (success) | upstream Response forwarded verbatim — body is Sentry's `{"id":"<event_id>"}` echo + `X-Sentry-Rate-Limits` / `Retry-After` headers passthrough so the SDK can throttle |
 | OPTIONS preflight | `204 No Content` |
-| Otherwise | `200 OK` |
 
-Runtime is `edge` (`AbortSignal.timeout` is edge-safe) and `dynamic =
-'force-dynamic'`.
+Note: **no Content-Type check.** Canonical handler ignores incoming
+Content-Type entirely; envelope validity is gated by the first-line JSON
+header parse + DSN allowlist match. This is intentional — the previous
+strict `application/x-sentry-envelope` allowlist was the root cause of
+the multi-day silent telemetry drop.
+
+Runtime is `edge` (Web APIs only — `Uint8Array`, `Response`, `fetch`) and
+`dynamic = 'force-dynamic'`.
 
 ## 11. Troubleshooting
 
@@ -395,7 +421,7 @@ Runtime is `edge` (`AbortSignal.timeout` is edge-safe) and `dynamic =
 | `/_sentry/test` returns 404 | `SENTRY_TEST_ENABLED` not set | Set to `1` in Render → save → redeploy |
 | Sentry shows 0 events after a known error | DSN wrong, or network blocked Sentry's ingest | Check DSN in Render dashboard; check `/monitoring` tunnel route reachable from browser |
 | `POST /monitoring` returns `404` in prod | Sentry webpack-plugin virtual route handler not generated for this build | §10.1 — `frontend/app/monitoring/route.ts` is the physical fallback; if it's missing for any reason, restore from `fix/sentry-tunnel-route` |
-| `POST /monitoring` returns `415` | SDK posting wrong `Content-Type` (should be `application/x-sentry-envelope`) | Likely `Sentry.init({ tunnel })` accidentally set to non-tunnel URL — verify `instrumentation-client.ts` |
+| `POST /monitoring` returns `415` | Route handler is the pre-#413 bespoke version with the strict Content-Type allowlist | Pull `frontend/app/monitoring/route.ts` to `4366ece9` or later. Canonical impl delegates to `@sentry/core`'s `handleTunnelRequest` and accepts the `text/plain;charset=UTF-8` envelopes that Sentry actually sends. |
 | `POST /monitoring` returns `403` | Envelope's embedded DSN doesn't match `NEXT_PUBLIC_SENTRY_DSN` | DSN env-var drift between Render frontend service and the Sentry project — re-sync |
 | Slack alert never fires | Alert rule's project filter doesn't match | Sentry → Alerts → edit rule, confirm `project` filter matches the backend/frontend project name |
 | `sentry-sdk` import fails after `make lock-python` | Lockfile didn't regenerate | `pip install pip-tools && make lock-python && pip install --require-hashes -r requirements.txt` |

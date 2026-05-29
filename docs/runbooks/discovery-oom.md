@@ -1,13 +1,28 @@
 # Discovery OOM (Render starter, 512 MB)
 
-**Status**: RESOLVED 2026-05-29 via Render plan bump starter→standard
-(2 GB RAM, ~$25/mo). 2 concurrent `/discovery/start` calls verified post-bump:
-16 leads, 0 `oomKilled` events. Defense-in-depth code mitigations from this
-PR (preflight 503, stylesheet block, Chromium flags, smaller viewport)
-retained — they cost nothing on the bumped plan and harden against future
-memory spikes from siblings endpoints. Yield caps (scroll iters, container
-cap) restored to pre-incident defaults (5 / 30) after the bump since the
-2 GB ceiling no longer requires them. See [[render-bump-oom-resolved-2026-05-29]].
+**Status**: **RESOLVED 2026-05-29T15:08:23Z** via Render plan bump
+starter → standard (`plan-srv-006` → `plan-srv-008`, ~$25/mo). PR #397
++ PR #412 mitigations (Semaphore(1) + resource-block + stylesheet kill +
+preflight 503 + Chromium flags + scroll/container caps) stay merged as
+defense-in-depth — they cost nothing on the bumped plan and harden
+against future memory spikes from sibling endpoints. Post-bump probe:
+2 concurrent `/discovery/start` jobs completed cleanly (8 + 8 = 16 leads
+added, table 43 → 59), **0** OOM events in 15:08Z → now window. Backend
+live at `dep-d8cqnjnavr4c73ekhv7g`.
+
+Reversal: `PATCH /v1/services/srv-d89bisbbc2fs73f1pjpg -d '{"plan":"starter"}'`.
+
+Operator decision recorded in
+[`render_bump_oom_resolved_2026-05-29.md`](../../../.claude/projects/.../memory)
+memory; option A picked over B (subprocess) / C (drop) / D (external pool).
+
+---
+
+**Historical context (kept for incident archaeology)**: PR #397 shipped
+2026-05-29 reduced footprint but did NOT eliminate single-discovery OOM on
+starter plan. PR #412 added preflight 503 + further caps + Chromium flags;
+plan bump made those defense-in-depth rather than essential. The bug below
+describes the pre-bump state.
 
 ## Symptom
 
@@ -41,7 +56,7 @@ reproduce 2026-05-29 09:23 UTC, first discovery against Mostar, 32 s in).
 
 ## Fix recipe
 
-PR #397 (commit `ca9d9b06`, merged 2026-05-29) — INSUFFICIENT on starter plan.
+**Shipped 2026-05-29T15:07:30Z**: Render plan bump.
 
 **Plan bump** (chosen 2026-05-29, ~15:07 UTC): starter → standard
 (`plan-srv-006 → plan-srv-008`, ~$25/mo). 2 concurrent `/discovery/start`
@@ -49,9 +64,35 @@ calls post-bump returned 16 leads, 0 `oomKilled` events. Reversible via
 PATCH back. See [[render-bump-oom-resolved-2026-05-29]] for the operational
 recipe and rollback steps.
 
-**Defense-in-depth code mitigations** (PR #412, branch
-`fix/discovery-free-plan-survival`) layered on top of #397 and retained
-post-bump because cost is nil:
+Reproducible PATCH+deploy recipe:
+
+```bash
+RENDER_API_KEY=...
+SVC=srv-d89bisbbc2fs73f1pjpg
+
+# Verify current plan
+curl -sS -H "Authorization: Bearer $RENDER_API_KEY" "https://api.render.com/v1/services/$SVC" \
+  | jq -r '.serviceDetails.plan'
+
+# Bump (top-level {plan: ...} works; nested {serviceDetails:{plan:...}} also accepted)
+curl -sS -X PATCH -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"plan":"standard"}' \
+  "https://api.render.com/v1/services/$SVC"
+
+# Explicit deploy (PATCH alone does NOT auto-redeploy on this account/plan combo)
+curl -sS -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"clearCache":"do_not_clear"}' \
+  "https://api.render.com/v1/services/$SVC/deploys"
+
+# Confirm plan_changed event landed
+curl -sS -H "Authorization: Bearer $RENDER_API_KEY" "https://api.render.com/v1/services/$SVC/events?limit=10" \
+  | jq '.[].event | select(.type == "plan_changed")'
+# Expect: {"details":{"from":"plan-srv-006","to":"plan-srv-008"}, ...}
+```
+
+**Defense-in-depth code mitigations** (PR #397 + PR #412, branches
+`fix/discovery-oom-mitigation` + `fix/discovery-free-plan-survival`)
+layered and retained post-bump because cost is nil:
 
 1. `_BLOCKED_RESOURCE_TYPES` adds `stylesheet` (we scrape role+aria
    selectors, never paint). Smoke-verified locally 2026-05-29: query
@@ -77,6 +118,12 @@ Bumped-back-down knobs are still env-tunable for tighter plans.
 was footprint-per-call, not concurrency. Semaphore retained as part of the
 defense-in-depth posture.
 
+PR #397 (commit `ca9d9b06`, merged 2026-05-29 09:21Z) — INSUFFICIENT on
+starter plan, sufficient on standard. PR #412 added the preflight 503 +
+stylesheet block — further insurance.
+
+Pre-bump diagnostic (kept for archaeology):
+
 ```bash
 # Confirm OOM is the active cause (NOT just timeout):
 RENDER_API_KEY=...  # pull from local .env or 1Password
@@ -85,15 +132,23 @@ curl -sS -H "Authorization: Bearer $RENDER_API_KEY" \
   | jq '.[].event | select(.type == "server_failed") | {ts: .timestamp, reason: .details.reason}'
 ```
 
-If `oomKilled` reappears post-bump: the standard plan has been outgrown.
-Escalation options (none currently chosen, listed for future regress):
+**Operator decisions (taken 2026-05-29T15:07Z — option 2)**:
 
-1. **Subprocess isolation** — fork Chromium into separate `multiprocessing.Process`
-   with own memory accounting; main FastAPI worker survives kernel OOM-kill of
-   child. Cleanest single-instance fix.
-2. **Bump Render plan** standard → pro (4 GB) ≈ $85/mo.
-3. **External browser pool** (Browserless.io / Playwright Cloud) ≈ $60/mo.
-   Removes Chromium memory from Render instance.
+1. ~~Subprocess isolation~~ — fork Chromium into separate
+   `multiprocessing.Process` with own memory accounting. ~200 LoC + IPC +
+   signal-handling edge cases. Operator time cost > 12 years of plan-bump.
+   Deferred indefinitely.
+2. **Bump Render plan starter → standard** (~2 GB) ≈ $25/mo. **PICKED.** See
+   resolution block above. PR #412 (preflight 503) became optional but
+   retained as defense-in-depth.
+3. ~~Drop discovery route~~ — feature loss for the BookBed crossover use case.
+4. ~~External browser pool~~ (Browserless.io / Playwright Cloud) ≈ $60/mo. More
+   expensive than plan bump + adds dependency surface.
+
+**If `oomKilled` reappears post-bump**: the standard plan has been outgrown.
+Escalation: bump to pro (4 GB) ≈ $85/mo, OR pull the trigger on option 1
+(subprocess isolation) — the LOC cost finally justifies itself if the next
+plan tier doesn't fit either.
 
 ## Recurrence guard
 
@@ -125,7 +180,9 @@ Escalation options (none currently chosen, listed for future regress):
 
 ## Related
 
-- Memory: `bug_discovery_oom_2026-05-28.md`, `pr397_oom_fix_INSUFFICIENT.md`
+- Memory: `bug_discovery_oom_2026-05-28.md` (RESOLVED),
+  `pr397_oom_fix_INSUFFICIENT.md` (RESOLVED),
+  `render_bump_oom_resolved_2026-05-29.md`
 - Code: `src/scrapers/discovery_engine.py:34-100`,
   `src/scrapers/enrichment_engine.py:70-106` (reference pattern),
   `src/core/task_orchestrator.py:run_discovery_job`
