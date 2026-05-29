@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useFocusTrap } from '@/utils/useFocusTrap';
+import { useFocusTrap } from '@/app/hooks/useFocusTrap';
 import {
   Mail, Play, Pause, Download, Plus, ArrowLeft,
   Loader2, Send, Users, CheckCircle,
@@ -9,8 +9,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
-import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
+import { API_BASE_URL, apiFetch } from '@/app/lib/apiConfig';
+import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/app/hooks/useEscape';
 import dynamic from 'next/dynamic';
 import Sidebar from '../components/Sidebar';
 import { Linkedin } from '../components/BrandIcons';

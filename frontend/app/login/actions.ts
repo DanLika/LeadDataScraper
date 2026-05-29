@@ -2,9 +2,9 @@
 
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
-import { createClient } from '@/utils/supabase/server'
-import { checkLoginRate, clearLoginRate } from '@/utils/loginThrottle'
-import { sanitizeNext } from '@/utils/url.mjs'
+import { createClient } from '@/app/lib/supabase/server'
+import { checkLoginRate, clearLoginRate } from '@/app/lib/loginThrottle'
+import { sanitizeNext } from '@/app/lib/url.mjs'
 
 // Same trusted-IP header the /api/proxy route reads, so the rate-limit
 // bucket key matches across the auth path and the API path. Anything else

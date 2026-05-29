@@ -3,8 +3,8 @@
 import { useCallback, useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { useFocusTrap } from '@/utils/useFocusTrap';
-import { restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
+import { useFocusTrap } from '@/app/hooks/useFocusTrap';
+import { restoreFocus, BURGER_SELECTOR } from '@/app/hooks/useEscape';
 // Row-level icons (Globe, Phone, Crosshair, Music, Pin, Facebook, Instagram,
 // AlertCircle, etc.) all moved into LeadTable.tsx with the JSX they belong
 // to. Page-level chrome still uses Upload/Mail/Shield/Settings/etc.
@@ -19,8 +19,8 @@ import { Linkedin } from './components/BrandIcons';
 import Sidebar from './components/Sidebar';
 import StatsCards from './components/StatsCards';
 import FilterBar, { DEFAULT_SORT, type SortKey } from './components/FilterBar';
-import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
-import { ensureProtocol } from '@/utils/url.mjs';
+import { API_BASE_URL, apiFetch } from '@/app/lib/apiConfig';
+import { ensureProtocol } from '@/app/lib/url.mjs';
 
 // Heavy components are lazy-loaded so the dashboard's initial JS payload
 // stays under the perf budget. Recharts (HealthChart) and the AI chat
