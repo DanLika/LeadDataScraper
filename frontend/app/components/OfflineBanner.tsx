@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useSyncExternalStore } from 'react';
-import { offlineQueue } from '@/utils/offlineQueue';
+import { offlineQueue } from '@/app/lib/offlineQueue';
 
 function subscribeOnline(cb: () => void) {
   window.addEventListener('online', cb);

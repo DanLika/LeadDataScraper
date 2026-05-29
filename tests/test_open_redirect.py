@@ -1,7 +1,7 @@
 """Open-redirect e2e for `/login?next=<payload>`.
 
-`sanitizeNext` in `frontend/utils/url.mjs` is unit-tested by
-`frontend/utils/url.test.mjs` — fast, deterministic, no infra. This
+`sanitizeNext` in `frontend/app/lib/url.mjs` is unit-tested by
+`frontend/app/lib/url.test.mjs` — fast, deterministic, no infra. This
 file exercises the same contract through a real browser + real login,
 verifying that after a successful sign-in the user lands on a
 same-origin path, not on the attacker's host. Catches integration

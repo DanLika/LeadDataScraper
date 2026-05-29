@@ -15,7 +15,7 @@ Browser  →  /api/proxy/[...path]  →  FastAPI backend (X-API-Key injected her
 - `frontend/app/api/proxy/[...path]/route.ts` — proxy that forwards every
   method (GET/POST/PUT/DELETE/PATCH/OPTIONS) to `BACKEND_URL` and attaches
   `X-API-Key` from the server-side `API_SECRET_KEY` env var.
-- `frontend/utils/apiConfig.ts` — `apiFetch()` wrapper. Callers use
+- `frontend/app/lib/apiConfig.ts` — `apiFetch()` wrapper. Callers use
   `apiFetch(\`${API_BASE_URL}/leads\`)`; `API_BASE_URL` is `/api/proxy`.
 - Frontend pages (`app/page.tsx`, `app/insights/page.tsx`) read leads only via
   `/leads`. Supabase RLS blocks anon access to the data tables.

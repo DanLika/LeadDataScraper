@@ -8,7 +8,7 @@
  * correctly in CI/deploy to keep session cookies encrypted.
  *
  * Pure function so it's unit-testable without a Next.js request context.
- * Used by frontend/utils/supabase/middleware.ts and server.ts — both cookie
+ * Used by frontend/app/lib/supabase/middleware.ts and server.ts — both cookie
  * write paths share the same contract, pinned by cookie-floor.test.mjs.
  */
 export function hardenCookieOptions(options) {

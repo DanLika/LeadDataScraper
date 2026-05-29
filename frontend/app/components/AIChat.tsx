@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Shield, Loader2, Play, Send, Copy, Check } from 'lucide-react';
-import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
+import { API_BASE_URL, apiFetch } from '@/app/lib/apiConfig';
 
 interface AIChatPlan {
   task: string;

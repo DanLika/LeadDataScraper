@@ -8,8 +8,8 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Sidebar from '../components/Sidebar';
-import { API_BASE_URL, apiFetch } from '@/utils/apiConfig';
-import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/utils/useEscape';
+import { API_BASE_URL, apiFetch } from '@/app/lib/apiConfig';
+import { useEscape, restoreFocus, BURGER_SELECTOR } from '@/app/hooks/useEscape';
 
 // Recharts is ~80kb gzipped. Defer it to a separate chunk so the
 // /insights route shell hits the wire fast; charts render after the

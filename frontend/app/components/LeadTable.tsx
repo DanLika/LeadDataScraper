@@ -32,7 +32,7 @@ import {
   AlertCircle, Crosshair, Globe, Loader2, Mail, Phone, Shield, Users, Music, Pin,
 } from 'lucide-react';
 import { Facebook, Instagram, Linkedin } from './BrandIcons';
-import { ensureProtocol } from '@/utils/url.mjs';
+import { ensureProtocol } from '@/app/lib/url.mjs';
 
 import type { Lead } from '../types/lead';
 

@@ -9,7 +9,7 @@ Tools:
 
 ## Headline
 
-| | Python (`src/`) | Frontend (`frontend/app/`, `frontend/utils/`) |
+| | Python (`src/`) | Frontend (`frontend/app/`, `frontend/app/lib/`) |
 |---|---:|---:|
 | Modules scanned | 26 | 25 |
 | **Circular dependencies** | **0** ✅ | **0** ✅ |
@@ -60,7 +60,7 @@ Key relationships visible in the SVG:
 
 ### Frontend — `frontend-module-graph.svg`
 
-25 modules under `frontend/app/` + `frontend/utils/`. The
+25 modules under `frontend/app/` + `frontend/app/lib/`. The
 component tree is shallow: page-level entrypoints
 (`page.tsx`, `campaigns/page.tsx`, `insights/page.tsx`, `login/page.tsx`)
 import from `components/` + `utils/` + Next-injected runtime — no
@@ -89,13 +89,13 @@ orphans are intentional**:
 | `app/layout.tsx` | Next.js root layout — framework-invoked |
 | `app/api/proxy/[...path]/route.ts` | Next.js API route — framework-invoked |
 | `app/api/auth/signout/route.ts` | Same (not orphan-listed because it's nested; same category) |
-| `utils/apiConfig.ts` | Re-export module imported via `@/utils/apiConfig` everywhere — madge sees the alias only when projects use it. Re-running with `--ts-config frontend/tsconfig.json` would resolve the aliases; the default scan doesn't. (Not a bug — false orphan.) |
-| `utils/loginThrottle.ts` | Same — used by `app/login/actions.ts` |
-| `utils/supabase/server.ts` | Same — used by 3 route handlers + actions |
-| `utils/supabase/middleware.ts` | Used by `frontend/proxy.ts` (Next 16 root middleware convention — NOT under `app/`; falls outside madge's scan path here) |
-| `utils/supabase/client.ts` | Already confirmed unused in PR #185 (dead-code report). Deletion shipped in PR #185 — should disappear from this orphan list once that merges. |
-| `utils/supabase/cookie-floor.test.mjs` | Test file, run by `node --test`, not imported |
-| `utils/useEscape.ts` / `utils/useFocusTrap.ts` | Used via `@/utils/...` alias — same false-orphan reason as `apiConfig` |
+| `app/lib/apiConfig.ts` | Re-export module imported via `@/app/lib/apiConfig` everywhere — madge sees the alias only when projects use it. Re-running with `--ts-config frontend/tsconfig.json` would resolve the aliases; the default scan doesn't. (Not a bug — false orphan.) |
+| `app/lib/loginThrottle.ts` | Same — used by `app/login/actions.ts` |
+| `app/lib/supabase/server.ts` | Same — used by 3 route handlers + actions |
+| `app/lib/supabase/middleware.ts` | Used by `frontend/proxy.ts` (Next 16 root middleware convention — NOT under `app/`; falls outside madge's scan path here) |
+| `app/lib/supabase/client.ts` | Already confirmed unused in PR #185 (dead-code report). Deletion shipped in PR #185 — should disappear from this orphan list once that merges. |
+| `app/lib/supabase/cookie-floor.test.mjs` | Test file, run by `node --test`, not imported |
+| `app/hooks/useEscape.ts` / `app/hooks/useFocusTrap.ts` | Used via `@/app/hooks/...` alias — same false-orphan reason as `apiConfig` |
 
 **Action**: re-run madge with `--ts-config` to resolve path aliases
 (future improvement). For now, the orphan list is informational only;

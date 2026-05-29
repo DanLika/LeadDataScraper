@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Post-deploy auth + cookie-floor smoke. Catches SSR session bugs and
 // cookie-floor regressions in production — the unit tests in
-// frontend/utils/supabase/cookie-floor.test.mjs pin the helper; this
+// frontend/app/lib/supabase/cookie-floor.test.mjs pin the helper; this
 // pins the live response on real prod cookies.
 //
 // Required env:

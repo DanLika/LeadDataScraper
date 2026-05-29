@@ -58,8 +58,8 @@ Listed to make the boundary explicit. Do **not** port any of these.
 | `src/utils/csv_helper.py` `sanitize_dataframe_for_csv` (formula injection) | BookBed has no CSV export to operators. Skip. |
 | `src/utils/supabase_helper.py` lazy singletons + `asyncio.to_thread` | Supabase-specific; BookBed uses Firestore. |
 | `src/utils/stats_cache.py` + `query_profiler.py` | Backend-internal perf primitives. |
-| `frontend/utils/loginThrottle.ts` | Supabase Auth flow; BookBed uses Firebase Auth (different surface). |
-| `frontend/utils/url.mjs::sanitizeNext` + open-redirect tests | No `/login?next=` flow on bookbed-website (mailto-only forms) and no `?next=` consumer on Flutter. |
+| `frontend/app/lib/loginThrottle.ts` | Supabase Auth flow; BookBed uses Firebase Auth (different surface). |
+| `frontend/app/lib/url.mjs::sanitizeNext` + open-redirect tests | No `/login?next=` flow on bookbed-website (mailto-only forms) and no `?next=` consumer on Flutter. |
 
 ---
 
@@ -102,7 +102,7 @@ Status legend: ✅ already implemented · ⚠️ partial · ❌ missing · N/A t
 |---|---|---|---|---|
 | SSRFGuardResolver: reject private/loopback/link-local/multicast IPs + cloud metadata hostnames | `src/utils/ssrf_guard.py` | ✅ **verified** — `app/[locale]/tools/ical-checker/actions.ts`: `https:`-only, credential strip, `dns.lookup` all-records private-IP reject (incl. CGNAT 100.64/10 + IPv6 ULA/link-local/mapped), double-resolve rebind guard, `redirect: "manual"`. Self-noted residual: undici may re-resolve post-guard (TOCTOU) — acceptable for a validator. | N/A — CF outbound is only OTAs + Resend, both static-allowlisted hosts. | If bookbed CF ever adds operator-provided URLs (webhooks, custom iCal feeds), port the LDS SSRF helper — or copy this `actions.ts` resolver, which is already close to LDS parity. |
 | Playwright route guard re-runs SSRF check on every subresource | `enrichment_engine.py` | N/A — no Playwright | N/A | |
-| Block scheme allowlist (`http://`/`https://` only) | `frontend/utils/url.mjs::ensureProtocol` | ⚠️ probably implicit; verify on `safeHref` per CLAUDE.md | ⚠️ ? CF callable URLs | Worth porting `ensureProtocol` pattern if user-content links exist in `bookbed/` (booking confirmation pages, etc.). |
+| Block scheme allowlist (`http://`/`https://` only) | `frontend/app/lib/url.mjs::ensureProtocol` | ⚠️ probably implicit; verify on `safeHref` per CLAUDE.md | ⚠️ ? CF callable URLs | Worth porting `ensureProtocol` pattern if user-content links exist in `bookbed/` (booking confirmation pages, etc.). |
 
 ### 2.4 — Email / SMTP injection
 
@@ -130,8 +130,8 @@ Status legend: ✅ already implemented · ⚠️ partial · ❌ missing · N/A t
 
 | Pattern | LDS source | bookbed-website | bookbed Flutter | Notes |
 |---|---|---|---|---|
-| Cookie-floor: `SameSite=Lax`, `HttpOnly=true`, `Secure=true` overwritten true-down (never weakened) | `frontend/utils/supabase/middleware.ts` | N/A — no session cookies (static site) | N/A — Firebase Auth manages tokens client-side | |
-| 1157-case cookie-floor fuzz test | `frontend/utils/supabase/cookie-floor-fuzz.test.mjs` | N/A | N/A | |
+| Cookie-floor: `SameSite=Lax`, `HttpOnly=true`, `Secure=true` overwritten true-down (never weakened) | `frontend/app/lib/supabase/middleware.ts` | N/A — no session cookies (static site) | N/A — Firebase Auth manages tokens client-side | |
+| 1157-case cookie-floor fuzz test | `frontend/app/lib/supabase/cookie-floor-fuzz.test.mjs` | N/A | N/A | |
 
 ### 2.8 — Input validation / payload pollution
 
@@ -176,7 +176,7 @@ Status legend: ✅ already implemented · ⚠️ partial · ❌ missing · N/A t
 
 | Pattern | LDS source | bookbed-website | bookbed CF | Notes |
 |---|---|---|---|---|
-| In-process per-key token bucket | `frontend/utils/loginThrottle.ts` + slowapi on backend | ✅ **verified** — `actions.ts`: 10/min trusted, stricter 3/min for the shared `unknown` bucket, opportunistic GC at `rateBuckets.size > 5000` | ⚠️ Per `.claude/rules/cloud-functions.md` rate-limit pattern referenced; **verify all callable endpoints have it** | LDS pattern: bounded `MAX_BUCKETS` cap + LRU evict + expired-sweep. bookbed-website's GC is sweep-only (no hard cap / LRU evict) — under a unique-IP flood the map can still grow to 5000 before a sweep. Minor; port LDS's hard-cap evict if that surface ever gets hostile traffic. |
+| In-process per-key token bucket | `frontend/app/lib/loginThrottle.ts` + slowapi on backend | ✅ **verified** — `actions.ts`: 10/min trusted, stricter 3/min for the shared `unknown` bucket, opportunistic GC at `rateBuckets.size > 5000` | ⚠️ Per `.claude/rules/cloud-functions.md` rate-limit pattern referenced; **verify all callable endpoints have it** | LDS pattern: bounded `MAX_BUCKETS` cap + LRU evict + expired-sweep. bookbed-website's GC is sweep-only (no hard cap / LRU evict) — under a unique-IP flood the map can still grow to 5000 before a sweep. Minor; port LDS's hard-cap evict if that surface ever gets hostile traffic. |
 | Trusted client-IP header derivation | LDS proxy + bucket key | ✅ rightmost XFF on Cloud Run | App Check + `auth.uid` (not IP-based) | |
 
 ### 2.13 — Database integrity (Supabase/Firestore symmetric concepts)
@@ -390,7 +390,7 @@ exist.
 | 2.6 (Origin gate — bookbed CF) | ⚠️ partial | `functions/src/index.ts` is a pure `export *` barrel — App Check enforcement (`enforceAppCheck: true`) lives inside each `onCall({...})` config, not centrally. Did not exhaustively grep all 21 callables; the original hypothesis is plausible per-call but the "every callable" guarantee needs a one-liner audit script before treating it as load-bearing. |
 | 2.8 (Pydantic-equivalent) | ✅ confirmed | `grep -rn 'zod\|z\.object\|z\.string' functions/src/` returns **zero matches**. 21 onCall handlers exist; the manual-validation pattern (`if (typeof x !== "string") throw new HttpsError("invalid-argument", …)`) is the convention — see `availability.ts::parseIsoDate` for the reference shape. Porting `zod` with `strict: true` would close the extra-field-rejection gap LDS already enforces via Pydantic `extra='forbid'`. |
 | 2.9 (Upload guard) | ✅ confirmed | `storage.rules` enforces per-bucket caps (`request.resource.size < 10 * 1024 * 1024` for user / property paths; `< 5 * 1024 * 1024` for iCal exports) AND content-type allowlist (`request.resource.contentType.matches('image/.*')` for image buckets). 3 `putFile` callers in `lib/` (ical_export_service, storage_service, owner properties repo). Storage-rules layer is the right boundary — Flutter callers can't bypass the rule. |
-| 2.12 (Rate limit — bookbed CF) | ❌ overturned | The "verify all callable endpoints have it" hypothesis is **wrong** — 10 / 21 callables (~48 %) have **no visible** `checkRateLimit` invocation: `admin/setLifetimeLicense.ts`, `admin/updateUserStatus.ts`, `customEmail.ts`, `deleteUserAccount.ts`, `icalSync.ts`, `migrations/migrateTrialStatus.ts`, `passwordHistory.ts`, `resendBookingEmail.ts`, `revokeTokens.ts`, `updateBookingTokenExpiration.ts`. Several are spam / destructive vectors (`customEmail`, `deleteUserAccount`, `resendBookingEmail`). Admin / migration paths may be OK behind a separate auth gate, but the rest is a real gap. Recommend: add `checkRateLimit` per-callable AND port the LDS `MAX_BUCKETS` + LRU-evict cap from `frontend/utils/loginThrottle.ts` so unique-IP floods can't grow the in-memory map unbounded. |
+| 2.12 (Rate limit — bookbed CF) | ❌ overturned | The "verify all callable endpoints have it" hypothesis is **wrong** — 10 / 21 callables (~48 %) have **no visible** `checkRateLimit` invocation: `admin/setLifetimeLicense.ts`, `admin/updateUserStatus.ts`, `customEmail.ts`, `deleteUserAccount.ts`, `icalSync.ts`, `migrations/migrateTrialStatus.ts`, `passwordHistory.ts`, `resendBookingEmail.ts`, `revokeTokens.ts`, `updateBookingTokenExpiration.ts`. Several are spam / destructive vectors (`customEmail`, `deleteUserAccount`, `resendBookingEmail`). Admin / migration paths may be OK behind a separate auth gate, but the rest is a real gap. Recommend: add `checkRateLimit` per-callable AND port the LDS `MAX_BUCKETS` + LRU-evict cap from `frontend/app/lib/loginThrottle.ts` so unique-IP floods can't grow the in-memory map unbounded. |
 | 2.13 (Firestore type / CHECK constraints) | ❌ overturned | `firestore.rules` is 441 LOC but has **zero** type-check patterns (`is string` / `is number` / `is bool` / `matches(` / `.size()` all return no matches). The only constraint-shaped rules are 5 field-allowlist sites using `hasAny([…])` / `hasOnly([…])`. There is NO Firestore equivalent of LDS's 10 CHECK constraints today. Porting them would be a real lift: per-field `request.resource.data.field is string` + value-allowlist matches on `status` / `channel` / `audit_status` analogues. Highest-value targets (per LDS analogue): booking `status` allowlist, payment-state allowlist, email-shape on guest_email. |
 
 **Net effect on the porting plan.** Phase A (website CI) + Phase B (CF email
