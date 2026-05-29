@@ -249,3 +249,73 @@ class TestBudgetExceededExceptionHandler:
         assert resp.status_code == 503
         body = resp.json()
         assert body == {"error": "AI daily budget exhausted"}
+
+
+class TestAIQuotaExceededExceptionHandler:
+    """Verify the FastAPI dispatch picks up the dedicated
+    ``AIQuotaExceededError`` handler and emits the structured
+    ``{"error":"ai_quota_exceeded","retry_after":"tomorrow"}`` body.
+    This is the contract test for upstream-Gemini-429 — the unit-level
+    `tests/unit/test_guarded_generate_content.py` confirms the wrapper
+    raises the typed error; this confirms the boundary maps it to the
+    documented HTTP body shape.
+    """
+
+    _EXPECTED_BODY = {"error": "ai_quota_exceeded", "retry_after": "tomorrow"}
+
+    def test_ai_quota_error_in_draft_outreach_returns_503(
+        self, client, monkeypatch
+    ):
+        from src.errors import AIQuotaExceededError
+        import main as backend_main
+
+        async def raises_quota(*args, **kwargs):
+            raise AIQuotaExceededError("upstream Gemini quota exhausted")
+
+        backend_main.router.execute_task = raises_quota  # type: ignore[assignment]
+        resp = client.post(
+            "/draft-outreach",
+            headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
+            json={"unique_key": "lead-1234"},
+        )
+        assert resp.status_code == 503, (
+            f"expected 503 ai_quota_exceeded, got {resp.status_code}: {resp.text}"
+        )
+        assert resp.json() == self._EXPECTED_BODY
+
+    def test_ai_quota_error_in_ask_returns_503(self, client, monkeypatch):
+        """`/ask` wraps the router in `try/except Exception` — the generic
+        catch would swallow `AIQuotaExceededError` to a 500 UNLESS the
+        `except (BudgetExceededError, AIQuotaExceededError): raise` is in
+        place. This test locks that re-raise."""
+        from src.errors import AIQuotaExceededError
+        import main as backend_main
+
+        async def raises_quota(*args, **kwargs):
+            raise AIQuotaExceededError("upstream Gemini quota exhausted")
+
+        backend_main.router.route_instruction = raises_quota  # type: ignore[assignment]
+        resp = client.post(
+            "/ask",
+            headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
+            json={"instruction": {"text": "How many leads?"}},
+        )
+        assert resp.status_code == 503, (
+            f"expected 503 ai_quota_exceeded, got {resp.status_code}: {resp.text}"
+        )
+        assert resp.json() == self._EXPECTED_BODY
+
+    def test_ai_quota_error_in_insights_returns_503(self, client, monkeypatch):
+        from src.errors import AIQuotaExceededError
+        import main as backend_main
+
+        async def raises_quota(*args, **kwargs):
+            raise AIQuotaExceededError("upstream Gemini quota exhausted")
+
+        backend_main.router.execute_task = raises_quota  # type: ignore[assignment]
+        resp = client.get(
+            "/insights",
+            headers={"X-API-Key": API_KEY},
+        )
+        assert resp.status_code == 503
+        assert resp.json() == self._EXPECTED_BODY

@@ -53,6 +53,21 @@ class DomainError(Exception):
     """
 
 
+# ---- AI quota domain ---------------------------------------------
+
+
+class AIQuotaExceededError(DomainError):
+    """Upstream Gemini API returned HTTP 429.
+
+    Distinct from `src.utils.gemini_budget.BudgetExceededError` (our own
+    SQLite daily-cap circuit breaker). This signals Google-side quota:
+    the operator can do nothing until the upstream window resets, so the
+    boundary handler returns a friendly 503 with
+    `{"error":"ai_quota_exceeded","retry_after":"tomorrow"}` instead of
+    the raw `google.genai.errors.ClientError` envelope.
+    """
+
+
 # ---- SEO audit domain --------------------------------------------
 
 

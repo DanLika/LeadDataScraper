@@ -55,6 +55,21 @@ export default function AIChat({ onExecute, sidebarCollapsed, hidden }: AIChatPr
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
+        // Graceful quota / daily-budget path: backend maps Gemini 429 to
+        // {"error":"ai_quota_exceeded","retry_after":"tomorrow"} and the
+        // local SQLite cap to {"error":"AI daily budget exhausted"} —
+        // both arrive as HTTP 503. Surface a single friendly copy
+        // instead of the raw error string.
+        if (
+          response.status === 503 &&
+          (data?.error === 'ai_quota_exceeded' || data?.error === 'AI daily budget exhausted')
+        ) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'AI temporarily unavailable, retry tomorrow.',
+          }]);
+          return;
+        }
         // Pydantic 422 returns { detail: [{type, loc, msg, ...}] }. Surface the
         // first msg so the user sees "String should have at most 4000
         // characters" instead of a generic placeholder.

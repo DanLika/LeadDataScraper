@@ -17,6 +17,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from src.errors import AIQuotaExceededError  # noqa: E402
 from src.utils import gemini_call  # noqa: E402
 from src.utils.gemini_budget import BudgetExceededError  # noqa: E402
 
@@ -298,3 +299,139 @@ class TestExtractUsageEdgeCases:
         )
         a, b = gemini_call._extract_usage(r, 42, 17)
         assert a == 42 and b == 17
+
+
+def _make_fake_client_error(code: int, module: str = "google.genai.errors"):
+    """Build an exception whose `type(exc).__module__` and `.code`
+    mimic `google.genai.errors.ClientError`.  Avoids importing the SDK
+    in tests so the suite stays runnable without `google-genai`."""
+
+    cls = type(
+        "ClientError",
+        (Exception,),
+        {"__module__": module},
+    )
+    exc = cls(f"upstream {code}")
+    exc.code = code  # type: ignore[attr-defined]
+    return exc
+
+
+class TestQuotaExceededHandling:
+    """Sync + async wrappers translate google-genai 429 into
+    `AIQuotaExceededError` so the FastAPI boundary returns a friendly
+    structured `{"error":"ai_quota_exceeded","retry_after":"tomorrow"}`
+    instead of the raw SDK envelope.
+    """
+
+    def test_sync_429_raises_ai_quota_exceeded(self, isolated_budget):
+        client = MagicMock()
+        client.models.generate_content.side_effect = _make_fake_client_error(429)
+        with pytest.raises(AIQuotaExceededError):
+            gemini_call.guarded_generate_content(
+                client,
+                model="m",
+                contents="x",
+                config=None,
+                estimate_input=10,
+                estimate_output=10,
+            )
+
+    def test_sync_non_429_client_error_propagates_raw(self, isolated_budget):
+        """A 400 (or anything not 429) is a real bug — propagate the raw
+        exception so the FastAPI catch-all 500s with `logger.exception`
+        instead of misleading the operator with `ai_quota_exceeded`."""
+
+        client = MagicMock()
+        client.models.generate_content.side_effect = _make_fake_client_error(400)
+        with pytest.raises(Exception) as exc_info:
+            gemini_call.guarded_generate_content(
+                client,
+                model="m",
+                contents="x",
+                config=None,
+                estimate_input=10,
+                estimate_output=10,
+            )
+        assert not isinstance(exc_info.value, AIQuotaExceededError)
+
+    def test_sync_429_from_unrelated_module_is_not_translated(self, isolated_budget):
+        """Defense-in-depth: a 429-coded exception whose module is NOT
+        in the `google.genai` / `google.api_core` namespace stays raw.
+        Some other SDK firing 429 would otherwise impersonate Gemini.
+        """
+
+        client = MagicMock()
+        client.models.generate_content.side_effect = _make_fake_client_error(
+            429, module="random.other.sdk"
+        )
+        with pytest.raises(Exception) as exc_info:
+            gemini_call.guarded_generate_content(
+                client,
+                model="m",
+                contents="x",
+                config=None,
+                estimate_input=10,
+                estimate_output=10,
+            )
+        assert not isinstance(exc_info.value, AIQuotaExceededError)
+
+    def test_sync_429_pre_debit_sticks_no_double_charge(self, isolated_budget):
+        """`check_budget` pre-debits the estimate before the SDK call.
+        On 429 the SDK throws BEFORE `record_usage` reconciles, so the
+        estimate stays as a phantom debit (counter = estimate, not 2×
+        estimate). Acceptable defensive over-counting; refunding would
+        require a new `gemini_budget` API (current `record_usage` clamps
+        delta to ≥0 when actual < estimated, so it can't decrement).
+        """
+
+        from src.utils import gemini_budget
+
+        client = MagicMock()
+        client.models.generate_content.side_effect = _make_fake_client_error(429)
+        with pytest.raises(AIQuotaExceededError):
+            gemini_call.guarded_generate_content(
+                client,
+                model="m",
+                contents="x",
+                config=None,
+                estimate_input=10,
+                estimate_output=10,
+            )
+        state = gemini_budget.get_state()
+        # Exactly the estimate — NOT double (which would mean
+        # record_usage also fired on the error path).
+        assert state["input_today"] == 10
+        assert state["output_today"] == 10
+
+    @pytest.mark.asyncio
+    async def test_async_429_raises_ai_quota_exceeded(self, isolated_budget):
+        client = MagicMock()
+        client.aio.models.generate_content = AsyncMock(
+            side_effect=_make_fake_client_error(429)
+        )
+        with pytest.raises(AIQuotaExceededError):
+            await gemini_call.guarded_generate_content_async(
+                client,
+                model="m",
+                contents="x",
+                config=None,
+                estimate_input=10,
+                estimate_output=10,
+            )
+
+    @pytest.mark.asyncio
+    async def test_async_non_429_propagates_raw(self, isolated_budget):
+        client = MagicMock()
+        client.aio.models.generate_content = AsyncMock(
+            side_effect=_make_fake_client_error(500)
+        )
+        with pytest.raises(Exception) as exc_info:
+            await gemini_call.guarded_generate_content_async(
+                client,
+                model="m",
+                contents="x",
+                config=None,
+                estimate_input=10,
+                estimate_output=10,
+            )
+        assert not isinstance(exc_info.value, AIQuotaExceededError)

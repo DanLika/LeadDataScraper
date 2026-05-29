@@ -10,6 +10,8 @@ from src.utils.prompt_safety import (
     _UNTRUSTED_DATA_SYSTEM_INSTRUCTION,
     fenced_json as _fenced_json,
 )
+from src.errors import AIQuotaExceededError
+from src.utils.gemini_budget import BudgetExceededError
 from src.utils.gemini_call import (
     estimate_tokens_from_text,
     guarded_generate_content,
@@ -248,6 +250,12 @@ class AgenticRouter:
                 "reasoning": "No tool was called by the model.",
                 "raw": response.text if response.text else "No text response",
             }
+        except (BudgetExceededError, AIQuotaExceededError):
+            # Daily-cap / upstream-429: bubble to FastAPI boundary so the
+            # registered exception handlers map to 503 with the canonical
+            # body. Without this re-raise the catch-all below would mask
+            # the typed signal as a generic "Tool calling failed".
+            raise
         except Exception as e:
             logger.error("Route instruction failed: %s", e, exc_info=True)
             return {
@@ -433,6 +441,8 @@ class AgenticRouter:
                 estimate_output=2048,
             )
             return {"answer": summary_response.text}
+        except (BudgetExceededError, AIQuotaExceededError):
+            raise
         except Exception as e:
             logger.error("Database query AI call failed: %s", e, exc_info=True)
             return {"error": "AI query failed"}
@@ -540,6 +550,8 @@ class AgenticRouter:
                 "lead_email": lead.get("email") or "",
                 "operator_name": operator_name,
             }
+        except (BudgetExceededError, AIQuotaExceededError):
+            raise
         except Exception as e:
             logger.error(
                 "Outreach draft generation failed for %s: %s",
@@ -611,6 +623,8 @@ class AgenticRouter:
                 "draft": draft.text.strip(),
                 "recipient": lead.get("leadership_team", "there"),
             }
+        except (BudgetExceededError, AIQuotaExceededError):
+            raise
         except Exception as e:
             logger.error(
                 "LinkedIn draft generation failed for %s: %s",
@@ -719,6 +733,8 @@ class AgenticRouter:
                 "insights": [ai_response.text[:100]],
                 "top_priorities": [],
             }
+        except (BudgetExceededError, AIQuotaExceededError):
+            raise
         except Exception as e:
             logger.error("Strategic insights AI call failed: %s", e, exc_info=True)
             return {

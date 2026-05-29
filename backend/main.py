@@ -61,6 +61,7 @@ from src.utils.logging_config import (
     bind_request_context,
 )
 from src.utils.stats_cache import stats_cache
+from src.errors import AIQuotaExceededError
 from src.utils.gemini_budget import (
     BudgetExceededError,
     get_state as _get_gemini_budget_state,
@@ -622,6 +623,27 @@ async def _budget_exceeded_handler(request: Request, exc: BudgetExceededError):
     )
     return JSONResponse(
         content={"error": "AI daily budget exhausted"},
+        status_code=503,
+    )
+
+
+@app.exception_handler(AIQuotaExceededError)
+async def _ai_quota_exceeded_handler(request: Request, exc: AIQuotaExceededError):
+    """Map upstream Gemini 429 to HTTP 503 with a structured friendly body.
+
+    Distinct from `_budget_exceeded_handler` (our own daily SQLite cap).
+    This fires when the upstream `google-genai` SDK raised `ClientError`
+    with `code=429` — operator did not exceed our cap; Google did.
+    `retry_after: "tomorrow"` matches Gemini's daily quota window;
+    the breaker resets at UTC midnight Pacific.
+    """
+    logger.warning(
+        "Gemini upstream 429 on %s %s — surfacing ai_quota_exceeded",
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        content={"error": "ai_quota_exceeded", "retry_after": "tomorrow"},
         status_code=503,
     )
 
@@ -2632,12 +2654,11 @@ async def ask_ai(
             + plan.get("task", "Unknown")
             + "?",
         }
-    except BudgetExceededError:
-        # Daily Gemini token budget tripped — let the registered
-        # `@app.exception_handler(BudgetExceededError)` map this to a
-        # 503 with the canonical body.  Without the re-raise the
-        # generic catch below would surface a 500 "Failed to process
-        # instruction" instead.
+    except (BudgetExceededError, AIQuotaExceededError):
+        # Daily Gemini token budget tripped OR upstream Gemini 429 —
+        # let the registered exception handlers map to 503 with the
+        # canonical body.  Without the re-raise the generic catch below
+        # would surface a 500 "Failed to process instruction" instead.
         raise
     except Exception as e:
         logger.error("Error in /ask: %s", e, exc_info=True)
@@ -2657,9 +2678,9 @@ async def get_insights(request: Request):
         if isinstance(result, dict) and result.get("error"):
             return error_response(result["error"], status_code=503)
         return result
-    except BudgetExceededError:
-        # See /ask handler — re-raise so the global budget handler
-        # maps to a 503 instead of the generic "Insights unavailable" 500.
+    except (BudgetExceededError, AIQuotaExceededError):
+        # See /ask handler — re-raise so the global budget / AI-quota
+        # handlers map to 503 instead of the generic 500.
         raise
     except Exception as e:
         logger.error("Error getting insights: %s", e, exc_info=True)
