@@ -164,6 +164,10 @@ async def _run_block_handler(route):
         ("https://maps.google.com/avatar.png", "image", True),
         ("https://fonts.gstatic.com/woff2/foo.woff2", "font", True),
         ("https://example.com/ad.mp4", "media", True),
+        # Free-plan-survival 2026-05-29: stylesheet joins the kill-list.
+        # URL alone doesn't match _BLOCKED_URL_PATTERN — abort comes from
+        # the resource_type frozenset membership check.
+        ("https://www.google.com/maps/style.css", "stylesheet", True),
         # 2. URL pattern kill-list (Maps vector tiles, Street View, gstatic raster)
         ("https://www.google.com/maps/vt/pb=!1m4!1m3!1i12", "xhr", True),
         ("https://maps.googleapis.com/maps/vt?lyrs=m&x=1&y=2", "xhr", True),
@@ -194,18 +198,20 @@ async def test_resource_block_handler_aborts_or_falls_through(
 # ───────────────── scroll + container caps ────────────────────────────────
 
 
-def test_scroll_iter_default_is_five():
-    """Default reduces from the pre-incident value of 10 to 5 — halves the
-    lazy-load pressure on each ``page.mouse.wheel`` cycle."""
+def test_scroll_iter_default_is_three():
+    """Free-plan-survival default (2026-05-29): 5 → 3. Trades batch size for
+    OOM survival on the 512 MB Render starter. Bumped plans override via
+    DISCOVERY_MAX_SCROLL_ITERS env."""
 
-    assert discovery_engine._MAX_SCROLL_ITERS == 5
+    assert discovery_engine._MAX_SCROLL_ITERS == 3
 
 
-def test_container_default_is_thirty():
-    """Hard cap protects against pathological Google Maps responses
-    returning hundreds of result containers."""
+def test_container_default_is_fifteen():
+    """Free-plan-survival default (2026-05-29): 30 → 15. Hard cap protects
+    against pathological Google Maps responses AND keeps the per-call
+    Chromium footprint inside the 512 MB starter envelope."""
 
-    assert discovery_engine._MAX_CONTAINERS == 30
+    assert discovery_engine._MAX_CONTAINERS == 15
 
 
 def test_caps_respect_env_overrides_and_floor_at_one(monkeypatch):

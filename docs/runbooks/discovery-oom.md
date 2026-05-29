@@ -97,12 +97,14 @@ the four follow-ups below ships. Each fresh discovery will OOM again.
 
 ## Recurrence guard
 
-- **CI gate** — `tests/test_discovery_resource_budget.py` (PR #397) asserts
-  the semaphore + resource-block + container/scroll caps stay wired. Falls
-  green even when peak memory remains over 512 MB — that's an integration
-  concern not a unit test. **Free-plan-survival pass note**: the test
-  asserts the *3/15 defaults* and the stylesheet entry in
-  `_BLOCKED_RESOURCE_TYPES`; revert-by-mistake bumps trip CI.
+- **CI gate** — `tests/unit/test_discovery_oom_mitigation.py` (PR #397)
+  asserts the semaphore + resource-block + container/scroll caps stay
+  wired. Falls green even when peak memory remains over 512 MB — that's an
+  integration concern not a unit test. **Free-plan-survival pass note**:
+  the test asserts the *3/15 defaults* AND a stylesheet kill-list case
+  (URL alone doesn't match `_BLOCKED_URL_PATTERN`, so the abort is pinned
+  to the `_BLOCKED_RESOURCE_TYPES` frozenset entry). Revert-by-mistake
+  bumps trip CI.
 - **Live verification (operator)**: re-run a single `/discovery/start`
   against prod, then poll `/v1/services/$SVC/events` for `oomKilled`. This
   is the only way to confirm the second pass holds — the CI gate sees
