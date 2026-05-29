@@ -67,6 +67,61 @@ This populates `node_modules/@sentry/nextjs` and resolves the TypeScript
 diagnostics that show "Cannot find module '@sentry/nextjs'" until the
 install runs.
 
+### 1c. Browser init is deferred post-FCP (PR #419, `a55149b3`)
+
+`frontend/instrumentation-client.ts` does NOT eager-import `@sentry/nextjs`.
+The SDK is loaded via a dynamic `import()` inside `requestIdleCallback`
+(with a `setTimeout(100ms)` fallback for browsers without rIC, mainly
+Safari ≤ 16). The 454 KB raw / 142 KB gz SDK chunk no longer ships in
+`rootMainFiles`; it lives in a deferred async chunk that streams in after
+first contentful paint.
+
+Why the wrapper export:
+
+```ts
+import type * as SentryNs from '@sentry/nextjs';
+type RouterTransitionFn = typeof SentryNs.captureRouterTransitionStart;
+
+let routerTransitionHandler: RouterTransitionFn = () => {};
+
+export const onRouterTransitionStart: RouterTransitionFn = (...args) =>
+  routerTransitionHandler(...args);
+```
+
+Next 16's framework picks up `onRouterTransitionStart` at module-eval; it
+must be a synchronous module-level export. The wrapper above is a stable
+no-op that delegates to a mutable handler — the handler stays a no-op
+until the deferred SDK chunk loads and rebinds it.
+
+**Tradeoff.** Errors thrown in the ~50–200 ms between page load and the
+idle-callback fire are NOT captured. Hydration errors typically surface
+after init anyway, so this has been acceptable for LDS's single-operator
+workload. If pre-init error capture is ever needed, the canonical
+revert is to delete §1c's import wrapping and restore the eager
+`import * as Sentry from '@sentry/nextjs'` at the top of
+`instrumentation-client.ts`.
+
+**Measured impact** (`next 16.2.6` Turbopack, prod `/login`, gzip -9):
+
+| Metric                          | Baseline | Post-defer | Delta             |
+|---------------------------------|----------|------------|-------------------|
+| `rootMainFiles` TOTAL gz        | 206 019  | 133 707    | −72 312 (−35 %)   |
+| Sentry SDK gz in `rootMainFiles`| 142 282  | 0          | −142 282 (−100 %) |
+| Sentry SDK gz (deferred async)  | —        | 180 168    | +180 168 lazy     |
+| Lighthouse `/login` LCP median  | 1502 ms  | 1336 ms    | −166 ms (−11 %)   |
+| Lighthouse `/login` Perf median | 100      | 100        | 0                 |
+
+Deferred chunk grew 142 → 180 KB gz because
+`integrations: defaults => defaults.filter(i => i.name !== 'BrowserTracing')`
+is a runtime filter — it removes the integration's executor at SDK init,
+but the integration code itself remains inside the SDK barrel. True
+tree-shake would need `defaultIntegrations: false` + an explicit
+curated `integrations: [...]` list AND avoiding the `@sentry/nextjs`
+barrel — not done.
+
+Memory: `sentry_defer_post_fcp_2026-05-29.md`. Bundle baseline:
+`bundle_audit_2026-05-29.md`.
+
 ## 2. Create a Sentry project
 
 1. Sign in at <https://sentry.io>.
