@@ -1,0 +1,118 @@
+name: dependabot-pip-route-check
+
+# Belt-and-braces alongside the `requirements.txt ↔ requirements.in sync`
+# job in ci.yml. That job re-resolves with pip-compile and diffs the
+# lockfile; this one enforces the upstream invariant: a PR that bumps
+# the LOCKFILE must also touch the SOURCE-OF-TRUTH.
+#
+# Why both? The drift check passes by coincidence when requirements.in
+# has loose pins ("numpy" with no upper bound). pip-compile picks
+# whatever satisfies the bare name on Py3.10, which may match the
+# Dependabot bump → drift green → operator admin-merges → prod breaks
+# at deploy because the lockfile pin no longer reflects an intentional
+# source-of-truth decision (PR #220 numpy 2.4.6 / Py3.10 incident,
+# 2026-05-28, 5 failed Render deploys).
+#
+# With this gate: any PR that edits requirements.txt without a matching
+# edit to requirements.in fails here. Operator must add an explicit pin
+# to requirements.in (or document why the lockfile move is intentional
+# via a `[skip-route-check]` token in the commit message) before merge.
+#
+# Workflow file edits don't fire the gate against itself.
+
+on:
+  pull_request:
+    paths:
+      - 'requirements.txt'
+      - 'requirements.in'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  require-source-of-truth-edit:
+    name: requirements.txt edit must accompany requirements.in edit
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect which lockfile/source files this PR touches
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+            requirements.txt requirements.in)
+          echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          if echo "$CHANGED" | grep -q '^requirements\.txt$'; then
+            echo "txt_changed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "txt_changed=0" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^requirements\.in$'; then
+            echo "in_changed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "in_changed=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check escape hatch token in commit messages
+        id: escape
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if git log --format=%B "$BASE_SHA..$HEAD_SHA" | grep -qF '[skip-route-check]'; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enforce paired edit (or escape hatch)
+        env:
+          TXT: ${{ steps.detect.outputs.txt_changed }}
+          IN: ${{ steps.detect.outputs.in_changed }}
+          SKIP: ${{ steps.escape.outputs.skip }}
+          ACTOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          if [ "$SKIP" = "1" ]; then
+            echo "Escape hatch '[skip-route-check]' present in a commit message."
+            echo "Skipping paired-edit invariant. Operator has accepted lockfile-only change."
+            exit 0
+          fi
+
+          if [ "$TXT" = "1" ] && [ "$IN" = "0" ]; then
+            echo "::error::This PR edits requirements.txt without touching requirements.in."
+            echo "::error::requirements.in is the SOURCE-OF-TRUTH; requirements.txt is its"
+            echo "::error::pip-compile output. Lockfile-only edits hide intent and have"
+            echo "::error::shipped Py-incompatible upgrades to prod (PR #220 numpy 2.4.6)."
+            echo "::error::"
+            echo "::error::If this is a Dependabot pip PR (actor=${ACTOR}): apply the same"
+            echo "::error::version pin to requirements.in, run 'make lock-python', and"
+            echo "::error::force-push the merged result."
+            echo "::error::"
+            echo "::error::If the lockfile-only edit is intentional (sha rotation, hash-only"
+            echo "::error::refresh, etc.), include '[skip-route-check]' in a commit message"
+            echo "::error::to bypass this gate. The companion drift check in ci.yml still"
+            echo "::error::runs and will catch a resolve-divergence."
+            exit 1
+          fi
+
+          if [ "$IN" = "1" ] && [ "$TXT" = "0" ]; then
+            echo "::error::This PR edits requirements.in without regenerating requirements.txt."
+            echo "::error::Run 'make lock-python' locally and commit the updated lockfile."
+            exit 1
+          fi
+
+          echo "Paired edit OK (txt=$TXT in=$IN), or neither touched."
