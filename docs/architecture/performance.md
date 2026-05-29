@@ -1,0 +1,17 @@
+# Performance + observability invariants
+
+Sourced from CLAUDE.md 2026-05-29 slim. See also `docs/observability.md` + `docs/alerting.md`.
+
+- **Cursor pagination `/leads`**: `?limit=1..200` + `?cursor=<base64url(json({c,k}))>`. Decoder fail-closed → page-1. ≤512 bytes raw, k ≤128 + **`_CURSOR_KEY_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{1,128}\Z")` charset gate** (k interpolates raw into `.or_()` predicate at `src/utils/supabase_helper.py:159-161`; `,`/`)`/`(` would escape the tie-break clause). `list_leads_recent` uses `created_at.lt.<c>` OR `and(created_at.eq.<c>, unique_key.lt.<k>)` tie-break. Index: `idx_leads_created_at_desc`.
+- **Async DB wrappers** in `SupabaseHelper` `to_thread`-wrap sync supabase-py `.execute()` (only `/leads`, `/stats`, `/process-lead`, `/process-all`; background stays sync).
+- **`/stats` cache** 60s TTL + `asyncio.Lock` double-checked, per-worker. Invalidated on `process_csv_background` upsert + `_process_in_chunks` `finally`. Single-lead mutations don't invalidate (lag ≤60s).
+- **Cold-start lazy imports.** Module `__getattr__` resolves `db`/`router`/`auditor`/`orchestrator` on attribute access. 1.14s → 219ms. **PEP 562 trap**: doesn't fire for bare-name `LOAD_GLOBAL` inside same-module functions. Lifespan runs a priming loop walking `sys.modules[__name__]` per-name with try/except (missing env disables that singleton only). Any future lazy singleton MUST land in the loop.
+- **Lifespan still blocks cold start**: `db.check_schema()` + `orchestrator.recover_interrupted_jobs()` before uvicorn binds. Move recovery into `asyncio.create_task` after `yield` to hit <5s on Render free. Follow-up.
+- **Block-logger middleware**: `WARN slow handler` when elapsed ≥ `SLOW_HANDLER_THRESHOLD_MS` (100 default). Structured `extra={method, path, duration_ms, threshold_ms}`.
+- **Web-vitals RUM** at `/metrics`: `WebVitalsMetric` Pydantic; `sendBeacon` with JSON `Blob` (bare beacon defaults `text/plain` → 422). Rate-limit 60/min. PR #242: `{reportAllChanges:true}` on `onCLS`+`onLCP`.
+- **Streaming `/export/{download,outreach}`** use `StreamingResponse` + `_stream_leads_csv` paging 200 rows via keyset. ≈60 KB/chunk. Column order LOCKED via `_EXPORT_*_COLUMNS` tuples.
+- **Query profiler** refuses without `QUERY_PROFILER=1`. `assert_o1(per_unit=N, tolerance=2.0)`. Static audit 2026-05-22: 0 N+1.
+- **EnrichmentEngine shared-browser pool**: one Chromium / instance; per-lead `new_context()`. `aclose()` MUST run on teardown.
+- **Load-test scaffolding** `tests/loadtest/`: `locustfile.py`, `bench_enrich.py`, `spike.sh`, `soak.sh` (24h + 8-signal `SOAK_PLAYBOOK.md`), `chaos.md` + `drop_supabase_pool.py` (local-only `CHAOS_LOCAL_ONLY=1`). VUs inject synthetic RFC1918 XFF.
+- **Structured JSON logging**: envelope `{timestamp, level, logger, message, request_id, user_id, route, duration_ms?, exception?, <domain>...}`. `extra={…}` merges at top level (NOT nested under `"context"`). `JsonFormatter` + `_CRLFScrubFilter` cooperate. 11-test pin.
+- **Request-context middleware** declared BEFORE `_block_logger` (Starlette LAST decorator = OUTERMOST wrapper). Honours valid `X-Request-ID` (`[A-Za-z0-9_-]{1,64}`), mints `uuid.uuid4().hex` else. Binds ContextVars + Sentry per-request scope. Also stashes on `request.state` (survives BaseHTTPMiddleware task-hop — PR #246). `_block_logger` reads `request.state` into `extra={…}`; `JsonFormatter` merges extras BEFORE ContextVar `setdefault`. **Does NOT clear in `finally`** — `StreamingResponse` body iterators run AFTER `call_next` returns; clearing would lose request_id.
