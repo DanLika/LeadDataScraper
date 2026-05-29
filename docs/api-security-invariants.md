@@ -296,6 +296,25 @@ Long-form invariants with rationale + test pins. CLAUDE.md keeps the quick-refer
   2000-level nested body doesn't surface as a 500 the operator has to
   triage. Locked in by
   `tests/test_json_pollution.py::TestDeeplyNestedJSON`.
+- **AI-quota error pair → 503** (PR #420). Two distinct typed errors map
+  to 503 with separate bodies:
+  - `BudgetExceededError` (`src/utils/gemini_budget.py`) — our own SQLite
+    daily-token-cap circuit breaker tripped. Body
+    `{"error": "AI daily budget exhausted"}`. Operator surface is
+    `GET /admin/gemini-budget`; `used_today`/`ceiling` are logged but
+    never echoed in the response body (would leak operator-cost internals).
+  - `AIQuotaExceededError` (`src/errors.py`) — upstream Gemini returned
+    HTTP 429 (`google.genai.errors.ClientError(code=429)`). Body
+    `{"error": "ai_quota_exceeded", "retry_after": "tomorrow"}`. Operator
+    cannot do anything until the upstream window resets; rotation of
+    `GEMINI_API_KEY` may restore quota sooner depending on cause.
+  Both errors must be re-raised ahead of any catch-all `except Exception`
+  in `src/core/agentic_router.py` (5 inner handlers) — otherwise the
+  generic catch swallows them and the backend re-raise at `/ask` +
+  `/insights` becomes a no-op. Locked in by
+  `tests/unit/test_gemini_budget_endpoint.py::TestBudgetExceededExceptionHandler`
+  + `::TestAIQuotaExceededExceptionHandler` (3+3 HTTP body-shape pins
+  across `/draft-outreach`, `/ask`, `/insights`).
 - `_validation_with_authz_check` (the `@app.exception_handler(RequestValidationError)`
   override in `backend/main.py`) gates Pydantic 422 responses behind the
   X-API-Key check. Without this, FastAPI's default 422 returned the full
