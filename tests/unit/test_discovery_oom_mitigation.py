@@ -198,20 +198,20 @@ async def test_resource_block_handler_aborts_or_falls_through(
 # ───────────────── scroll + container caps ────────────────────────────────
 
 
-def test_scroll_iter_default_is_three():
-    """Free-plan-survival default (2026-05-29): 5 → 3. Trades batch size for
-    OOM survival on the 512 MB Render starter. Bumped plans override via
-    DISCOVERY_MAX_SCROLL_ITERS env."""
+def test_scroll_iter_default_is_five():
+    """Default reduces from the pre-incident value of 10 to 5 — halves the
+    lazy-load pressure on each ``page.mouse.wheel`` cycle. Restored to 5
+    after Render plan bump 2026-05-29 (free-plan-survival cut to 3 reverted)."""
 
-    assert discovery_engine._MAX_SCROLL_ITERS == 3
+    assert discovery_engine._MAX_SCROLL_ITERS == 5
 
 
-def test_container_default_is_fifteen():
-    """Free-plan-survival default (2026-05-29): 30 → 15. Hard cap protects
-    against pathological Google Maps responses AND keeps the per-call
-    Chromium footprint inside the 512 MB starter envelope."""
+def test_container_default_is_thirty():
+    """Hard cap protects against pathological Google Maps responses
+    returning hundreds of result containers. Restored to 30 after Render
+    plan bump 2026-05-29 (free-plan-survival cut to 15 reverted)."""
 
-    assert discovery_engine._MAX_CONTAINERS == 15
+    assert discovery_engine._MAX_CONTAINERS == 30
 
 
 def test_caps_respect_env_overrides_and_floor_at_one(monkeypatch):

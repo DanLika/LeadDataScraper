@@ -56,11 +56,11 @@ async def _install_resource_block(context: BrowserContext) -> None:
     await context.route("**/*", _handler)
 
 
-_MAX_SCROLL_ITERS = max(1, int(os.getenv("DISCOVERY_MAX_SCROLL_ITERS", "3")))
-_MAX_CONTAINERS = max(1, int(os.getenv("DISCOVERY_MAX_CONTAINERS", "15")))
-# Free-plan-survival defaults (2026-05-29): 5→3 scrolls, 30→15 containers.
-# Trades batch size for OOM survival on Render starter (512 MB). Override via
-# DISCOVERY_MAX_SCROLL_ITERS / DISCOVERY_MAX_CONTAINERS on a bumped plan.
+_MAX_SCROLL_ITERS = max(1, int(os.getenv("DISCOVERY_MAX_SCROLL_ITERS", "5")))
+_MAX_CONTAINERS = max(1, int(os.getenv("DISCOVERY_MAX_CONTAINERS", "30")))
+# Defaults restored to 5/30 after Render plan bump starter→standard 2026-05-29
+# (2Gi headroom). Earlier free-plan-survival cuts to 3/15 are unnecessary on
+# the bumped plan and were starving yield. Tune via env on tighter plans.
 
 # Chromium flags that materially cut RSS without compromising scraping fidelity.
 # Intentionally omitted: --single-process (renderer crashes take the whole

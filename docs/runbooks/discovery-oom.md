@@ -1,10 +1,13 @@
 # Discovery OOM (Render starter, 512 MB)
 
-**Status**: FURTHER MITIGATED 2026-05-29 (second pass, branch
-`fix/discovery-free-plan-survival`). Free-plan-survival mode: smaller batches +
-stylesheets blocked + pre-flight 503 + smaller viewport + fail-fast context
-timeout. Trade-off: 30→15 max containers per call. `/events` verification on
-prod still blocked on [[render-api-key-stale-2026-05-29]] rotation.
+**Status**: RESOLVED 2026-05-29 via Render plan bump starter→standard
+(2 GB RAM, ~$25/mo). 2 concurrent `/discovery/start` calls verified post-bump:
+16 leads, 0 `oomKilled` events. Defense-in-depth code mitigations from this
+PR (preflight 503, stylesheet block, Chromium flags, smaller viewport)
+retained — they cost nothing on the bumped plan and harden against future
+memory spikes from siblings endpoints. Yield caps (scroll iters, container
+cap) restored to pre-incident defaults (5 / 30) after the bump since the
+2 GB ceiling no longer requires them. See [[render-bump-oom-resolved-2026-05-29]].
 
 ## Symptom
 
@@ -40,38 +43,39 @@ reproduce 2026-05-29 09:23 UTC, first discovery against Mostar, 32 s in).
 
 PR #397 (commit `ca9d9b06`, merged 2026-05-29) — INSUFFICIENT on starter plan.
 
-**Free-plan-survival pass** (branch `fix/discovery-free-plan-survival`,
-2026-05-29) layered on top:
+**Plan bump** (chosen 2026-05-29, ~15:07 UTC): starter → standard
+(`plan-srv-006 → plan-srv-008`, ~$25/mo). 2 concurrent `/discovery/start`
+calls post-bump returned 16 leads, 0 `oomKilled` events. Reversible via
+PATCH back. See [[render-bump-oom-resolved-2026-05-29]] for the operational
+recipe and rollback steps.
 
-1. `DISCOVERY_MAX_SCROLL_ITERS` default 5 → 3 (`discovery_engine.py:55`).
-2. `DISCOVERY_MAX_CONTAINERS` default 30 → 15 (`discovery_engine.py:56`).
-3. `_BLOCKED_RESOURCE_TYPES` adds `stylesheet` (we scrape role+aria
+**Defense-in-depth code mitigations** (PR #412, branch
+`fix/discovery-free-plan-survival`) layered on top of #397 and retained
+post-bump because cost is nil:
+
+1. `_BLOCKED_RESOURCE_TYPES` adds `stylesheet` (we scrape role+aria
    selectors, never paint). Smoke-verified locally 2026-05-29: query
    `"dentist in Mostar"` → 64 result containers in 4.2 s.
-4. Chromium launch args: `--disable-gpu --disable-dev-shm-usage
+2. Chromium launch args: `--disable-gpu --disable-dev-shm-usage
    --disable-extensions`. Intentionally **NOT** `--single-process` — renderer
    crash takes the whole browser, ~50 MB savings not worth it (advisor).
-5. Viewport 800 × 600 (smaller framebuffer + fewer compositor tiles).
-6. `context.set_default_timeout(15000)` — fail-fast on hung op.
-7. **Pre-flight 503 in `task_orchestrator.run_discovery_job`**: when
+3. Viewport 800 × 600 (smaller framebuffer + fewer compositor tiles).
+4. `context.set_default_timeout(15000)` — fail-fast on hung op.
+5. **Pre-flight 503 in `task_orchestrator.run_discovery_job`**: when
    `psutil.virtual_memory().available / MB < DISCOVERY_MIN_FREE_MB` (default
    300), raise `HTTPException(503, "Server busy, retry in 30s")` BEFORE the
    `orchestration_jobs` insert and BEFORE Chromium launch. Returns to client
-   intact; no orphan job row. Override via env (`0` disables) when on a
-   bumped plan.
+   intact; no orphan job row. Disable via `DISCOVERY_MIN_FREE_MB=0`.
+
+**Reverted at PR-412 review (post-bump)**: yield caps. Scroll iters and
+container cap defaults were temporarily cut to 3 / 15 to survive 512 MB.
+With the 2 GB ceiling, those cuts only starved yield. Restored to 5 / 30.
+Bumped-back-down knobs are still env-tunable for tighter plans.
 
 **Caveat: serialisation was already in place.** `task_orchestrator._discovery_sem
 = Semaphore(1)` (line 63) prevents parallel Chromium since PR #397. The OOM
-is footprint-per-call, not concurrency. The semaphore is necessary but not
-sufficient — that's why the second pass shrinks the footprint instead of
-the concurrency.
-
-**Trade-off**: hard cap of 15 containers per `/discovery/start` call. Operators
-running larger batches need to either (a) fire multiple sequential discoveries
-(semaphore serialises them anyway), or (b) bump the plan and raise both
-env knobs.
-
-Until operator picks a path:
+was footprint-per-call, not concurrency. Semaphore retained as part of the
+defense-in-depth posture.
 
 ```bash
 # Confirm OOM is the active cause (NOT just timeout):
@@ -81,37 +85,31 @@ curl -sS -H "Authorization: Bearer $RENDER_API_KEY" \
   | jq '.[].event | select(.type == "server_failed") | {ts: .timestamp, reason: .details.reason}'
 ```
 
-If `oomKilled.memoryLimit=512Mi`: do NOT retry `/discovery/start` until one of
-the four follow-ups below ships. Each fresh discovery will OOM again.
-
-**Operator decisions (one needed)**:
+If `oomKilled` reappears post-bump: the standard plan has been outgrown.
+Escalation options (none currently chosen, listed for future regress):
 
 1. **Subprocess isolation** — fork Chromium into separate `multiprocessing.Process`
    with own memory accounting; main FastAPI worker survives kernel OOM-kill of
    child. Cleanest single-instance fix.
-2. **Bump Render plan** starter → standard (2 GB) ≈ $25/mo. Cost-conservative
-   per [ADR-007](../adr/007-render-not-vercel.md) — operator preference.
-3. **Drop discovery route** entirely; rely on CSV ingest for lead seeding.
-4. **External browser pool** (Browserless.io / Playwright Cloud) ≈ $60/mo.
+2. **Bump Render plan** standard → pro (4 GB) ≈ $85/mo.
+3. **External browser pool** (Browserless.io / Playwright Cloud) ≈ $60/mo.
    Removes Chromium memory from Render instance.
 
 ## Recurrence guard
 
 - **CI gate** — `tests/unit/test_discovery_oom_mitigation.py` (PR #397)
   asserts the semaphore + resource-block + container/scroll caps stay
-  wired. Falls green even when peak memory remains over 512 MB — that's an
-  integration concern not a unit test. **Free-plan-survival pass note**:
-  the test asserts the *3/15 defaults* AND a stylesheet kill-list case
-  (URL alone doesn't match `_BLOCKED_URL_PATTERN`, so the abort is pinned
-  to the `_BLOCKED_RESOURCE_TYPES` frozenset entry). Revert-by-mistake
-  bumps trip CI.
-- **Live verification (operator)**: re-run a single `/discovery/start`
-  against prod, then poll `/v1/services/$SVC/events` for `oomKilled`. This
-  is the only way to confirm the second pass holds — the CI gate sees
-  defaults, not RSS. Blocked on `RENDER_API_KEY` rotation per
-  `render_api_key_stale_2026-05-29.md`. **Local-only signal so far**: smoke
-  shows containers populated + parent RSS ≤ 44 MB; child Chromium RSS not
-  measured (separate process).
+  wired. Falls green even when peak memory remains over the plan ceiling —
+  that's an integration concern not a unit test. Asserts post-bump
+  defaults (5 / 30) AND the stylesheet kill-list case (URL alone doesn't
+  match `_BLOCKED_URL_PATTERN`, so the abort is pinned to the
+  `_BLOCKED_RESOURCE_TYPES` frozenset entry). Accidental kill-list removal
+  trips CI.
+- **Post-bump live verification (operator)**: re-run 2 concurrent
+  `/discovery/start` calls against prod, then poll
+  `/v1/services/$SVC/events` for `oomKilled`. Done 2026-05-29 — 0 events.
+  Repeat after any future plan change or `discovery_engine.py` /
+  `task_orchestrator.run_discovery_job` change.
 - **Diagnostic discipline**:
   - Pull BOTH `/v1/services/$SVC/events` AND `/v1/logs` during an incident —
     OOMs only land in events.
