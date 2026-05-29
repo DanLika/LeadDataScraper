@@ -56,6 +56,11 @@ class TaskOrchestrator:
         self.db = SupabaseHelper()
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self._job_lock = asyncio.Lock()
+        # Discovery launches a fresh Chromium per call (Google Maps ~400-550 MB
+        # peak). Two parallel /discovery/start calls on a 512 MB Render starter
+        # OOM-killed the container twice on 2026-05-28 (14:46:03 / 14:51:25).
+        # Serialise discovery so only one Chromium runs at a time per worker.
+        self._discovery_sem = asyncio.Semaphore(1)
         # Active auditor + enricher per job_id, so stop_job can propagate a
         # cooperative cancel into the gather currently running inside
         # _process_in_chunks. Without this map, stop_job only flipped the DB
@@ -88,53 +93,54 @@ class TaskOrchestrator:
 
         engine = DiscoveryEngine()
 
-        try:
-            await self._update_job_status(
-                job_id,
-                {
-                    "status": "running",
-                    "current_phase": f"Searching for '{query}' in '{location}'...",
-                },
-            )
+        async with self._discovery_sem:
+            try:
+                await self._update_job_status(
+                    job_id,
+                    {
+                        "status": "running",
+                        "current_phase": f"Searching for '{query}' in '{location}'...",
+                    },
+                )
 
-            leads = await engine.find_leads(query, location)
+                leads = await engine.find_leads(query, location)
 
-            if leads and not any(l.get("status") == "CAPTCHA_REQUIRED" for l in leads):
-                # Import leads
-                self.db.upsert_leads(leads)
+                if leads and not any(l.get("status") == "CAPTCHA_REQUIRED" for l in leads):
+                    # Import leads
+                    self.db.upsert_leads(leads)
+                    await self._update_job_status(
+                        job_id,
+                        {
+                            "status": "completed",
+                            "current_phase": f"Discovery complete. Found {len(leads)} leads.",
+                            "total_count": len(leads),
+                            "processed_count": len(leads),
+                        },
+                    )
+                elif leads and any(l.get("status") == "CAPTCHA_REQUIRED" for l in leads):
+                    await self._update_job_status(
+                        job_id,
+                        {
+                            "status": "failed",
+                            "current_phase": "CAPTCHA Required - Manual intervention needed.",
+                        },
+                    )
+                else:
+                    await self._update_job_status(
+                        job_id,
+                        {
+                            "status": "completed",
+                            "current_phase": "No leads found for this query.",
+                            "total_count": 0,
+                            "processed_count": 0,
+                        },
+                    )
+            except Exception as e:
+                logger.error("Discovery job %s failed: %s", job_id, e, exc_info=True)
                 await self._update_job_status(
                     job_id,
-                    {
-                        "status": "completed",
-                        "current_phase": f"Discovery complete. Found {len(leads)} leads.",
-                        "total_count": len(leads),
-                        "processed_count": len(leads),
-                    },
+                    {"status": "failed", "current_phase": f"Discovery failed: {str(e)}"},
                 )
-            elif leads and any(l.get("status") == "CAPTCHA_REQUIRED" for l in leads):
-                await self._update_job_status(
-                    job_id,
-                    {
-                        "status": "failed",
-                        "current_phase": "CAPTCHA Required - Manual intervention needed.",
-                    },
-                )
-            else:
-                await self._update_job_status(
-                    job_id,
-                    {
-                        "status": "completed",
-                        "current_phase": "No leads found for this query.",
-                        "total_count": 0,
-                        "processed_count": 0,
-                    },
-                )
-        except Exception as e:
-            logger.error("Discovery job %s failed: %s", job_id, e, exc_info=True)
-            await self._update_job_status(
-                job_id,
-                {"status": "failed", "current_phase": f"Discovery failed: {str(e)}"},
-            )
 
     async def run_massive_pipeline(
         self,

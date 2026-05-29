@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import os
 import re
 from urllib.parse import quote_plus
 from typing import List, Optional
@@ -14,6 +15,44 @@ from src.core.agentic_router import AgenticRouter
 from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+_BLOCKED_RESOURCE_TYPES = frozenset({"image", "font", "media"})
+# Google Maps vector + raster tiles and Street View imagery — the bulk of the
+# memory footprint during scroll. We keep document/script/xhr/fetch so the
+# results panel still populates. The route handler chains BEFORE the SSRF guard
+# so blocked-type requests short-circuit; legitimate requests fall through to
+# the security check (registration order = reverse run order in Playwright).
+_BLOCKED_URL_PATTERN = re.compile(
+    r"(maps/vt(/|\?)|streetviewpixels|googleusercontent\.com|"
+    r"gstatic\.com/.*\.(png|jpg|jpeg|webp|gif|svg|ico))",
+    re.IGNORECASE,
+)
+
+
+async def _install_resource_block(context) -> None:
+    """Drop heavy media subresources during Google Maps scroll.
+
+    Cuts ~80-150 MB off single-call peak on a starter-plan container by skipping
+    tiles, images, fonts, and Street View pixels — none of which contribute to
+    the result-container DOM we actually scrape. SSRF route guard still runs on
+    everything that fell through (registered earlier = runs later)."""
+
+    async def _handler(route):
+        req = route.request
+        if (
+            req.resource_type in _BLOCKED_RESOURCE_TYPES
+            or _BLOCKED_URL_PATTERN.search(req.url)
+        ):
+            await route.abort()
+            return
+        await route.fallback()
+
+    await context.route("**/*", _handler)
+
+
+_MAX_SCROLL_ITERS = max(1, int(os.getenv("DISCOVERY_MAX_SCROLL_ITERS", "5")))
+_MAX_CONTAINERS = max(1, int(os.getenv("DISCOVERY_MAX_CONTAINERS", "30")))
 
 
 class DiscoveryEngine:
@@ -44,6 +83,11 @@ class DiscoveryEngine:
             # a subresource fetched from a private host — and keeps the SSRF
             # invariant consistent with enrichment_engine.
             await _install_ssrf_route_guard(context)
+            # Register the resource-block handler AFTER the SSRF guard so it
+            # runs FIRST (Playwright: last-registered handler dispatches first).
+            # `route.fallback()` for non-blocked requests defers to the SSRF
+            # guard, preserving the route-guard invariant on redirect chains.
+            await _install_resource_block(context)
             page = await context.new_page()
 
             try:
@@ -60,7 +104,7 @@ class DiscoveryEngine:
                 # 2. Scroll to load more results
                 # Google Maps uses a scrollable div for results. Usually it's the one with specific role.
                 prev_count = 0
-                for _ in range(10):
+                for _ in range(_MAX_SCROLL_ITERS):
                     await page.mouse.wheel(0, 8000)
                     await asyncio.sleep(2)
                     current_containers = await page.query_selector_all(
@@ -81,7 +125,8 @@ class DiscoveryEngine:
 
                 logger.info("Found %d potential result containers.", len(containers))
 
-                for container in containers[:max_results]:
+                hard_cap = min(max_results, _MAX_CONTAINERS)
+                for container in containers[:hard_cap]:
                     try:
                         lead_data = await self._extract_lead_data(page, container)
                         if lead_data:
