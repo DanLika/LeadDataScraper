@@ -20,6 +20,12 @@ CI stays green without setup.
   header / DNS-TXT lookups (26 tests)
 - `tests/test_security_defenses.py` — `fenced_json` corpus + Playwright
   route guard
+- `tests/security/test_cursor_escape.py` — `_decode_lead_cursor`
+  17-vector reject harness (charset / length / parse / RLS-bypass-intent)
+  + 1 accept round-trip baseline. Pins INFO-1 of the 2026-05-29 deep
+  RLS audit; cursor `k` interpolates raw into a PostgREST `.or_()`
+  predicate so the regex charset gate is single-point-of-failure for
+  pagination scope (18 tests; PR #418)
 - `tests/test_prompt_injection_corpus.py` — 15-payload injection corpus
   through `fenced_json` + mocked-Gemini router/draft surfaces (12 tests
   + 34 subtests)
