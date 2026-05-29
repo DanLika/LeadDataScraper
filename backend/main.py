@@ -1502,6 +1502,25 @@ async def _process_instantly_event(event_id: str, payload: dict) -> None:
     ``campaign_messages.id = lds_message_id``.
     """
 
+    # PEP-562 cron-path guard. When ``scripts/webhook_sweeper.py`` runs
+    # this handler the FastAPI lifespan never fires, so the lazy-imported
+    # ``db`` / ``router`` / ``auditor`` / ``orchestrator`` singletons in
+    # this module's globals() are still unset. Bare-name ``db.client`` /
+    # ``router.execute_task`` inside any nested function or lambda would
+    # then raise ``NameError: name 'db' is not defined`` (LOAD_GLOBAL on
+    # a missing name skips PEP-562 ``__getattr__``). Observed in prod
+    # 2026-05-28 — every 2-minute cron tick produced two NameError
+    # tracebacks at the webhook_events checkpoint UPDATE site, leaving
+    # processed_at NULL and letting the same rows replay forever.
+    # One attribute access via sys.modules triggers ``__getattr__``,
+    # which populates ``globals()['db']`` etc; subsequent bare-name uses
+    # in this handler + the ``_instantly_handle_*`` chain resolve at
+    # zero overhead. Cheap (~µs) when already primed.
+    import sys as _sys
+
+    _self_mod = _sys.modules[__name__]
+    _self_mod.db  # noqa — side-effect: primes globals()["db"] via PEP-562 __getattr__
+
     # Defense-in-depth: provider id + email round-trip into outbound
     # SMTP-adjacent payloads (In-Reply-To, To:). HMAC gates forgery, so
     # this is belt-and-braces against a future compromised-provider
