@@ -164,6 +164,10 @@ async def _run_block_handler(route):
         ("https://maps.google.com/avatar.png", "image", True),
         ("https://fonts.gstatic.com/woff2/foo.woff2", "font", True),
         ("https://example.com/ad.mp4", "media", True),
+        # Free-plan-survival 2026-05-29: stylesheet joins the kill-list.
+        # URL alone doesn't match _BLOCKED_URL_PATTERN — abort comes from
+        # the resource_type frozenset membership check.
+        ("https://www.google.com/maps/style.css", "stylesheet", True),
         # 2. URL pattern kill-list (Maps vector tiles, Street View, gstatic raster)
         ("https://www.google.com/maps/vt/pb=!1m4!1m3!1i12", "xhr", True),
         ("https://maps.googleapis.com/maps/vt?lyrs=m&x=1&y=2", "xhr", True),
@@ -196,14 +200,16 @@ async def test_resource_block_handler_aborts_or_falls_through(
 
 def test_scroll_iter_default_is_five():
     """Default reduces from the pre-incident value of 10 to 5 — halves the
-    lazy-load pressure on each ``page.mouse.wheel`` cycle."""
+    lazy-load pressure on each ``page.mouse.wheel`` cycle. Restored to 5
+    after Render plan bump 2026-05-29 (free-plan-survival cut to 3 reverted)."""
 
     assert discovery_engine._MAX_SCROLL_ITERS == 5
 
 
 def test_container_default_is_thirty():
     """Hard cap protects against pathological Google Maps responses
-    returning hundreds of result containers."""
+    returning hundreds of result containers. Restored to 30 after Render
+    plan bump 2026-05-29 (free-plan-survival cut to 15 reverted)."""
 
     assert discovery_engine._MAX_CONTAINERS == 30
 

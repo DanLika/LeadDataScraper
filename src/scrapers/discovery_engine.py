@@ -19,12 +19,16 @@ from src.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-_BLOCKED_RESOURCE_TYPES = frozenset({"image", "font", "media"})
-# Google Maps vector + raster tiles and Street View imagery — the bulk of the
-# memory footprint during scroll. We keep document/script/xhr/fetch so the
-# results panel still populates. The route handler chains BEFORE the SSRF guard
-# so blocked-type requests short-circuit; legitimate requests fall through to
-# the security check (registration order = reverse run order in Playwright).
+_BLOCKED_RESOURCE_TYPES = frozenset({"image", "font", "media", "stylesheet"})
+# Google Maps vector + raster tiles, Street View imagery, AND stylesheets — the
+# bulk of the memory footprint during scroll. Stylesheets dropped on the
+# free-plan-survival pass (2026-05-29): the results-panel DOM is identified by
+# role+aria selectors that don't depend on CSS computed style, and we don't
+# render visually. Local smoke required before ship — see runbook.
+# We keep document/script/xhr/fetch so the results panel still populates. The
+# route handler chains BEFORE the SSRF guard so blocked-type requests
+# short-circuit; legitimate requests fall through to the security check
+# (registration order = reverse run order in Playwright).
 _BLOCKED_URL_PATTERN = re.compile(
     r"(maps/vt(/|\?)|streetviewpixels|googleusercontent\.com|"
     r"gstatic\.com/.*\.(png|jpg|jpeg|webp|gif|svg|ico))",
@@ -54,6 +58,26 @@ async def _install_resource_block(context: BrowserContext) -> None:
 
 _MAX_SCROLL_ITERS = max(1, int(os.getenv("DISCOVERY_MAX_SCROLL_ITERS", "5")))
 _MAX_CONTAINERS = max(1, int(os.getenv("DISCOVERY_MAX_CONTAINERS", "30")))
+# Defaults restored to 5/30 after Render plan bump starter→standard 2026-05-29
+# (2Gi headroom). Earlier free-plan-survival cuts to 3/15 are unnecessary on
+# the bumped plan and were starving yield. Tune via env on tighter plans.
+
+# Chromium flags that materially cut RSS without compromising scraping fidelity.
+# Intentionally omitted: --single-process (renderer crashes take the whole
+# browser; ~50 MB savings not worth losing entire discoveries on a GC stall —
+# advisor 2026-05-29). --no-sandbox already provided by Microsoft Playwright
+# base image / pwuser convention; re-adding is a no-op but harmless.
+_CHROMIUM_LAUNCH_ARGS = (
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+)
+# Smaller viewport = smaller framebuffer + fewer compositor tiles. Headless
+# still renders for Maps' JS to populate the side panel.
+_DISCOVERY_VIEWPORT = {"width": 800, "height": 600}
+# Fail-fast default for per-op timeouts inside the discovery context. Below
+# this, page.goto explicit 60s and wait_for_selector explicit 10s still win.
+_DISCOVERY_CONTEXT_TIMEOUT_MS = 15000
 
 
 class DiscoveryEngine:
@@ -73,10 +97,15 @@ class DiscoveryEngine:
         leads = []
         async with async_playwright() as p:
             # Enhanced browser launch for local development
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            browser = await p.chromium.launch(
+                headless=True,
+                args=list(_CHROMIUM_LAUNCH_ARGS),
             )
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                viewport=_DISCOVERY_VIEWPORT,
+            )
+            context.set_default_timeout(_DISCOVERY_CONTEXT_TIMEOUT_MS)
             # Defence-in-depth: the search URL host is hardcoded to google.com,
             # so structural SSRF via `query` is already blocked by quote_plus
             # + fixed host. The route guard catches the remaining theoretical
