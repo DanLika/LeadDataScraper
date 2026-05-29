@@ -13,7 +13,13 @@
 # analysis. Trivy still gates merge on CRITICAL + fixable-HIGH against
 # the FULL image — the allowlist applies only to grype, the
 # second-opinion tool. Issue #363 bucket #9 cleanup.
-FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
+#
+# The `@sha256:...` digest is pinned per /security-audit:run 2026-05-29 so
+# a tag re-push at the registry can't silently swap the base layer between
+# resolve-time and build-time. Digest fetched from the MCR manifest API
+# (multi-arch index). Dependabot's docker ecosystem updates both the tag
+# AND the digest atomically on each rebuild.
+FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy@sha256:aaa8048c7a7c414fab6ad809469eb35f13bbf5093038113eef851b3c4814ad77
 
 # Build-time release tag for Sentry. Defaults to "unknown" if the build
 # context didn't pass --build-arg GIT_SHA (e.g. `docker build .` locally).
@@ -35,8 +41,15 @@ COPY requirements.txt .
 # A PyPI tampering scenario where a package's content changes between
 # resolve-time and install-time fails the install with a HashMismatch.
 # Operator regenerates the lockfile via `make lock-python`.
+# build-essential version pinned to the jammy archive snapshot at audit
+# time (12.9ubuntu3 — stable since 2022-03-23, single source of truth
+# for jammy/jammy-updates/jammy-security per packages.ubuntu.com). Pin
+# prevents an apt-side rebuild between resolve and install from swapping
+# the toolchain. Pkg is purged in this same RUN layer so it never lands
+# in the runtime image — pin guards the BUILD-TIME toolchain only.
+# Per /security-audit:run 2026-05-29.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
+    && apt-get install -y --no-install-recommends build-essential=12.9ubuntu3 \
     && pip install --no-cache-dir --require-hashes -r requirements.txt \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*

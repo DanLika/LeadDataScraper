@@ -72,6 +72,7 @@ parallel Py3.10 pytest job — pending operator decision on CI cost budget.
 | Runbook | Status | Symptom |
 |---|---|---|
 | [`lockfile-drift-recovery.md`](lockfile-drift-recovery.md) | RESOLVED (cluster #1) | `npm ci` fails across 7 jobs with `@swc/helpers` lockfile drift on Node 20 CI. |
+| [`supply-chain-pin-discipline.md`](supply-chain-pin-discipline.md) | LIVE | Carets on security-critical npm deps + bare `FROM` tag + unpinned apt — three pin classes per `/security-audit:run` 2026-05-29. |
 
 <a id="ci-cluster-discipline"></a>
 **CI cluster discipline** (per `ci_six_clusters_2026-05-28.md` memory) —
