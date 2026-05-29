@@ -65,6 +65,13 @@ slowapi==0.1.9
 # requirements.txt — the lockfile is the actual byte-level guarantee.
 sentry-sdk[fastapi]>=2.20,<3
 
+# Free-plan-survival pre-flight (2026-05-29). psutil.virtual_memory() gates
+# the /discovery/start handler so we refuse new Chromium launches when the
+# container is already near its 512 MB starter cap. Single-import, no
+# transitive churn. ABI ties to host libc + cpython — Microsoft Playwright
+# base (jammy + py3.10) has manylinux2014 wheels for any recent release.
+psutil>=6.0,<8
+
 # ---------------------------------------------------------------------------
 # Dev-time deps (test runners) — pinned in requirements.in so `make
 # lock-python` keeps them hash-locked alongside runtime deps. They DO ship

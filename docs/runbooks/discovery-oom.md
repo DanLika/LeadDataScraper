@@ -1,8 +1,10 @@
 # Discovery OOM (Render starter, 512 MB)
 
-**Status**: PARTIALLY MITIGATED. PR #397 shipped 2026-05-29 reduced footprint but
-did NOT eliminate single-discovery OOM on starter plan. Operator decision pending
-(subprocess isolation / plan bump / drop discovery / external browser pool).
+**Status**: FURTHER MITIGATED 2026-05-29 (second pass, branch
+`fix/discovery-free-plan-survival`). Free-plan-survival mode: smaller batches +
+stylesheets blocked + pre-flight 503 + smaller viewport + fail-fast context
+timeout. Trade-off: 30→15 max containers per call. `/events` verification on
+prod still blocked on [[render-api-key-stale-2026-05-29]] rotation.
 
 ## Symptom
 
@@ -38,6 +40,37 @@ reproduce 2026-05-29 09:23 UTC, first discovery against Mostar, 32 s in).
 
 PR #397 (commit `ca9d9b06`, merged 2026-05-29) — INSUFFICIENT on starter plan.
 
+**Free-plan-survival pass** (branch `fix/discovery-free-plan-survival`,
+2026-05-29) layered on top:
+
+1. `DISCOVERY_MAX_SCROLL_ITERS` default 5 → 3 (`discovery_engine.py:55`).
+2. `DISCOVERY_MAX_CONTAINERS` default 30 → 15 (`discovery_engine.py:56`).
+3. `_BLOCKED_RESOURCE_TYPES` adds `stylesheet` (we scrape role+aria
+   selectors, never paint). Smoke-verified locally 2026-05-29: query
+   `"dentist in Mostar"` → 64 result containers in 4.2 s.
+4. Chromium launch args: `--disable-gpu --disable-dev-shm-usage
+   --disable-extensions`. Intentionally **NOT** `--single-process` — renderer
+   crash takes the whole browser, ~50 MB savings not worth it (advisor).
+5. Viewport 800 × 600 (smaller framebuffer + fewer compositor tiles).
+6. `context.set_default_timeout(15000)` — fail-fast on hung op.
+7. **Pre-flight 503 in `task_orchestrator.run_discovery_job`**: when
+   `psutil.virtual_memory().available / MB < DISCOVERY_MIN_FREE_MB` (default
+   300), raise `HTTPException(503, "Server busy, retry in 30s")` BEFORE the
+   `orchestration_jobs` insert and BEFORE Chromium launch. Returns to client
+   intact; no orphan job row. Override via env (`0` disables) when on a
+   bumped plan.
+
+**Caveat: serialisation was already in place.** `task_orchestrator._discovery_sem
+= Semaphore(1)` (line 63) prevents parallel Chromium since PR #397. The OOM
+is footprint-per-call, not concurrency. The semaphore is necessary but not
+sufficient — that's why the second pass shrinks the footprint instead of
+the concurrency.
+
+**Trade-off**: hard cap of 15 containers per `/discovery/start` call. Operators
+running larger batches need to either (a) fire multiple sequential discoveries
+(semaphore serialises them anyway), or (b) bump the plan and raise both
+env knobs.
+
 Until operator picks a path:
 
 ```bash
@@ -67,7 +100,16 @@ the four follow-ups below ships. Each fresh discovery will OOM again.
 - **CI gate** — `tests/test_discovery_resource_budget.py` (PR #397) asserts
   the semaphore + resource-block + container/scroll caps stay wired. Falls
   green even when peak memory remains over 512 MB — that's an integration
-  concern not a unit test.
+  concern not a unit test. **Free-plan-survival pass note**: the test
+  asserts the *3/15 defaults* and the stylesheet entry in
+  `_BLOCKED_RESOURCE_TYPES`; revert-by-mistake bumps trip CI.
+- **Live verification (operator)**: re-run a single `/discovery/start`
+  against prod, then poll `/v1/services/$SVC/events` for `oomKilled`. This
+  is the only way to confirm the second pass holds — the CI gate sees
+  defaults, not RSS. Blocked on `RENDER_API_KEY` rotation per
+  `render_api_key_stale_2026-05-29.md`. **Local-only signal so far**: smoke
+  shows containers populated + parent RSS ≤ 44 MB; child Chromium RSS not
+  measured (separate process).
 - **Diagnostic discipline**:
   - Pull BOTH `/v1/services/$SVC/events` AND `/v1/logs` during an incident —
     OOMs only land in events.

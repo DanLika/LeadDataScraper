@@ -1,10 +1,13 @@
 import asyncio
+import os
 import uuid
 import random
 import pandas as pd
 import numpy as np
+import psutil
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+from fastapi import HTTPException
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.parallel_auditor import ParallelAuditor
 from src.scrapers.enrichment_engine import EnrichmentEngine
@@ -12,6 +15,13 @@ from src.utils.logging_config import get_logger
 from src.utils.stats_cache import stats_cache
 
 logger = get_logger(__name__)
+
+# Free-plan-survival pre-flight: refuse new discoveries when the container
+# already has less than this much RAM headroom, BEFORE Chromium launches.
+# Chromium peaks ~400-550 MB on Google Maps; with a 512 MB Render starter cap
+# anything under ~300 MB free is the danger zone (PR #397 + 2026-05-29 repro).
+# Tunable via env so a bumped plan can disable by setting 0.
+_DISCOVERY_MIN_FREE_MB = max(0, int(os.getenv("DISCOVERY_MIN_FREE_MB", "300")))
 
 # Allowlist of columns callers may filter leads by. Mirrors the API-layer
 # allowlist in backend/main.py — keep in sync. Anything outside this set is
@@ -71,6 +81,23 @@ class TaskOrchestrator:
         """
         Starts a discovery search as a trackable orchestration job.
         """
+        # Pre-flight memory check. Runs in the request path (handler awaits us),
+        # so HTTPException propagates to the client as a real 503 — refusing
+        # the job BEFORE the DB row + Chromium launch. Placing this inside
+        # _process_discovery would not help: by then the handler has returned
+        # job_id and the task runs detached (asyncio.create_task).
+        if _DISCOVERY_MIN_FREE_MB > 0:
+            available_mb = psutil.virtual_memory().available / (1024 * 1024)
+            if available_mb < _DISCOVERY_MIN_FREE_MB:
+                logger.warning(
+                    "Refusing discovery: %.0f MB free < %d MB threshold",
+                    available_mb,
+                    _DISCOVERY_MIN_FREE_MB,
+                )
+                raise HTTPException(
+                    status_code=503, detail="Server busy, retry in 30s"
+                )
+
         job_id = str(uuid.uuid4())
         job_data = {
             "id": job_id,
