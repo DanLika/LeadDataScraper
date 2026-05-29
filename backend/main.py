@@ -19,14 +19,14 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 import os
 import secrets
 import uuid
 import aiofiles
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Literal, Optional, List
+from typing import TYPE_CHECKING, Literal, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, conlist
 
@@ -59,7 +59,6 @@ from src.utils.logging_config import (
     setup_logging,
     get_logger,
     bind_request_context,
-    clear_request_context,
 )
 from src.utils.stats_cache import stats_cache
 from src.utils.gemini_budget import (
@@ -336,7 +335,9 @@ class PipelineRequest(BaseModel):
     lead_ids: Optional[
         conlist(safe_constr(min_length=1, max_length=128), max_length=10_000)
     ] = None
-    tasks: Optional[conlist(safe_constr(min_length=1, max_length=64), max_length=64)] = None
+    tasks: Optional[
+        conlist(safe_constr(min_length=1, max_length=64), max_length=64)
+    ] = None
 
 
 # /execute is the AI router's "execute the proposed plan" surface. Lock the
