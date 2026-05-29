@@ -6,7 +6,9 @@ from urllib.parse import quote_plus
 from typing import List, Optional
 from playwright.async_api import (
     async_playwright,
+    BrowserContext,
     Error as PlaywrightError,
+    Route,
     TimeoutError as PlaywrightTimeoutError,
 )
 from src.scrapers.enrichment_engine import _install_ssrf_route_guard
@@ -30,7 +32,7 @@ _BLOCKED_URL_PATTERN = re.compile(
 )
 
 
-async def _install_resource_block(context) -> None:
+async def _install_resource_block(context: BrowserContext) -> None:
     """Drop heavy media subresources during Google Maps scroll.
 
     Cuts ~80-150 MB off single-call peak on a starter-plan container by skipping
@@ -38,11 +40,10 @@ async def _install_resource_block(context) -> None:
     the result-container DOM we actually scrape. SSRF route guard still runs on
     everything that fell through (registered earlier = runs later)."""
 
-    async def _handler(route):
+    async def _handler(route: Route) -> None:
         req = route.request
-        if (
-            req.resource_type in _BLOCKED_RESOURCE_TYPES
-            or _BLOCKED_URL_PATTERN.search(req.url)
+        if req.resource_type in _BLOCKED_RESOURCE_TYPES or _BLOCKED_URL_PATTERN.search(
+            req.url
         ):
             await route.abort()
             return
