@@ -49,6 +49,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from src.utils.datetime_helper import parse_iso_timestamp
+
 logger = logging.getLogger(__name__)
 
 
@@ -484,7 +486,7 @@ class CampaignMessageRepository:
         from datetime import datetime, timedelta, timezone
 
         now = (
-            datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+            parse_iso_timestamp(now_iso)
             if now_iso
             else datetime.now(timezone.utc)
         )
