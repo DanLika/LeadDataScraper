@@ -27,6 +27,7 @@ import uuid
 import aiofiles
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Literal, Optional, List
+from src.utils.datetime_helper import parse_iso_timestamp
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, conlist
 
@@ -1649,9 +1650,7 @@ async def _instantly_handle_sent(
         step_repo = SequenceStepRepository(db.client)
         try:
             parsed_sent = (
-                datetime.fromisoformat(sent_at_iso.replace("Z", "+00:00"))
-                if sent_at_iso
-                else None
+                parse_iso_timestamp(sent_at_iso) if sent_at_iso else None
             )
         except ValueError:
             parsed_sent = None
@@ -2071,7 +2070,7 @@ def _decode_lead_cursor(cursor: str) -> Optional[dict]:
         if not _CURSOR_KEY_PATTERN.fullmatch(k):
             return None
         # ISO timestamp sanity check — parse will reject garbage.
-        datetime.fromisoformat(c.replace("Z", "+00:00"))
+        parse_iso_timestamp(c)
         return {"c": c, "k": k}
     except Exception:  # noqa: BLE001 — any failure means malformed input
         return None

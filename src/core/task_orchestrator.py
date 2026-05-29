@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+from src.utils.datetime_helper import parse_iso_timestamp
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.parallel_auditor import ParallelAuditor
 from src.scrapers.enrichment_engine import EnrichmentEngine
@@ -661,9 +662,7 @@ class TaskOrchestrator:
 
         now = datetime.now(timezone.utc)
         for job in response.data:
-            updated_at = datetime.fromisoformat(
-                job["updated_at"].replace("Z", "+00:00")
-            )
+            updated_at = parse_iso_timestamp(job["updated_at"])
             if (now - updated_at).total_seconds() > 600:
                 await self._update_job_status(
                     job["id"],
