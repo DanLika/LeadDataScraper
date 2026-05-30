@@ -10,14 +10,8 @@
  *   - Cookie with `SameSite=None` → MUST collapse to `Lax`.
  *   - Cookie missing `HttpOnly` → MUST be added.
  *   - Cookie `Domain` set wider than current origin (`.com`, leading
- *     dot, attacker-host) → DOCUMENTED CURRENT BEHAVIOR: floor passes
- *     domain through unchanged. The same-origin defense lives at the
- *     `Set-Cookie` parser layer (browser refuses `Domain=.com`). A
- *     belt-and-braces narrow-domain check would harden further; left
- *     as a TODO with a failing assertion the operator can promote.
- *   - `__Host-` prefix violations — DOCUMENTED: the `__Host-` semantics
- *     are enforced by the BROWSER (no Domain attr, Path=/, Secure).
- *     The floor doesn't know the cookie name; left as a TODO.
+ *     dot, attacker-host) → MUST be narrowed to the current host or stripped.
+ *   - `__Host-` prefix violations → MUST be stripped of Domain and given Path=/.
  *
  * The malformed-options cases (mostly type confusion) are full coverage:
  * every input must yield a `{sameSite, httpOnly, secure}` triple the
@@ -141,28 +135,45 @@ for (const ss of SAMESITE_INPUTS) {
 }
 
 
-// ── Documented gaps. These tests use `.skip` to surface what the floor
-// could harden against; promote them to live tests when the production
-// code adds these defenses. ──
+// ── Advanced hardening features ──
 
-test.skip('TODO: Domain wider than current origin should be narrowed', () => {
-  // `hardenCookieOptions` currently lets `domain: '.com'` or
-  // `domain: 'evil.com'` pass through. The browser's cookie parser
-  // would reject `.com` (TLD too broad) but a sibling-host cookie like
-  // `.example.com` set from `app.example.com` is accepted. If the floor
-  // ever moves to a context-aware variant (knows current host),
-  // promote this test.
-  const out = hardenCookieOptions(
-    { sameSite: 'lax', domain: '.com' },
-  )
-  // Expectation: floor strips invalid domain or narrows to host-only.
-  assert.notEqual(out.domain, '.com')
+test('Domain wider than current origin or unrelated should be stripped', () => {
+  // Broad TLD is stripped
+  const out1 = hardenCookieOptions({ sameSite: 'lax', domain: '.com' }, 'sb-test', 'app.example.com')
+  assert.equal(out1.domain, undefined)
+
+  // Sibling host is stripped
+  const out2 = hardenCookieOptions({ sameSite: 'lax', domain: 'evil.com' }, 'sb-test', 'app.example.com')
+  assert.equal(out2.domain, undefined)
+
+  // Single label domains are stripped unless localhost
+  const out3 = hardenCookieOptions({ sameSite: 'lax', domain: 'invalid' }, 'sb-test', 'app.example.com')
+  assert.equal(out3.domain, undefined)
+
+  // Parent domain without leading dot is preserved
+  const out4 = hardenCookieOptions({ sameSite: 'lax', domain: 'example.com' }, 'sb-test', 'app.example.com')
+  assert.equal(out4.domain, 'example.com')
+
+  // Parent domain with leading dot is preserved
+  const out5 = hardenCookieOptions({ sameSite: 'lax', domain: '.example.com' }, 'sb-test', 'app.example.com')
+  assert.equal(out5.domain, '.example.com')
+
+  // Exact match is preserved
+  const out6 = hardenCookieOptions({ sameSite: 'lax', domain: 'app.example.com' }, 'sb-test', 'app.example.com')
+  assert.equal(out6.domain, 'app.example.com')
+
+  // Port in currentHost is stripped before check
+  const out7 = hardenCookieOptions({ sameSite: 'lax', domain: 'app.example.com' }, 'sb-test', 'app.example.com:3000')
+  assert.equal(out7.domain, 'app.example.com')
 })
 
-test.skip("TODO: __Host- prefixed cookies must have Path=/ and no Domain", () => {
-  // The `__Host-` prefix is a browser-enforced constraint: cookie name
-  // starts with `__Host-` → must be Secure, Path=/, no Domain. The
-  // floor doesn't see the cookie NAME today (it only gets options).
-  // If the API surface grows to include the name, validate the prefix
-  // rules here.
+test("__Host- prefixed cookies must have Path=/ and no Domain", () => {
+  const out = hardenCookieOptions(
+    { sameSite: 'lax', domain: 'example.com', path: '/foo' },
+    '__Host-session',
+    'app.example.com'
+  )
+  assert.equal(out.domain, undefined)
+  assert.equal(out.path, '/')
+  assert.equal(out.secure, true)
 })

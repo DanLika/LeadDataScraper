@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { hardenCookieOptions } from './cookie-floor.mjs'
 
 export async function createClient() {
@@ -13,13 +13,16 @@ export async function createClient() {
         getAll() {
           return cookieStore.getAll()
         },
-        setAll(cookiesToSet) {
+        async setAll(cookiesToSet) {
           // Cookie floor lives in cookie-floor.mjs (pure helper, unit-tested).
           // Used on Server Action paths (e.g. login) where the cookie is set
           // directly during the action handler, not via middleware.
           try {
+            const resolvedHeaders = await headers()
+            const hostHeader = resolvedHeaders.get('x-forwarded-host') || resolvedHeaders.get('host') || ''
+            const hostname = hostHeader.split(':')[0]
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, hardenCookieOptions(options))
+              cookieStore.set(name, value, hardenCookieOptions(options, name, hostname))
             })
           } catch {
             // The `setAll` method was called from a Server Component, which
