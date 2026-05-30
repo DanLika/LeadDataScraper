@@ -159,10 +159,22 @@ test.skip('TODO: Domain wider than current origin should be narrowed', () => {
   assert.notEqual(out.domain, '.com')
 })
 
-test.skip("TODO: __Host- prefixed cookies must have Path=/ and no Domain", () => {
+test("__Host- prefixed cookies must have Path=/ and no Domain", () => {
   // The `__Host-` prefix is a browser-enforced constraint: cookie name
-  // starts with `__Host-` → must be Secure, Path=/, no Domain. The
-  // floor doesn't see the cookie NAME today (it only gets options).
-  // If the API surface grows to include the name, validate the prefix
-  // rules here.
+  // starts with `__Host-` → must be Secure, Path=/, no Domain.
+  const input = {
+    sameSite: 'lax',
+    domain: '.example.com',
+    path: '/custom',
+  }
+
+  const outHost = hardenCookieOptions(input, '__Host-session')
+  assert.equal(outHost.path, '/')
+  assert.equal(outHost.domain, undefined)
+  assert.equal(outHost.secure, true)
+
+  // A non-host cookie passes domain and path through
+  const outNormal = hardenCookieOptions(input, 'normal-cookie')
+  assert.equal(outNormal.path, '/custom')
+  assert.equal(outNormal.domain, '.example.com')
 })
