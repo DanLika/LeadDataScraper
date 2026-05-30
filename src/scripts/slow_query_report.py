@@ -61,6 +61,99 @@ def _preview(query_text: str) -> str:
     return flat if len(flat) <= QUERY_PREVIEW_LEN else flat[:QUERY_PREVIEW_LEN] + "…"
 
 
+def _analyze_top_queries(conn: psycopg.Connection, report: list[str]) -> None:
+    # --- Section 1: top by total_exec_time ---
+    # LIKE patterns bound as parameters — inline `%` in 'EXPLAIN%' /
+    # '%pg_stat_statements%' collides with psycopg's placeholder
+    # parser (only %s/%b/%t allowed), which is how this gate has
+    # been failing silently since it landed. Param binding side-
+    # steps the parser entirely.
+    cur = conn.execute(
+        "SELECT calls, total_exec_time, mean_exec_time, query "
+        "FROM pg_stat_statements "
+        "WHERE query NOT ILIKE %s "
+        "  AND query NOT ILIKE %s "
+        "ORDER BY total_exec_time DESC "
+        "LIMIT %s",
+        ("EXPLAIN%", "%pg_stat_statements%", TOP_N),
+    )
+    report.append("")
+    report.append(f"  Top {TOP_N} by total_exec_time:")
+    for calls, total_ms, mean_ms, qtext in cur.fetchall():
+        report.append(
+            f"    total={float(total_ms):>10.0f} ms  "
+            f"mean={float(mean_ms):>7.1f} ms  "
+            f"calls={int(calls):>7}  {_preview(qtext)}"
+        )
+
+
+def _analyze_slow_queries(conn: psycopg.Connection, report: list[str], findings: list[str]) -> None:
+    # --- Section 2: mean_exec_time > 1s ---
+    cur = conn.execute(
+        "SELECT calls, mean_exec_time, query "
+        "FROM pg_stat_statements "
+        "WHERE mean_exec_time > %s "
+        "  AND query NOT ILIKE %s "
+        "  AND query NOT ILIKE %s "
+        "ORDER BY mean_exec_time DESC",
+        (MEAN_EXEC_SLOW_MS, "EXPLAIN%", "%pg_stat_statements%"),
+    )
+    slow_rows = cur.fetchall()
+    report.append("")
+    report.append(f"  Queries with mean_exec_time > {MEAN_EXEC_SLOW_MS:.0f} ms:")
+    if not slow_rows:
+        report.append("    (none)")
+    for calls, mean_ms, qtext in slow_rows:
+        report.append(
+            f"    mean={float(mean_ms):>7.1f} ms  calls={int(calls):>7}  "
+            f"{_preview(qtext)}"
+        )
+        findings.append(
+            f"slow query (mean {float(mean_ms):.0f}ms, called "
+            f"{int(calls)}x): {_preview(qtext)}"
+        )
+
+
+def _analyze_cold_queries(conn: psycopg.Connection, report: list[str], findings: list[str]) -> None:
+    # --- Section 3: low cache hit ratio on hot queries ---
+    cur = conn.execute(
+        "SELECT calls, mean_exec_time, "
+        "       shared_blks_hit, shared_blks_read, query "
+        "FROM pg_stat_statements "
+        "WHERE calls >= %s "
+        "  AND (shared_blks_hit + shared_blks_read) > 0 "
+        "  AND query NOT ILIKE %s "
+        "  AND query NOT ILIKE %s",
+        (HOT_QUERY_MIN_CALLS, "EXPLAIN%", "%pg_stat_statements%"),
+    )
+    cold_rows: list[tuple[float, int, float, str]] = []
+    for calls, mean_ms, hit, read, qtext in cur.fetchall():
+        denom = int(hit) + int(read)
+        if denom == 0:
+            continue
+        ratio = int(hit) / denom
+        if ratio < CACHE_HIT_FLOOR:
+            cold_rows.append((ratio, int(calls), float(mean_ms), qtext))
+    cold_rows.sort()  # lowest ratio first
+    report.append("")
+    report.append(
+        f"  Hot queries (calls ≥ {HOT_QUERY_MIN_CALLS}) with cache hit ratio "
+        f"< {CACHE_HIT_FLOOR:.0%}:"
+    )
+    if not cold_rows:
+        report.append("    (none)")
+    for ratio, calls, mean_ms, qtext in cold_rows:
+        report.append(
+            f"    cache_hit={ratio:>6.2%}  calls={calls:>7}  "
+            f"mean={mean_ms:>6.1f}ms  {_preview(qtext)}"
+        )
+        findings.append(
+            f"cold hot-path query (cache_hit={ratio:.1%}, "
+            f"{calls} calls): index opportunity for "
+            f"{_preview(qtext)}"
+        )
+
+
 def main() -> int:
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -85,92 +178,9 @@ def main() -> int:
             )
             return 2
 
-        # --- Section 1: top by total_exec_time ---
-        # LIKE patterns bound as parameters — inline `%` in 'EXPLAIN%' /
-        # '%pg_stat_statements%' collides with psycopg's placeholder
-        # parser (only %s/%b/%t allowed), which is how this gate has
-        # been failing silently since it landed. Param binding side-
-        # steps the parser entirely.
-        cur = conn.execute(
-            "SELECT calls, total_exec_time, mean_exec_time, query "
-            "FROM pg_stat_statements "
-            "WHERE query NOT ILIKE %s "
-            "  AND query NOT ILIKE %s "
-            "ORDER BY total_exec_time DESC "
-            "LIMIT %s",
-            ("EXPLAIN%", "%pg_stat_statements%", TOP_N),
-        )
-        report.append("")
-        report.append(f"  Top {TOP_N} by total_exec_time:")
-        for calls, total_ms, mean_ms, qtext in cur.fetchall():
-            report.append(
-                f"    total={float(total_ms):>10.0f} ms  "
-                f"mean={float(mean_ms):>7.1f} ms  "
-                f"calls={int(calls):>7}  {_preview(qtext)}"
-            )
-
-        # --- Section 2: mean_exec_time > 1s ---
-        cur = conn.execute(
-            "SELECT calls, mean_exec_time, query "
-            "FROM pg_stat_statements "
-            "WHERE mean_exec_time > %s "
-            "  AND query NOT ILIKE %s "
-            "  AND query NOT ILIKE %s "
-            "ORDER BY mean_exec_time DESC",
-            (MEAN_EXEC_SLOW_MS, "EXPLAIN%", "%pg_stat_statements%"),
-        )
-        slow_rows = cur.fetchall()
-        report.append("")
-        report.append(f"  Queries with mean_exec_time > {MEAN_EXEC_SLOW_MS:.0f} ms:")
-        if not slow_rows:
-            report.append("    (none)")
-        for calls, mean_ms, qtext in slow_rows:
-            report.append(
-                f"    mean={float(mean_ms):>7.1f} ms  calls={int(calls):>7}  "
-                f"{_preview(qtext)}"
-            )
-            findings.append(
-                f"slow query (mean {float(mean_ms):.0f}ms, called "
-                f"{int(calls)}x): {_preview(qtext)}"
-            )
-
-        # --- Section 3: low cache hit ratio on hot queries ---
-        cur = conn.execute(
-            "SELECT calls, mean_exec_time, "
-            "       shared_blks_hit, shared_blks_read, query "
-            "FROM pg_stat_statements "
-            "WHERE calls >= %s "
-            "  AND (shared_blks_hit + shared_blks_read) > 0 "
-            "  AND query NOT ILIKE %s "
-            "  AND query NOT ILIKE %s",
-            (HOT_QUERY_MIN_CALLS, "EXPLAIN%", "%pg_stat_statements%"),
-        )
-        cold_rows: list[tuple[float, int, float, str]] = []
-        for calls, mean_ms, hit, read, qtext in cur.fetchall():
-            denom = int(hit) + int(read)
-            if denom == 0:
-                continue
-            ratio = int(hit) / denom
-            if ratio < CACHE_HIT_FLOOR:
-                cold_rows.append((ratio, int(calls), float(mean_ms), qtext))
-        cold_rows.sort()  # lowest ratio first
-        report.append("")
-        report.append(
-            f"  Hot queries (calls ≥ {HOT_QUERY_MIN_CALLS}) with cache hit ratio "
-            f"< {CACHE_HIT_FLOOR:.0%}:"
-        )
-        if not cold_rows:
-            report.append("    (none)")
-        for ratio, calls, mean_ms, qtext in cold_rows:
-            report.append(
-                f"    cache_hit={ratio:>6.2%}  calls={calls:>7}  "
-                f"mean={mean_ms:>6.1f}ms  {_preview(qtext)}"
-            )
-            findings.append(
-                f"cold hot-path query (cache_hit={ratio:.1%}, "
-                f"{calls} calls): index opportunity for "
-                f"{_preview(qtext)}"
-            )
+        _analyze_top_queries(conn, report)
+        _analyze_slow_queries(conn, report, findings)
+        _analyze_cold_queries(conn, report, findings)
     except psycopg.Error as e:
         print(f"ERROR: pg_stat_statements query failed: {e}", file=sys.stderr)
         conn.close()
