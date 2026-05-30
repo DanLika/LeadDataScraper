@@ -31,6 +31,28 @@ _MARKETING_PATTERN = re.compile(r"pixel|analytics|tracking|ga4")
 _ENTERPRISE_PATTERN = re.compile(r"enterprise|fortune|corporate")
 _LOCAL_SMB_PATTERN = re.compile(r"small|local|home|residential|shop")
 
+_JUNK_EMAILS = (
+    "example.com",
+    "email.com",
+    "yourname",
+    "sentry.io",
+    "wixpress.com",
+    "domain.com",
+    "test.com",
+    "info@wix.com",
+    "noreply",
+    "support@wix.com",
+    "placeholder",
+    "my-email",
+    "abuse@",
+    "postmaster@",
+    "security@",
+    "generic@",
+    "office@domain.com",
+    "spam@",
+    "mailer-daemon",
+)
+
 # --- Crawlbase API Tokens (Configurable via ENV) ---
 CRAWLBASE_NORMAL_TOKEN = os.environ.get("CRAWLBASE_NORMAL_TOKEN")
 CRAWLBASE_JS_TOKEN = os.environ.get("CRAWLBASE_JS_TOKEN")
@@ -184,31 +206,15 @@ class LeadHunter:
             emails = re.findall(email_regex, html[:50_000], re.IGNORECASE)
 
             # Filter out obvious junk
+            seen = set()
             for email in emails:
                 email = email.lower()
-                # Expanded junk list based on production data
-                junk_list = [
-                    "example.com",
-                    "email.com",
-                    "yourname",
-                    "sentry.io",
-                    "wixpress.com",
-                    "domain.com",
-                    "test.com",
-                    "info@wix.com",
-                    "noreply",
-                    "support@wix.com",
-                    "placeholder",
-                    "my-email",
-                    "abuse@",
-                    "postmaster@",
-                    "security@",
-                    "generic@",
-                    "office@domain.com",
-                    "spam@",
-                    "mailer-daemon",
-                ]
-                if any(x in email for x in junk_list) or len(email) < 5:
+
+                if email in seen:
+                    continue
+                seen.add(email)
+
+                if any(x in email for x in _JUNK_EMAILS) or len(email) < 5:
                     continue
                 return email
         return None
