@@ -59,7 +59,7 @@ def _make_orchestrator_with_in_memory_jobs() -> tuple[TaskOrchestrator, List[Dic
 
 
 @pytest.mark.asyncio
-async def test_concurrent_run_massive_pipeline_dedups_to_single_job():
+async def test_concurrent_run_massive_pipeline_dedups_to_single_job() -> None:
     """Two concurrent calls without lead_ids must collapse to one job_id.
 
     Asserts the fix: INSERT writes status='running' (not 'starting'), so
@@ -71,10 +71,10 @@ async def test_concurrent_run_massive_pipeline_dedups_to_single_job():
     # Block _process_in_chunks: in real life it kicks off an audit pass
     # that runs for minutes. Replace with a no-op so the test does not
     # require any background work to complete.
-    async def no_op_process_in_chunks(*_args, **_kwargs):
+    async def no_op_process_in_chunks(*_args: Any, **_kwargs: Any) -> None:
         await asyncio.sleep(0)
 
-    orchestrator._process_in_chunks = no_op_process_in_chunks  # type: ignore[assignment]
+    orchestrator._process_in_chunks = no_op_process_in_chunks  # type: ignore[method-assign]
 
     # Fire two concurrent calls (mimics the T4 race: /process-all + /hunt-all).
     results = await asyncio.gather(
@@ -101,7 +101,7 @@ async def test_concurrent_run_massive_pipeline_dedups_to_single_job():
 
 
 @pytest.mark.asyncio
-async def test_serial_second_call_returns_existing_job_id():
+async def test_serial_second_call_returns_existing_job_id() -> None:
     """Non-concurrent dedup still works: a second call after the first
     completes its lock-protected INSERT must return the first job_id.
 
@@ -112,10 +112,10 @@ async def test_serial_second_call_returns_existing_job_id():
     """
     orchestrator, jobs = _make_orchestrator_with_in_memory_jobs()
 
-    async def no_op_process_in_chunks(*_args, **_kwargs):
+    async def no_op_process_in_chunks(*_args: Any, **_kwargs: Any) -> None:
         await asyncio.sleep(0)
 
-    orchestrator._process_in_chunks = no_op_process_in_chunks  # type: ignore[assignment]
+    orchestrator._process_in_chunks = no_op_process_in_chunks  # type: ignore[method-assign]
 
     first = await orchestrator.run_massive_pipeline(tasks=["audit"])
     second = await orchestrator.run_massive_pipeline(tasks=["hunt"])
@@ -127,7 +127,7 @@ async def test_serial_second_call_returns_existing_job_id():
 
 
 @pytest.mark.asyncio
-async def test_explicit_lead_ids_always_creates_new_job():
+async def test_explicit_lead_ids_always_creates_new_job() -> None:
     """When lead_ids is passed, dedup is intentionally bypassed — each
     explicit-IDs request gets its own job.
 
@@ -137,10 +137,10 @@ async def test_explicit_lead_ids_always_creates_new_job():
     """
     orchestrator, jobs = _make_orchestrator_with_in_memory_jobs()
 
-    async def no_op_process_in_chunks(*_args, **_kwargs):
+    async def no_op_process_in_chunks(*_args: Any, **_kwargs: Any) -> None:
         await asyncio.sleep(0)
 
-    orchestrator._process_in_chunks = no_op_process_in_chunks  # type: ignore[assignment]
+    orchestrator._process_in_chunks = no_op_process_in_chunks  # type: ignore[method-assign]
 
     first = await orchestrator.run_massive_pipeline(lead_ids=["k1"], tasks=["audit"])
     second = await orchestrator.run_massive_pipeline(lead_ids=["k2"], tasks=["audit"])
