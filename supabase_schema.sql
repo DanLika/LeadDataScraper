@@ -1183,3 +1183,170 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_message_per_lead_sequence_step
 
 COMMENT ON COLUMN public.campaign_messages.sequence_id IS
     'Denormalized from step_id → sequence_steps.sequence_id (Phase 15.4). Lets cancel_pending_steps_for_lead filter per-sequence without a join. NULL on legacy 15.1 rows + single-shot pre-15 rows; partial UNIQUE index uniq_message_per_lead_sequence_step excludes those.';
+
+-- ===========================================================================
+-- Phase 16 — Reply classification + auto-pause state machine
+-- ---------------------------------------------------------------------------
+-- Closes the dispatch loop: inbound replies (Resend webhook, PR β / T2)
+-- get classified by Claude Haiku 4.5 into 11 buckets; terminal classes
+-- (interested / not_interested / unsubscribe_request / complaint) flip
+-- sequences.paused_on_reply true so dispatch_tick stops walking the
+-- sequence forward for that lead.
+--
+-- Three additions:
+--
+--   * reply_classifications — one row per classified reply. The async
+--     classifier writes here after Haiku 4.5 returns. UNIQUE
+--     (lead_unique_key, message_body_hash) makes the write idempotent
+--     under provider retries + classifier replay — mirrors
+--     webhook_events posture for the same threat model.
+--
+--   * sequences.paused_on_reply BOOLEAN + .pause_reason TEXT — distinct
+--     from existing sequences.status='paused' (operator pause). Lets the
+--     operator UI distinguish "auto-paused by reply" from "manually
+--     paused" + surface the human-readable reason. pause_reason is
+--     intentionally free-form (≤200 chars) — classifier may emit
+--     "interested @ 0.92" or operator-typed audit text.
+--
+--   * campaign_messages.status += 'paused_by_reply' — extends the
+--     existing allowlist via DROP+ADD with the SAME constraint name so
+--     the drift gate continues to see exactly one
+--     campaign_messages_status_allowed. dispatch_tick already skips
+--     non-'pending' rows; this lets reporting distinguish operator
+--     cancel ('cancelled') from auto-pause ('paused_by_reply').
+--
+-- FK shape note: reply_classifications.lead_unique_key TEXT references
+-- leads(unique_key) — NOT a UUID lead_id. leads has no surface UUID PK
+-- (Phase 16 drift fix at line 5 removed it to match live DB); unique_key
+-- is the de-facto natural key already used by campaign_messages,
+-- suppressions, email_send_ledger.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS public.reply_classifications (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    lead_unique_key     TEXT NOT NULL REFERENCES public.leads(unique_key) ON DELETE CASCADE,
+    campaign_message_id UUID REFERENCES public.campaign_messages(id) ON DELETE SET NULL,
+    message_body_hash   TEXT NOT NULL,
+    classification      TEXT NOT NULL,
+    confidence          DOUBLE PRECISION NOT NULL,
+    reasoning           TEXT,
+    model_version       TEXT NOT NULL,
+    classified_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+    ALTER TABLE public.reply_classifications
+        ADD CONSTRAINT reply_classifications_classification_allowed
+        CHECK (classification IN (
+            'interested', 'not_interested', 'ooo', 'wrong_person',
+            'asking_for_info', 'unsubscribe_request', 'complaint',
+            'bounce_soft', 'bounce_hard', 'auto_reply', 'other'
+        ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.reply_classifications
+        ADD CONSTRAINT reply_classifications_confidence_range
+        CHECK (confidence >= 0 AND confidence <= 1);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Body-hash shape gate. Production classifier emits 64-char lowercase
+-- SHA256 hex; the [16, 128] window leaves room for alternative digest
+-- choices (BLAKE2 truncated, SHA3-256) without a schema change.
+DO $$ BEGIN
+    ALTER TABLE public.reply_classifications
+        ADD CONSTRAINT reply_classifications_body_hash_format
+        CHECK (length(message_body_hash) BETWEEN 16 AND 128);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Idempotency key: a re-fired webhook for the same reply body, or a
+-- classifier replay, hits 23505 instead of double-writing. Matches the
+-- webhook_events (provider, event_id) UNIQUE posture.
+DO $$ BEGIN
+    ALTER TABLE public.reply_classifications
+        ADD CONSTRAINT reply_classifications_unique_classification
+        UNIQUE (lead_unique_key, message_body_hash);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Hot-path index — operator UI loads "latest reply per lead". DESC on
+-- classified_at so the index alone answers the query.
+CREATE INDEX IF NOT EXISTS idx_reply_classifications_lead_recent
+    ON public.reply_classifications (lead_unique_key, classified_at DESC);
+
+-- Reporting index — daily digest groups by classification for the
+-- "10 hottest replies" rollup.
+CREATE INDEX IF NOT EXISTS idx_reply_classifications_classification
+    ON public.reply_classifications (classification);
+
+ALTER TABLE public.reply_classifications ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.reply_classifications FROM anon, authenticated, PUBLIC;
+
+DO $$ BEGIN
+    CREATE POLICY reply_classifications_deny_all ON public.reply_classifications
+        AS RESTRICTIVE
+        FOR ALL
+        TO anon, authenticated
+        USING (false)
+        WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+COMMENT ON TABLE public.reply_classifications IS
+    'Phase 16 — one row per classified inbound reply. Written async by the Resend webhook handler (PR β / Terminal 2) after Claude Haiku 4.5 classification. The (lead_unique_key, message_body_hash) UNIQUE constraint is the idempotency key under provider retries + classifier replay.';
+COMMENT ON COLUMN public.reply_classifications.classification IS
+    '11-bucket enum (CHECK reply_classifications_classification_allowed): interested, not_interested, ooo, wrong_person, asking_for_info, unsubscribe_request, complaint, bounce_soft, bounce_hard, auto_reply, other. Terminal classes (interested, not_interested, unsubscribe_request, complaint) trigger sequences.paused_on_reply auto-flip in the dispatcher.';
+COMMENT ON COLUMN public.reply_classifications.confidence IS
+    'Model-reported confidence ∈ [0, 1]. Auto-pause threshold lives in src/services/reply_classifier.py CONFIDENCE_MIN; values below threshold fall through to operator review without triggering pause.';
+COMMENT ON COLUMN public.reply_classifications.message_body_hash IS
+    'SHA256 hex of the pre-processed reply body (quoted-text + signature + footer stripped). Idempotency key under (lead_unique_key, message_body_hash) UNIQUE.';
+
+-- ---------------------------------------------------------------------------
+-- sequences: paused_on_reply marker + pause_reason audit string.
+-- One ALTER per column so the drift gate's single-column ADD-COLUMN
+-- regex matches both declarations (multi-clause ALTER only matches the
+-- first column — pinned lesson from Phase 14.2 trade-off comment above).
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.sequences
+    ADD COLUMN IF NOT EXISTS paused_on_reply BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.sequences
+    ADD COLUMN IF NOT EXISTS pause_reason TEXT;
+
+DO $$ BEGIN
+    ALTER TABLE public.sequences
+        ADD CONSTRAINT sequences_pause_reason_size
+        CHECK (pause_reason IS NULL OR length(pause_reason) <= 200);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Hot-path partial — dispatch_tick filters out paused_on_reply=true
+-- rows on every iteration. Partial WHERE skips the long tail of
+-- still-active sequences (which is most of them).
+CREATE INDEX IF NOT EXISTS idx_sequences_paused_on_reply
+    ON public.sequences (paused_on_reply)
+    WHERE paused_on_reply = true;
+
+COMMENT ON COLUMN public.sequences.paused_on_reply IS
+    'Phase 16 — true when the auto-pause kicked in because a classified reply landed in a terminal bucket (interested, not_interested, unsubscribe_request, complaint). Distinct from sequences.status=''paused'' (manual operator pause); both can be true simultaneously.';
+COMMENT ON COLUMN public.sequences.pause_reason IS
+    'Phase 16 — human-readable reason the sequence was auto-paused (≤200 chars). Free-form, classifier-supplied (typical: ''<classification> @ <confidence>'') or operator-typed for manual pause. No enum CHECK by design — audit string, not control flow.';
+
+-- ---------------------------------------------------------------------------
+-- campaign_messages.status: extend allowlist with 'paused_by_reply'.
+-- DROP+ADD with the SAME constraint name so the drift gate continues to
+-- see exactly one campaign_messages_status_allowed entry. The
+-- EXPECTED_CHECK_CONSTRAINTS dict in schema_drift_check.py does NOT
+-- change for this edit — same constraint name, same table.
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+    ALTER TABLE public.campaign_messages
+        DROP CONSTRAINT IF EXISTS campaign_messages_status_allowed;
+EXCEPTION WHEN undefined_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE public.campaign_messages
+        ADD CONSTRAINT campaign_messages_status_allowed
+        CHECK (status IS NULL OR status IN (
+            'pending', 'dispatching', 'sent', 'delivered',
+            'replied', 'bounced', 'unsubscribed', 'cancelled', 'failed',
+            'paused_by_reply'
+        ));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
