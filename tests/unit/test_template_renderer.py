@@ -136,7 +136,7 @@ class TestRender(unittest.TestCase):
         self.assertIn("<script>", out)
 
     def test_none_template_returns_empty_string(self) -> None:
-        self.assertEqual(render(None, {}), "")
+        self.assertEqual(render(None, {}), "")  # type: ignore[arg-type]
 
     def test_syntax_error_raises_template_error(self) -> None:
         with self.assertRaises(TemplateError):
