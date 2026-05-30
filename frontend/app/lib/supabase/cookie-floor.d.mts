@@ -19,4 +19,5 @@ export interface HardenedCookieOptions extends SupabaseCookieOptions {
 
 export function hardenCookieOptions(
   options: SupabaseCookieOptions | undefined,
+  cookieName?: string,
 ): HardenedCookieOptions
