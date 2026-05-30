@@ -1,5 +1,6 @@
 import asyncio
 import os
+import urllib.parse
 
 from typing import List, Dict, Any, Optional
 from playwright.async_api import async_playwright, Browser, Playwright
@@ -38,7 +39,30 @@ async def _install_ssrf_route_guard(context) -> None:
             logger.warning("SSRF guard error on %s: %s — aborting", url, exc)
             await route.abort()
             return
-        await route.continue_()
+
+        try:
+            # Fetch the response without automatically following redirects
+            response = await route.fetch(max_redirects=0)
+
+            # If the response is a redirect, validate the target Location
+            if response.status in (301, 302, 303, 307, 308):
+                location = response.headers.get("location")
+                if location:
+                    # Resolve relative redirect locations
+                    target_url = urllib.parse.urljoin(url, location)
+                    try:
+                        await assert_safe_url(target_url)
+                    except SSRFError as exc:
+                        logger.warning("SSRF guard blocked redirect from %s to %s: %s", url, target_url, exc)
+                        await route.abort()
+                        return
+
+            # Let Playwright fulfill the request (and natively follow the redirect if valid)
+            await route.fulfill(response=response)
+        except Exception as exc:
+            # This can happen if the fetch fails (e.g., target server refuses connection)
+            logger.debug("SSRF guard fetch error on %s: %s", url, exc)
+            await route.abort()
 
     await context.route("**/*", _handler)
 
