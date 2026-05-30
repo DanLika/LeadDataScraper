@@ -47,7 +47,7 @@ class TestEdgeCases(unittest.TestCase):
         """Ensure the variant_label attribute from the _Weighted protocol is preserved."""
         only = [_FakeVariant("v-Y", "label-Y", weight=1)]
         picked = select_variant(only)
-        self.assertIsNotNone(picked)
+        assert picked is not None
         self.assertEqual(picked.variant_label, "label-Y")
 
 
