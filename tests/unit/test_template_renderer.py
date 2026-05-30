@@ -79,6 +79,10 @@ class TestAssertColdEmailUnsubscribe(unittest.TestCase):
         with self.assertRaises(MissingUnsubscribeUrlError):
             assert_cold_email_unsubscribe("")
 
+    def test_syntax_error_raises_template_error(self) -> None:
+        with self.assertRaises(TemplateError):
+            assert_cold_email_unsubscribe("Hi {{ unclosed")
+
 
 class TestRender(unittest.TestCase):
     def test_happy_path(self) -> None:
