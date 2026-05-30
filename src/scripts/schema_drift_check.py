@@ -35,6 +35,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import psycopg
 
@@ -249,7 +250,7 @@ def check_deny_policies(conn: psycopg.Connection) -> list[str]:
         "WHERE schemaname = 'public' AND tablename = ANY(%s)",
         (list(TABLES),),
     )
-    by_table: dict[str, list[tuple]] = {}
+    by_table: dict[str, list[tuple[Any, ...]]] = {}
     for table, name, permissive, roles, cmd, qual, with_check in cur.fetchall():
         by_table.setdefault(table, []).append(
             (name, permissive, set(roles or []), cmd, qual, with_check)
