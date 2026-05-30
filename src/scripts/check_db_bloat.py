@@ -30,6 +30,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -69,6 +70,15 @@ def _pgstattuple_available(conn: psycopg.Connection) -> bool:
 
 
 def main() -> int:
+    # Load previous WoW stats if artifact exists
+    previous_stats = {}
+    if os.path.exists("current_bloat.json"):
+        try:
+            with open("current_bloat.json", "r") as f:
+                previous_stats = json.load(f)
+        except Exception as e:
+            print(f"Warning: could not parse current_bloat.json: {e}", file=sys.stderr)
+
     url = os.environ.get("DATABASE_URL")
     if not url:
         print("ERROR: DATABASE_URL env var not set", file=sys.stderr)
@@ -82,6 +92,7 @@ def main() -> int:
 
     failures: list[str] = []
     report: list[str] = ["DB bloat report", "==============="]
+    new_stats: dict[str, dict[str, float]] = {}
 
     try:
         cur = conn.execute(
@@ -99,17 +110,39 @@ def main() -> int:
         )
         report.append("")
         report.append(
-            f"  {'table':<22} {'rows':>10} {'dead':>10} {'dead_ratio':>11} {'size':>12}"
+            f"  {'table':<22} {'rows':>10} {'dead':>10} {'dead_ratio':>11} {'size':>12} {'Δ dead':>10} {'Δ size':>10}"
         )
-        report.append("  " + "-" * 70)
+        report.append("  " + "-" * 92)
         for relname, n_live, n_dead, total_bytes in rows:
             n_live = int(n_live or 0)
             n_dead = int(n_dead or 0)
             denom = max(n_live, 1)
             ratio = n_dead / denom
+            total_bytes = int(total_bytes)
+
+            new_stats[relname] = {
+                "dead_ratio": ratio,
+                "total_bytes": total_bytes,
+            }
+
+            delta_dead_str = ""
+            delta_size_str = ""
+
+            if relname in previous_stats:
+                prev = previous_stats[relname]
+                if "dead_ratio" in prev:
+                    diff_ratio = ratio - prev["dead_ratio"]
+                    delta_dead_str = f"{diff_ratio:+.1%}"
+                if "total_bytes" in prev:
+                    prev_bytes = prev["total_bytes"]
+                    if prev_bytes > 0:
+                        diff_bytes = (total_bytes - prev_bytes) / prev_bytes
+                        delta_size_str = f"{diff_bytes:+.1%}"
+
             report.append(
                 f"  {relname:<22} {n_live:>10} {n_dead:>10} "
-                f"{ratio:>10.1%} {_human_bytes(int(total_bytes)):>12}"
+                f"{ratio:>10.1%} {_human_bytes(total_bytes):>12} "
+                f"{delta_dead_str:>10} {delta_size_str:>10}"
             )
             if (
                 ratio > DEAD_TUPLE_RATIO_THRESHOLD
@@ -129,6 +162,12 @@ def main() -> int:
         return 2
     finally:
         conn.close()
+
+    try:
+        with open("current_bloat.json", "w") as f:
+            json.dump(new_stats, f, indent=2)
+    except Exception as e:
+        print(f"Warning: could not write current_bloat.json: {e}", file=sys.stderr)
 
     print("\n".join(report))
 
