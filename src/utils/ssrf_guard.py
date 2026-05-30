@@ -45,6 +45,14 @@ _BLOCKED_HOSTS = {
 
 _NUMERIC_HOST_RE = re.compile(r"^[\d.]+$")
 
+# Port allowlist. Without this the IP-only guard rejected
+# private/loopback/metadata IPs but accepted any TCP port on a public IP,
+# letting an operator-supplied URL like `http://example.com:22` use the
+# outbound HTTP stack as a port scanner against arbitrary remote services.
+# 80 and 443 cover http and https. `None` covers URLs without an explicit
+# `:port` (`urlparse(...).port` returns None in that case).
+_ALLOWED_PORTS: frozenset[int | None] = frozenset({80, 443, None})
+
 
 def assert_safe_scheme(url: str) -> None:
     parsed = urlparse(url)
@@ -52,6 +60,10 @@ def assert_safe_scheme(url: str) -> None:
         raise SSRFError(f"Blocked URL scheme: {parsed.scheme!r}")
     if not parsed.hostname:
         raise SSRFError("URL has no host")
+    if parsed.port is not None and parsed.port not in _ALLOWED_PORTS:
+        raise SSRFError(
+            f"Blocked port {parsed.port} (only 80, 443, or the scheme default are allowed)"
+        )
     host = parsed.hostname.lower().rstrip(".")
     if host in _BLOCKED_HOSTS:
         raise SSRFError(f"Blocked hostname: {parsed.hostname}")
