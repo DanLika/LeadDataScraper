@@ -96,6 +96,45 @@ class TestAssertSafeScheme(unittest.TestCase):
         assert_safe_scheme("https://8.8.8.8/")  # Google DNS — global
 
 
+class TestPortAllowlist(unittest.TestCase):
+    """Reject non-{80,443} ports — without this guard an operator-supplied
+    URL on a public IP could probe SSH (22), MySQL (3306), Redis (6379),
+    Postgres (5432), dev servers (3000/8080/8443/9200/...) and turn the
+    outbound HTTP stack into a port scanner. The IP/scheme/host checks
+    don't help once the host resolves to a public, non-metadata IP."""
+
+    def test_dangerous_ports_rejected(self):
+        for port in [22, 23, 25, 110, 143, 445, 1433, 1521, 2049, 2375, 3000, 3306, 5000, 5432, 6379, 8000, 8080, 8443, 8888, 9000, 9200, 11211, 27017, 50000, 65535]:
+            for scheme in ("http", "https"):
+                url = f"{scheme}://example.com:{port}/"
+                with self.assertRaises(SSRFError, msg=url) as cm:
+                    assert_safe_scheme(url)
+                self.assertIn(f"Blocked port {port}", str(cm.exception))
+
+    def test_port_80_allowed(self):
+        assert_safe_scheme("http://example.com:80/")
+        assert_safe_scheme("https://example.com:80/")  # cross-scheme is legal at this layer
+
+    def test_port_443_allowed(self):
+        assert_safe_scheme("https://example.com:443/")
+        assert_safe_scheme("http://example.com:443/")
+
+    def test_default_port_allowed(self):
+        # urlparse(...).port is None when no explicit port — the most
+        # common case. Must not regress.
+        assert_safe_scheme("http://example.com/path")
+        assert_safe_scheme("https://example.com/path")
+        assert_safe_scheme("https://api.github.com/repos")
+
+    def test_port_rejection_runs_before_ip_classification(self):
+        # A public-looking host with a dangerous port must still be
+        # rejected on the port — order matters because the IP probe
+        # would otherwise have to pass first.
+        with self.assertRaises(SSRFError) as cm:
+            assert_safe_scheme("http://8.8.8.8:22/")
+        self.assertIn("Blocked port 22", str(cm.exception))
+
+
 class TestAssertPublicIp(unittest.TestCase):
     def test_private_loopback_linklocal_rejected(self):
         for ip in [
@@ -142,6 +181,18 @@ class TestAssertSafeUrl(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_ip_literal_passes(self):
         await assert_safe_url("https://8.8.8.8/")  # no raise — global IP
+
+    async def test_dangerous_port_rejected_before_dns(self):
+        # Port check fires in `assert_safe_scheme` (called first by
+        # `assert_safe_url`) — no DNS lookup must occur for a blocked
+        # port, even on a host that would resolve to a public IP.
+        with self.assertRaises(SSRFError) as cm:
+            await assert_safe_url("http://example.com:22/")
+        self.assertIn("Blocked port 22", str(cm.exception))
+
+    async def test_allowed_port_passes(self):
+        # Explicit :443 on a public IP must clear the guard.
+        await assert_safe_url("https://8.8.8.8:443/")  # no raise
 
     async def test_dns_resolution_failure_raises_ssrf_error(self):
         # A `.invalid` TLD (RFC 2606) is guaranteed NXDOMAIN — the
