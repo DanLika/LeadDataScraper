@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useActionState } from 'react'
+import { Suspense, useActionState, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { useSearchParams } from 'next/navigation'
 import { signInAction, type LoginActionState } from './actions'
@@ -46,6 +46,21 @@ function LoginForm() {
     signInAction,
     undefined,
   )
+  // Clear stale login error on user input. The error lives in server-action
+  // state (`useActionState`), so we layer a client-only `dismissed` flag that
+  // flips true when the user types in either credential field. We reset it
+  // when the server action returns a new state by deriving during render
+  // (the React-docs anti-effect pattern — `setState` in an effect would
+  // trip `react-hooks/set-state-in-effect` under the React 19 compiler).
+  const [dismissed, setDismissed] = useState(false)
+  const [prevState, setPrevState] = useState(state)
+  if (state !== prevState) {
+    setPrevState(state)
+    setDismissed(false)
+  }
+  const handleCredentialInput = () => {
+    if (!dismissed) setDismissed(true)
+  }
 
   return (
     <main
@@ -82,6 +97,7 @@ function LoginForm() {
             name="email"
             autoComplete="email"
             required
+            onInput={handleCredentialInput}
             // fontSize: 16 prevents iOS Safari auto-zoom on focus (RESP-016).
             // <16px triggers zoom + sticky viewport that doesn't reset on blur.
             style={{
@@ -102,6 +118,7 @@ function LoginForm() {
             name="password"
             autoComplete="current-password"
             required
+            onInput={handleCredentialInput}
             // fontSize: 16 — see email input comment above (iOS zoom-on-focus guard).
             style={{
               padding: '10px 12px',
@@ -114,7 +131,7 @@ function LoginForm() {
             }}
           />
         </label>
-        {state?.error && (
+        {state?.error && !dismissed && (
           <p role="alert" style={{ margin: 0, color: 'var(--error, #ef4444)', fontSize: 13 }}>
             {state.error}
           </p>
