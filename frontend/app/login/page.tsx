@@ -3,6 +3,7 @@
 import { Suspense, useActionState, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { useSearchParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { signInAction, type LoginActionState } from './actions'
 
 /**
@@ -17,6 +18,7 @@ import { signInAction, type LoginActionState } from './actions'
 
 function SubmitButton() {
   const { pending } = useFormStatus()
+  const t = useTranslations('login')
   return (
     <button
       type="submit"
@@ -34,12 +36,13 @@ function SubmitButton() {
         opacity: pending ? 0.7 : 1,
       }}
     >
-      {pending ? 'Signing in…' : 'Sign in'}
+      {pending ? t('submitting') : t('submit')}
     </button>
   )
 }
 
 function LoginForm() {
+  const t = useTranslations('login')
   const params = useSearchParams()
   const nextRaw = params.get('next') ?? '/'
   const [state, formAction] = useActionState<LoginActionState, FormData>(
@@ -87,11 +90,11 @@ function LoginForm() {
         }}
       >
         <h1 id="login-title" style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>
-          Sign in
+          {t('title')}
         </h1>
         <input type="hidden" name="next" value={nextRaw} />
         <label style={{ display: 'grid', gap: 6, fontSize: 14 }}>
-          <span>Email</span>
+          <span>{t('email')}</span>
           <input
             type="email"
             name="email"
@@ -112,7 +115,7 @@ function LoginForm() {
           />
         </label>
         <label style={{ display: 'grid', gap: 6, fontSize: 14 }}>
-          <span>Password</span>
+          <span>{t('password')}</span>
           <input
             type="password"
             name="password"
