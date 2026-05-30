@@ -221,6 +221,13 @@ class TestDispatcherConstruction:
         assert d.batch_size == DEFAULT_BATCH_SIZE
 
 
+class TestSendPath:
+    @pytest.mark.asyncio
+    async def test_send_raises_not_implemented(self):
+        d = InstantlyDispatcher(api_key="k", default_campaign_id="c")
+        with pytest.raises(NotImplementedError, match="InstantlyDispatcher.send\\(\\) is not supported; use push_leads\\(\\) instead."):
+            await d.send(to="test@example.com", subject="Test", body="Test")
+
 class TestPushLeadsErrorPaths:
     @pytest.mark.asyncio
     async def test_no_campaign_id_raises(self):
