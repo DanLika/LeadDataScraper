@@ -20,7 +20,7 @@
     "note": "Total errors. Most are auto-fixable via `ruff check --fix` \u2014 that's a free PR worth landing."
   },
   "mypy_strict": {
-    "value": 637,
+    "value": 638,
     "argv": [
       "mypy",
       "--strict",

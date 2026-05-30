@@ -19,7 +19,7 @@ export async function createClient() {
           // directly during the action handler, not via middleware.
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, hardenCookieOptions(options))
+              cookieStore.set(name, value, hardenCookieOptions(options, name))
             })
           } catch {
             // The `setAll` method was called from a Server Component, which
