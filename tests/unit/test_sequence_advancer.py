@@ -52,7 +52,7 @@ def _mk_msg(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def _mk_step_repo(by_id: dict[str, _Step], by_index: dict[tuple, _Step]) -> MagicMock:
+def _mk_step_repo(by_id: dict[str, _Step], by_index: dict[tuple[str, int], _Step]) -> MagicMock:
     repo = MagicMock()
     repo.get_by_id = AsyncMock(side_effect=lambda sid: by_id.get(sid))
     repo.fetch_many = AsyncMock(
@@ -64,7 +64,7 @@ def _mk_step_repo(by_id: dict[str, _Step], by_index: dict[tuple, _Step]) -> Magi
     return repo
 
 
-def _mk_msg_repo(insert_returns: Optional[dict] = None) -> MagicMock:
+def _mk_msg_repo(insert_returns: Optional[dict[str, Any]] = None) -> MagicMock:
     repo = MagicMock()
     repo.insert_next_step_row = AsyncMock(return_value=insert_returns)
     return repo
