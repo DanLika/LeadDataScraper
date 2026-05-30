@@ -29,13 +29,16 @@ from typing import Any
 
 import pytest
 
+# `pytestmark` only skips test execution, not collection — pytest still
+# imports the module. Use `importorskip` to skip collection entirely if
+# hypothesis isn't installed (matches Tier 1).
+pytest.importorskip("hypothesis_jsonschema")
+
 pytestmark = pytest.mark.skipif(
     not os.getenv("RUN_PROD_FUZZ"),
     reason="prod fuzz disabled; set RUN_PROD_FUZZ=1 + RUN_PROD_FUZZ_API_KEY=...",
 )
 
-# Imports below the skip guard so a default `pytest` run doesn't even
-# need `httpx` / `hypothesis_jsonschema` installed.
 import httpx  # noqa: E402
 from hypothesis import HealthCheck, given, settings, strategies as st  # noqa: E402
 from hypothesis_jsonschema import from_schema  # noqa: E402

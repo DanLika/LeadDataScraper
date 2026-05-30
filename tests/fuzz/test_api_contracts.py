@@ -35,6 +35,12 @@ import sys
 
 import pytest
 
+# Collection-time skip if hypothesis isn't installed. `ci.yml` +
+# `main-matrix.yml` install it; `mutation-test.yml` + `flakiness-detector.yml`
+# do not, and a bare `from hypothesis import ...` would ImportError at
+# collection there, failing the whole pytest run (not just this file).
+pytest.importorskip("hypothesis_jsonschema")
+
 # Set fakes BEFORE `backend.main` import so module-load checks don't barf.
 # These never travel — Pydantic models do not touch env at construct time;
 # the env reads happen in middleware + handlers we never reach here.
@@ -52,9 +58,9 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from hypothesis import HealthCheck, given, settings, strategies as st
-from hypothesis_jsonschema import from_schema
-from pydantic import BaseModel, ValidationError
+from hypothesis import HealthCheck, given, settings, strategies as st  # noqa: E402
+from hypothesis_jsonschema import from_schema  # noqa: E402
+from pydantic import BaseModel, ValidationError  # noqa: E402
 
 from backend.main import (  # noqa: E402  (import after env + path setup)
     AccountDeletionRequest,
@@ -191,20 +197,6 @@ _ADVERSARIAL_JSON = st.recursive(
 )
 
 
-def _scrub_nan_inf(value: object) -> object:
-    """`json.dumps` (and Starlette's response encoder) reject NaN/Infinity,
-    but Pydantic accepts them on `float` fields. We want the fuzz to
-    *try* to feed them in — so we don't scrub here. The invariant we
-    pin is that Pydantic itself doesn't raise a bare ValueError on
-    NaN; that's a separate 500 path (`tests/test_json_pollution.py`
-    locks the validation-handler side)."""
-    return value
-
-
-def _is_finite_or_other(_: object) -> bool:  # used only to silence linters
-    return True
-
-
 @pytest.mark.parametrize("model", ALL_MODELS, ids=lambda m: m.__name__)
 def test_adversarial_payload_never_500(model: type[BaseModel]) -> None:
     """Throw deep / weird / oversize JSON at every model. Same invariant:
@@ -212,12 +204,14 @@ def test_adversarial_payload_never_500(model: type[BaseModel]) -> None:
 
     Hypothesis seeds the random walk; on a finding it shrinks to the
     minimal repro and prints it. Stop condition: any non-`ValidationError`
-    exception (real 500-equivalent bug)."""
+    exception (real 500-equivalent bug). NaN/Infinity floats pass through
+    intentionally — Pydantic must surface them as ValidationError, never
+    raw ValueError (the JSON-pollution suite locks the handler side)."""
 
     @_FUZZ_SETTINGS
     @given(st.dictionaries(st.text(max_size=24), _ADVERSARIAL_JSON, max_size=8))
     def _run(payload: dict) -> None:
-        _assert_constructs_or_validates(model, _scrub_nan_inf(payload))
+        _assert_constructs_or_validates(model, payload)
 
     _run()
 
