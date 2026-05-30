@@ -8,6 +8,7 @@ import psutil
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from fastapi import HTTPException
+from src.errors import NoWebsiteError
 from src.utils.supabase_helper import SupabaseHelper
 from src.core.parallel_auditor import ParallelAuditor
 from src.scrapers.enrichment_engine import EnrichmentEngine
@@ -519,7 +520,16 @@ class TaskOrchestrator:
                 if "audit" in tasks:
                     audit_res = await auditor.audit_single_lead(lead)
                     if audit_res.get("status") == "Failed":
-                        raise Exception(f"Audit failed: {audit_res.get('error')}")
+                        err = audit_res.get("error")
+                        # `parallel_auditor.audit_single_lead` returns the
+                        # literal sentinel "No website" when the lead row has
+                        # no website to audit — a graceful skip, NOT a bug.
+                        # Surface as a typed exception so the per-lead catch
+                        # routes it to WARNING (no exc_info) instead of the
+                        # noisy ERROR stack trace path (~54/day on prod).
+                        if err == "No website":
+                            raise NoWebsiteError("no website to audit")
+                        raise Exception(f"Audit failed: {err}")
                     # Update audit results in local object
                     updated_lead.update(
                         {
@@ -576,6 +586,25 @@ class TaskOrchestrator:
                 )
                 return updated_lead
 
+        except NoWebsiteError as e:
+            # Graceful skip — lead has no website column. Not a bug, just
+            # uncrawlable. Log at WARNING (no exc_info) so the operator
+            # dashboard isn't drowned by ~54/day ERROR-level noise. Row
+            # still records last_error + retry_count so the 3-strike
+            # `audit_status='Failed'` flip still fires after 3 attempts.
+            logger.warning("Lead %s skipped — %s", lead_id, e)
+            retry_count = (lead.get("retry_count") or 0) + 1
+            updated_lead.update(
+                {
+                    "last_error": str(e),
+                    "retry_count": retry_count,
+                    "audit_status": "Failed"
+                    if retry_count >= 3
+                    else lead.get("audit_status"),
+                    "last_processed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            return updated_lead
         except Exception as e:
             logger.error("Error processing lead %s: %s", lead_id, e, exc_info=True)
             retry_count = (lead.get("retry_count") or 0) + 1

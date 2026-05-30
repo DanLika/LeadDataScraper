@@ -80,3 +80,24 @@ class AuditFetchError(AuditError):
     HTML, the response body exceeded the configured size cap, or a
     redirect chain blew past the configured limit. The lead row's
     `last_error` carries the upstream status / reason."""
+
+
+# ---- Lead-data domain --------------------------------------------
+
+
+class NoWebsiteError(DomainError):
+    """Lead row has no `website` to audit — graceful skip, not a bug.
+
+    ``parallel_auditor.audit_single_lead`` returns ``{"status": "Failed",
+    "error": "No website"}`` when the lead's ``website`` column is null
+    or the literal string ``"nan"``. This is expected on freshly
+    scraped Google-Maps rows where the business has no website listed;
+    it is NOT an exception condition. The orchestrator's per-lead loop
+    catches this and logs at WARNING (no ``exc_info``) so the operator's
+    dashboard isn't drowned by ~54/day ERROR-level noise — see PR
+    follow-up to Phase 13 dogfood smoke 2026-05-30.
+
+    Distinct from ``AuditError`` (genuine fetch/parse failures). Sits
+    directly under ``DomainError`` matching the style of
+    ``AIQuotaExceededError``.
+    """
