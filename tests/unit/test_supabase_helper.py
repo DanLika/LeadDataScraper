@@ -96,11 +96,15 @@ class TestSupabaseHelper(unittest.TestCase):
             chain_mock = MagicMock()
             call_count[0] += 1
 
-            # First call is the bulk select — must fail with 'column does not exist'
-            if call_count[0] == 1:
-                chain_mock.limit.return_value.execute.side_effect = Exception(
-                    'column "seo_score" does not exist'
-                )
+            if "," in cols:
+                # Bulk select check - find first missing column to simulate error
+                missing_col = next((c for c in missing_cols_to_simulate if c in cols.split(",")), None)
+                if missing_col:
+                    chain_mock.limit.return_value.execute.side_effect = Exception(
+                        f'column "{missing_col}" does not exist'
+                    )
+                else:
+                    chain_mock.limit.return_value.execute.return_value = MagicMock(data=[])
                 return chain_mock
 
             # Subsequent calls are individual column checks
