@@ -2873,11 +2873,18 @@ async def clear_leads(request: Request):
     PostgREST returned. `deleted` mirrors `leads_deleted` for the
     operator-facing UI contract (parity with /leads/demo); `jobs_deleted`
     is surfaced for the same reason the helper wipes both tables.
+
+    `_db` is hoisted via `sys.modules[__name__]` because PEP 562 module
+    `__getattr__` doesn't fire for bare-name LOAD_GLOBAL lookups inside
+    same-module fns — same trap as `_process_instantly_event` (PR #415).
     """
-    if not db.client:
+    import sys as _sys
+
+    _db = getattr(_sys.modules[__name__], "db", None)
+    if _db is None or not _db.client:
         return error_response("Database not connected", status_code=503)
-    leads_resp = db.delete_all_leads()
-    jobs_resp = db.delete_all_jobs()
+    leads_resp = _db.delete_all_leads()
+    jobs_resp = _db.delete_all_jobs()
     leads_deleted = len(leads_resp.data) if leads_resp and leads_resp.data else 0
     jobs_deleted = len(jobs_resp.data) if jobs_resp and jobs_resp.data else 0
     logger.warning(
