@@ -44,9 +44,10 @@ class _StubResponse:
     - async context-manager protocol (`__aenter__` / `__aexit__`)
     """
 
-    def __init__(self, body: bytes, charset: str | None = "utf-8"):
+    def __init__(self, body: bytes, charset: str | None = "utf-8", status: int = 200):
         self._body = body
         self.charset = charset
+        self.status = status  # 2026-05-30: is_up gate requires 2xx/3xx
         self.content = MagicMock()
         # The cap branch reads MAX_HTML_BYTES + 1, so emulate the bytes
         # protocol: return at most `n` bytes from the front of the buffer.
