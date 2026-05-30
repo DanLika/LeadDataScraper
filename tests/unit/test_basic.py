@@ -14,7 +14,7 @@ def test_gmaps_processing():
     data = {
         "hfpxzc href": ["https://maps.google.com/1", "https://maps.google.com/2"],
         "qBF1Pd": ["Company A", "Company B"],
-        "MW4etd": ["4,5", "3.8"],
+        "MW4etd": [4.5, 3.8],
         "UY7F9": ["(120)", "(50)"],
         "lcr4fd href": ["www.comp-a.com", "https://comp-b.com"],
         "UsdlK": ["+381 11 222333", "064/123-456"],

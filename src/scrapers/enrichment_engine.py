@@ -322,20 +322,3 @@ class EnrichmentEngine:
             lead["enrichment_status"] = "FAILED_NO_CONTENT"
 
         return lead
-
-
-async def test_enrichment():
-    engine = EnrichmentEngine()
-    test_lead = {
-        "name": "Example Dental",
-        "website": "https://www.google.com",  # Just a placeholder
-    }
-    try:
-        result = await engine.enrich_lead(test_lead)
-        logger.info("Test result: %s", result)
-    finally:
-        await engine.aclose()
-
-
-if __name__ == "__main__":
-    asyncio.run(test_enrichment())
