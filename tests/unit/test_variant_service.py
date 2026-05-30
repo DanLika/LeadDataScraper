@@ -126,7 +126,7 @@ class TestColdUnsubscribeEnforcement(unittest.TestCase):
         repo.create.assert_called_once()
 
     @patch("src.services.variant_service.assert_cold_email_unsubscribe")
-    def test_email_unsubscribe_template_error(self, mock_assert) -> None:
+    def test_email_unsubscribe_template_error(self, mock_assert: MagicMock) -> None:
         mock_assert.side_effect = TemplateError("defensive error")
         repo = _build_repo(_sample_variant())
         service = VariantService(repo)
