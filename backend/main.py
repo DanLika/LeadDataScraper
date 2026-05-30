@@ -2871,12 +2871,42 @@ async def start_enrichment(request: Request, payload: LeadProcessRequest):
 )
 @limiter.limit("3/hour")
 async def clear_leads(request: Request):
-    """Purge all leads and job history (Danger Zone). Requires X-Admin-Token."""
-    db.delete_all_leads()
-    db.delete_all_jobs()
-    logger.warning("DESTRUCTIVE: /leads/clear invoked — all leads + jobs wiped.")
+    """Purge all leads and job history (Danger Zone). Requires X-Admin-Token.
+
+    Returns row counts so the operator-facing toast / curl client can
+    verify the wipe actually landed rather than guessing from a generic
+    200 OK. supabase-py defaults to `returning="representation"` on
+    `.delete()`, so `len(response.data)` reflects the exact row count
+    PostgREST returned. `deleted` mirrors `leads_deleted` for the
+    operator-facing UI contract (parity with /leads/demo); `jobs_deleted`
+    is surfaced for the same reason the helper wipes both tables.
+
+    `_db` is hoisted via `sys.modules[__name__]` because PEP 562 module
+    `__getattr__` doesn't fire for bare-name LOAD_GLOBAL lookups inside
+    same-module fns — same trap as `_process_instantly_event` (PR #415).
+    """
+    import sys as _sys
+
+    _db = getattr(_sys.modules[__name__], "db", None)
+    if _db is None or not _db.client:
+        return error_response("Database not connected", status_code=503)
+    leads_resp = _db.delete_all_leads()
+    jobs_resp = _db.delete_all_jobs()
+    leads_deleted = len(leads_resp.data) if leads_resp and leads_resp.data else 0
+    jobs_deleted = len(jobs_resp.data) if jobs_resp and jobs_resp.data else 0
+    logger.warning(
+        "DESTRUCTIVE: /leads/clear invoked — %d leads + %d jobs wiped.",
+        leads_deleted,
+        jobs_deleted,
+    )
     stats_cache.invalidate()
-    return {"status": "cleared", "message": "All leads and jobs have been deleted."}
+    return {
+        "status": "cleared",
+        "message": "All leads and jobs have been deleted.",
+        "deleted": leads_deleted,
+        "leads_deleted": leads_deleted,
+        "jobs_deleted": jobs_deleted,
+    }
 
 
 class DemoLeadsDeletionRequest(BaseModel):
@@ -2917,7 +2947,12 @@ async def delete_demo_leads(request: Request, payload: DemoLeadsDeletionRequest)
         counts.get("messages_deleted", 0),
     )
     stats_cache.invalidate()
-    return {"status": "cleared", **counts}
+    # `deleted` mirrors `leads_deleted` so a generic curl/UI client can
+    # check one well-known key across both /leads/clear and /leads/demo
+    # without branching on the response shape; legacy `leads_deleted` +
+    # `messages_deleted` stay populated for the existing dashboard toast
+    # ("Removed N demo leads + M messages").
+    return {"status": "cleared", "deleted": counts.get("leads_deleted", 0), **counts}
 
 
 # -----------------------------------------------------------------------------
