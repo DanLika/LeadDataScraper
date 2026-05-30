@@ -14,9 +14,10 @@ from __future__ import annotations
 import asyncio
 import unittest
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.repositories.sequence_variant_repo import SequenceVariant
+from src.services.template_renderer import TemplateError
 from src.services.variant_service import (
     ErrorCodes,
     VariantService,
@@ -123,6 +124,23 @@ class TestColdUnsubscribeEnforcement(unittest.TestCase):
         )
         self.assertTrue(result.ok)
         repo.create.assert_called_once()
+
+    @patch("src.services.variant_service.assert_cold_email_unsubscribe")
+    def test_email_unsubscribe_template_error(self, mock_assert) -> None:
+        mock_assert.side_effect = TemplateError("defensive error")
+        repo = _build_repo(_sample_variant())
+        service = VariantService(repo)
+        result = asyncio.run(
+            service.create_variant(
+                step_id="step-1",
+                step_channel="email",
+                variant_label="A",
+                body_template="Hi {{ first_name }} {{ unsubscribe_url }}",
+            )
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_code, ErrorCodes.SYNTAX)
+        self.assertEqual(result.error_message, "defensive error")
 
 
 class TestDuplicate(unittest.TestCase):
