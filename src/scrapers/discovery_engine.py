@@ -137,10 +137,9 @@ class DiscoveryEngine:
                 for _ in range(_MAX_SCROLL_ITERS):
                     await page.mouse.wheel(0, 8000)
                     await asyncio.sleep(2)
-                    current_containers = await page.query_selector_all(
+                    current_count = await page.locator(
                         "div[role='article'], a[href*='/maps/place/']"
-                    )
-                    current_count = len(current_containers) if current_containers else 0
+                    ).count()
                     if current_count >= max_results or current_count == prev_count:
                         break
                     prev_count = current_count
