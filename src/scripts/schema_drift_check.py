@@ -155,18 +155,6 @@ def _split_top_level_commas(body: str) -> list[str]:
     return [p for p in parts if p]
 
 
-def _find_matching_paren(sql: str, open_idx: int) -> int:
-    depth = 0
-    for i in range(open_idx, len(sql)):
-        if sql[i] == "(":
-            depth += 1
-        elif sql[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    raise ValueError("unbalanced parens in schema file")
-
-
 def parse_expected_columns(path: Path) -> dict[str, set[str]]:
     sql = _strip_line_comments(path.read_text())
     expected: dict[str, set[str]] = {t: set() for t in TABLES}
@@ -180,7 +168,20 @@ def parse_expected_columns(path: Path) -> dict[str, set[str]]:
         if table not in expected:
             continue
         open_paren = m.end() - 1
-        close_paren = _find_matching_paren(sql, open_paren)
+
+        depth = 0
+        close_paren = -1
+        for i in range(open_paren, len(sql)):
+            if sql[i] == "(":
+                depth += 1
+            elif sql[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    close_paren = i
+                    break
+        if close_paren == -1:
+            raise ValueError("unbalanced parens in schema file")
+
         body = sql[open_paren + 1 : close_paren]
         # Strip string literals BEFORE splitting on top-level commas — a
         # default like ``send_days TEXT NOT NULL DEFAULT 'mon,tue,wed'``
