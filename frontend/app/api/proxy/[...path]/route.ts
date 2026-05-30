@@ -38,6 +38,16 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
   .filter(Boolean);
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+// Single-tenant operator email. When set, every authed proxy request must
+// carry a Supabase session whose `user.email` matches this value
+// case-insensitively. Closes the post-boot 2nd-user threat that the backend
+// lifespan check cannot — backend has no per-request user identity; the
+// proxy is the only place the Supabase session JWT is materialised
+// server-side (via `supabase.auth.getUser()`). Unset (opt-in) → guard
+// no-ops; backend's `_assert_single_tenant_if_enforced` boot check
+// remains the only enforcement, catching only pre-boot drift.
+const OPERATOR_EMAIL = (process.env.OPERATOR_EMAIL || '').trim().toLowerCase();
+
 // Paths that require X-Admin-Token injection in addition to X-API-Key.
 // Add new destructive routes here — keep this list audit-friendly. Match is
 // exact on the joined dynamic segments (no query string, no prefixing).
@@ -67,6 +77,7 @@ const MAX_PROXY_BODY_BYTES = 50 * 1024 * 1024;
 // TypeScript toolchain — see `proxyHeaderFilter.test.mjs` for the strip
 // invariant pin. Single source of truth + audit-friendly.
 import { HOP_BY_HOP, STRIPPED_AUTH } from '@/app/lib/proxyHeaderFilter.mjs';
+import { checkSingleTenant } from '@/app/lib/singleTenantGuard.mjs';
 
 // Common no-store headers for all early returns so error responses can't be cached.
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
@@ -105,6 +116,22 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401, headers: NO_STORE_HEADERS });
+    }
+    // Per-request single-tenant guard. Backend has no Supabase JWT —
+    // only the proxy materialises the session here. Without this gate
+    // a 2nd Supabase user provisioned post-boot (admin panel, accident,
+    // attacker with service-role) inherits the operator's X-API-Key
+    // server-side and gains full backend access until the next deploy
+    // re-runs `_assert_single_tenant_if_enforced` in lifespan.
+    // OPERATOR_EMAIL unset → opt-in, no enforcement; matches backend
+    // lifespan semantics. Predicate lives in `singleTenantGuard.mjs`
+    // for node:test coverage.
+    const tenancy = checkSingleTenant({ user, expectedEmail: OPERATOR_EMAIL });
+    if (!tenancy.allowed) {
+      return NextResponse.json(
+        { error: tenancy.errorCode },
+        { status: tenancy.status, headers: NO_STORE_HEADERS },
+      );
     }
   }
 
