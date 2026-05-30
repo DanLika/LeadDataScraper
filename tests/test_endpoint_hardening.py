@@ -602,6 +602,138 @@ class TestAdminTokenGuard(unittest.IsolatedAsyncioTestCase):
         )
 
 
+# ---- Destructive-delete response-shape contract ----------------------------
+
+
+class TestDestructiveDeleteReturnsRowCount(unittest.IsolatedAsyncioTestCase):
+    """
+    `DELETE /leads/clear` + `DELETE /leads/demo` now return a numeric
+    `"deleted"` key so curl / dashboard clients can verify the wipe
+    actually landed rather than guessing from the generic 200.
+
+    Contract:
+      * 200 with `{"deleted": <int>, ...}` — `deleted` is the lead
+        row-count (parity across both endpoints).
+      * `/leads/clear` also surfaces `leads_deleted` + `jobs_deleted`.
+      * `/leads/demo` keeps `leads_deleted` + `messages_deleted` for
+        the existing dashboard toast (`frontend/app/page.tsx:895-902`).
+      * 503 when `db.client` is None — both endpoints. Without this
+        guard the row-count read crashes on a None response.
+    """
+
+    async def asyncSetUp(self):
+        self.app = _fresh_app()
+        self.http = _client(self.app)
+        self.h = {"X-API-Key": API_KEY, "X-Admin-Token": ADMIN_TOKEN}
+
+    async def asyncTearDown(self):
+        await self.http.aclose()
+
+    async def test_leads_clear_returns_deleted_count(self):
+        """200 + JSON shape {status, deleted, leads_deleted, jobs_deleted}.
+        The mock db helper returns response-like objects with `.data`
+        lists matching what supabase-py emits under
+        `returning="representation"`."""
+        from backend import main as backend_main
+
+        # Replace mock db with one that exposes a real client + helpers.
+        mock_db = MagicMock(name="mock_db_with_client")
+        mock_db.client = MagicMock()
+        mock_db.delete_all_leads = MagicMock(
+            return_value=MagicMock(data=[{"unique_key": "a"}, {"unique_key": "b"}])
+        )
+        mock_db.delete_all_jobs = MagicMock(return_value=MagicMock(data=[{"id": "j1"}]))
+        backend_main.db = mock_db
+
+        res = await self.http.delete("/leads/clear", headers=self.h)
+        self.assertEqual(res.status_code, 200, f"body={res.text!r}")
+        body = res.json()
+        self.assertEqual(body["deleted"], 2)
+        self.assertEqual(body["leads_deleted"], 2)
+        self.assertEqual(body["jobs_deleted"], 1)
+        self.assertEqual(body["status"], "cleared")
+
+    async def test_leads_clear_returns_zero_on_empty_wipe(self):
+        """200 + `deleted=0` when nothing matched — the load-bearing
+        case that silent-200 used to hide."""
+        from backend import main as backend_main
+
+        mock_db = MagicMock(name="mock_db_empty")
+        mock_db.client = MagicMock()
+        mock_db.delete_all_leads = MagicMock(return_value=MagicMock(data=[]))
+        mock_db.delete_all_jobs = MagicMock(return_value=MagicMock(data=[]))
+        backend_main.db = mock_db
+
+        res = await self.http.delete("/leads/clear", headers=self.h)
+        self.assertEqual(res.status_code, 200, f"body={res.text!r}")
+        body = res.json()
+        self.assertEqual(body["deleted"], 0)
+        self.assertEqual(body["leads_deleted"], 0)
+        self.assertEqual(body["jobs_deleted"], 0)
+
+    async def test_leads_clear_503_when_db_disconnected(self):
+        """`db.client is None` → 503 fail-closed (handler can't read
+        `.data` off a None response)."""
+        from backend import main as backend_main
+
+        mock_db = MagicMock(name="mock_db_none")
+        mock_db.client = None
+        backend_main.db = mock_db
+
+        res = await self.http.delete("/leads/clear", headers=self.h)
+        self.assertEqual(res.status_code, 503, f"body={res.text!r}")
+
+    async def test_leads_demo_returns_deleted_count(self):
+        """`/leads/demo` surfaces `deleted` (lead count) alongside the
+        existing `leads_deleted` + `messages_deleted` keys consumed by
+        the dashboard toast."""
+        from backend import main as backend_main
+
+        mock_db = MagicMock(name="mock_db_demo")
+        mock_db.client = MagicMock()
+        mock_db.delete_demo_leads = MagicMock(
+            return_value={"leads_deleted": 5, "messages_deleted": 3}
+        )
+        backend_main.db = mock_db
+
+        res = await self.http.request(
+            "DELETE",
+            "/leads/demo",
+            headers=self.h,
+            json={"confirmation": "REMOVE DEMO"},
+        )
+        self.assertEqual(res.status_code, 200, f"body={res.text!r}")
+        body = res.json()
+        self.assertEqual(body["deleted"], 5)
+        self.assertEqual(body["leads_deleted"], 5)
+        self.assertEqual(body["messages_deleted"], 3)
+        self.assertEqual(body["status"], "cleared")
+
+    async def test_leads_demo_returns_zero_on_empty_wipe(self):
+        """`deleted=0` when there are no demo rows — the operator-facing
+        toast can still report 'no demo data found'."""
+        from backend import main as backend_main
+
+        mock_db = MagicMock(name="mock_db_demo_empty")
+        mock_db.client = MagicMock()
+        mock_db.delete_demo_leads = MagicMock(
+            return_value={"leads_deleted": 0, "messages_deleted": 0}
+        )
+        backend_main.db = mock_db
+
+        res = await self.http.request(
+            "DELETE",
+            "/leads/demo",
+            headers=self.h,
+            json={"confirmation": "REMOVE DEMO"},
+        )
+        self.assertEqual(res.status_code, 200, f"body={res.text!r}")
+        body = res.json()
+        self.assertEqual(body["deleted"], 0)
+        self.assertEqual(body["leads_deleted"], 0)
+        self.assertEqual(body["messages_deleted"], 0)
+
+
 # ---- /execute task allowlist (defense-in-depth) ----------------------------
 
 
