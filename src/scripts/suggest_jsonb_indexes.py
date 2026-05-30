@@ -39,6 +39,7 @@ import os
 import re
 import sys
 from collections import Counter
+from typing import cast
 
 import psycopg
 
@@ -84,7 +85,7 @@ def _fetch_slow_queries(conn: psycopg.Connection) -> list[tuple[int, float, floa
         "ORDER BY total_exec_time DESC "
         "LIMIT 500"
     )
-    return cur.fetchall()
+    return cast(list[tuple[int, float, float, str]], cur.fetchall())
 
 
 def _analyze_target(
