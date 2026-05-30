@@ -22,6 +22,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'origin not allowed' }, { status: 403, headers: NO_STORE_HEADERS })
   }
   const supabase = await createClient()
-  await supabase.auth.signOut()
+  // scope:'local' — revoke only the current browser's refresh token. Default
+  // 'global' would invalidate every concurrent operator session (AUTH-06).
+  await supabase.auth.signOut({ scope: 'local' })
   return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS })
 }
