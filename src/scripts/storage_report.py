@@ -66,6 +66,88 @@ def _human_bytes(n: float) -> str:
     return f"{n:.1f} PB"
 
 
+
+def _check_database_size(conn: psycopg.Connection, quota: int, report: list[str], findings: list[str]) -> int:
+    cur = conn.execute("SELECT pg_database_size(current_database())")
+    db_bytes = int(cur.fetchone()[0])
+    ratio = db_bytes / quota if quota else 0.0
+    report.append(
+        f"  database total: {_human_bytes(db_bytes)} "
+        f"({ratio:.1%} of {_human_bytes(quota)} quota)"
+    )
+    if ratio >= HARD_FAIL_RATIO:
+        findings.append(
+            f"DB at {ratio:.1%} of {_human_bytes(quota)} quota — "
+            f"HARD threshold {HARD_FAIL_RATIO:.0%}: upgrade plan or "
+            f"archive immediately"
+        )
+    elif ratio >= SOFT_WARN_RATIO:
+        findings.append(
+            f"DB at {ratio:.1%} of {_human_bytes(quota)} quota — "
+            f"crossing soft threshold {SOFT_WARN_RATIO:.0%}: plan "
+            f"upgrade or archival within the next quarter"
+        )
+    return db_bytes
+
+def _get_table_sizes(conn: psycopg.Connection) -> dict[str, int]:
+    cur = conn.execute(
+        "SELECT relname, "
+        "       pg_total_relation_size(('public.'||relname)::regclass) AS bytes "
+        "FROM pg_stat_user_tables "
+        "WHERE schemaname = 'public' AND relname = ANY(%s) "
+        "ORDER BY pg_total_relation_size(('public.'||relname)::regclass) DESC",
+        (TABLE_LIST,),
+    )
+    return {r[0]: int(r[1]) for r in cur.fetchall()}
+
+def _load_baseline(baseline_path: Path, report: list[str]) -> dict[str, int]:
+    if not baseline_path.is_file():
+        return {}
+    try:
+        with baseline_path.open() as fh:
+            raw = json.load(fh)
+        return {k: int(v) for k, v in raw.get("tables", {}).items()}
+    except (json.JSONDecodeError, ValueError, OSError):
+        report.append(
+            f"  (baseline at {baseline_path} unreadable — "
+            f"treating as first run)"
+        )
+        return {}
+
+def _analyze_table_growth(current: dict[str, int], baseline: dict[str, int], report: list[str], findings: list[str]) -> None:
+    for table, bytes_now in current.items():
+        prev = baseline.get(table)
+        if prev is None or prev == 0:
+            delta_str = "(no baseline)"
+        else:
+            ratio_growth = bytes_now / prev
+            delta_str = f"{(ratio_growth - 1.0):+.1%}"
+            if ratio_growth > WOW_ANOMALY_MULTIPLIER:
+                findings.append(
+                    f"public.{table}: WoW growth "
+                    f"{(ratio_growth - 1.0):+.1%} (was "
+                    f"{_human_bytes(prev)}, now "
+                    f"{_human_bytes(bytes_now)}) — exceeds "
+                    f"{WOW_ANOMALY_MULTIPLIER:.0f}x — suggests stuck "
+                    f"job inserting forever, runaway producer, or "
+                    f"missed cleanup"
+                )
+        report.append(
+            f"  {table:<22} {_human_bytes(bytes_now):>12} {delta_str:>16}"
+        )
+
+def _save_baseline(baseline_path: Path, current: dict[str, int], db_bytes: int, report: list[str]) -> None:
+    try:
+        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        with baseline_path.open("w") as fh:
+            json.dump(
+                {"tables": current, "db_total_bytes": db_bytes},
+                fh,
+                indent=2,
+            )
+    except OSError as e:
+        report.append(f"  (could not persist baseline to {baseline_path}: {e})")
+
 def main() -> int:
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -85,85 +167,16 @@ def main() -> int:
     report: list[str] = ["Storage size report", "===================="]
 
     try:
-        cur = conn.execute("SELECT pg_database_size(current_database())")
-        db_bytes = int(cur.fetchone()[0])
-        ratio = db_bytes / quota if quota else 0.0
-        report.append(
-            f"  database total: {_human_bytes(db_bytes)} "
-            f"({ratio:.1%} of {_human_bytes(quota)} quota)"
-        )
-        if ratio >= HARD_FAIL_RATIO:
-            findings.append(
-                f"DB at {ratio:.1%} of {_human_bytes(quota)} quota — "
-                f"HARD threshold {HARD_FAIL_RATIO:.0%}: upgrade plan or "
-                f"archive immediately"
-            )
-        elif ratio >= SOFT_WARN_RATIO:
-            findings.append(
-                f"DB at {ratio:.1%} of {_human_bytes(quota)} quota — "
-                f"crossing soft threshold {SOFT_WARN_RATIO:.0%}: plan "
-                f"upgrade or archival within the next quarter"
-            )
-
-        # Per-table breakdown
-        cur = conn.execute(
-            "SELECT relname, "
-            "       pg_total_relation_size(('public.'||relname)::regclass) AS bytes "
-            "FROM pg_stat_user_tables "
-            "WHERE schemaname = 'public' AND relname = ANY(%s) "
-            "ORDER BY pg_total_relation_size(('public.'||relname)::regclass) DESC",
-            (TABLE_LIST,),
-        )
-        current: dict[str, int] = {r[0]: int(r[1]) for r in cur.fetchall()}
+        db_bytes = _check_database_size(conn, quota, report, findings)
+        current = _get_table_sizes(conn)
 
         report.append("")
         report.append(f"  {'table':<22} {'size':>12} {'wow_delta':>16}")
         report.append("  " + "-" * 52)
 
-        baseline: dict[str, int] = {}
-        if baseline_path.is_file():
-            try:
-                with baseline_path.open() as fh:
-                    raw = json.load(fh)
-                baseline = {k: int(v) for k, v in raw.get("tables", {}).items()}
-            except (json.JSONDecodeError, ValueError, OSError):
-                report.append(
-                    f"  (baseline at {baseline_path} unreadable — "
-                    f"treating as first run)"
-                )
-
-        for table, bytes_now in current.items():
-            prev = baseline.get(table)
-            if prev is None or prev == 0:
-                delta_str = "(no baseline)"
-            else:
-                ratio_growth = bytes_now / prev
-                delta_str = f"{(ratio_growth - 1.0):+.1%}"
-                if ratio_growth > WOW_ANOMALY_MULTIPLIER:
-                    findings.append(
-                        f"public.{table}: WoW growth "
-                        f"{(ratio_growth - 1.0):+.1%} (was "
-                        f"{_human_bytes(prev)}, now "
-                        f"{_human_bytes(bytes_now)}) — exceeds "
-                        f"{WOW_ANOMALY_MULTIPLIER:.0f}x — suggests stuck "
-                        f"job inserting forever, runaway producer, or "
-                        f"missed cleanup"
-                    )
-            report.append(
-                f"  {table:<22} {_human_bytes(bytes_now):>12} {delta_str:>16}"
-            )
-
-        # Persist new baseline for next run
-        try:
-            baseline_path.parent.mkdir(parents=True, exist_ok=True)
-            with baseline_path.open("w") as fh:
-                json.dump(
-                    {"tables": current, "db_total_bytes": db_bytes},
-                    fh,
-                    indent=2,
-                )
-        except OSError as e:
-            report.append(f"  (could not persist baseline to {baseline_path}: {e})")
+        baseline = _load_baseline(baseline_path, report)
+        _analyze_table_growth(current, baseline, report, findings)
+        _save_baseline(baseline_path, current, db_bytes, report)
     except psycopg.Error as e:
         print(f"ERROR: storage probe failed: {e}", file=sys.stderr)
         conn.close()
