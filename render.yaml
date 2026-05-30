@@ -155,6 +155,14 @@ services:
       # /leads/clear path. Unset → "Clear All Leads" UI 403s.
       - key: ADMIN_TOKEN
         sync: false
+      # Server-side only — must match backend OPERATOR_EMAIL. The proxy
+      # rejects any authed Supabase session whose `user.email` doesn't
+      # match this value (case-insensitive). Closes the post-boot 2nd-user
+      # gap that the backend lifespan check cannot — backend has no
+      # per-request user identity. Unset → guard no-ops; backend boot
+      # check is the only enforcement.
+      - key: OPERATOR_EMAIL
+        sync: false
       # Public — Supabase auth/publishable key. RLS prevents data access.
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
