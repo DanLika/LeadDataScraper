@@ -41,7 +41,7 @@ export async function updateSession(
             supabaseResponse.cookies.set(
               name,
               value,
-              hardenCookieOptions(options),
+              hardenCookieOptions(options, name),
             )
           })
         },
