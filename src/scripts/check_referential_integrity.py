@@ -51,10 +51,10 @@ def _run_cascade_test(conn: psycopg.Connection) -> list[str]:
         "INSERT INTO campaigns (id, name, channel) VALUES (%s, %s, %s)",
         (campaign_id, test_name, "email"),
     )
-    for _ in range(5):
-        conn.execute(
+    with conn.cursor() as cur:
+        cur.executemany(
             "INSERT INTO campaign_messages (campaign_id, channel) VALUES (%s, %s)",
-            (campaign_id, "email"),
+            [(campaign_id, "email") for _ in range(5)],
         )
 
     cur = conn.execute(
