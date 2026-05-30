@@ -375,31 +375,38 @@ class SupabaseHelper:
             "needs_manual_review",
         ]
 
-        try:
-            # Optimization 1: Attempt to select all columns in a single row query
-            # This handles the common case where all columns exist with only 1 query.
-            try:
-                self.client.table("leads").select(",".join(required_cols)).limit(
-                    1
-                ).execute()
-                return []
-            except Exception as e:
-                # If selection fails, it's likely because one or more columns are missing
-                if "column" not in str(e) or "does not exist" not in str(e):
-                    # For other types of errors, log and return empty
-                    logger.error("Error during bulk schema check: %s", e)
-                    return []
+        cols_to_check = list(required_cols)
+        missing = []
 
-            # Optimization 2: Individual checks (no generic exec_sql RPC).
-            # The generic exec_sql RPC was removed for security; column-level
-            # checks are slower but safe.
-            missing = []
-            for col in required_cols:
+        try:
+            while cols_to_check:
                 try:
-                    self.client.table("leads").select(col).limit(1).execute()
+                    self.client.table("leads").select(",".join(cols_to_check)).limit(1).execute()
+                    break # All remaining columns exist
                 except Exception as e:
-                    if "column" in str(e) and "does not exist" in str(e):
-                        missing.append(col)
+                    error_str = str(e)
+                    if "column" in error_str and "does not exist" in error_str:
+                        # Optimization: Extract the missing column from the error message to avoid N+1 queries
+                        match = re.search(r'column \\?"?([a-zA-Z0-9_]+)\\?"? does not exist', error_str)
+                        if match:
+                            missing_col = match.group(1)
+                            if missing_col in cols_to_check:
+                                missing.append(missing_col)
+                                cols_to_check.remove(missing_col)
+                                continue # Retry with the missing column removed
+
+                        # Fallback to individual checks if parsing fails
+                        for col in cols_to_check:
+                            try:
+                                self.client.table("leads").select(col).limit(1).execute()
+                            except Exception as inner_e:
+                                if "column" in str(inner_e) and "does not exist" in str(inner_e):
+                                    missing.append(col)
+                        break # We've checked all remaining individually
+                    else:
+                        logger.error("Error during bulk schema check: %s", e)
+                        break
+
             return missing
         except Exception as e:
             logger.error("Error checking schema: %s", e, exc_info=True)
