@@ -1,9 +1,11 @@
 import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { hardenCookieOptions } from './cookie-floor.mjs'
 
 export async function createClient() {
   const cookieStore = await cookies()
+  const headersList = await headers()
+  const requestHost = headersList.get('host') ?? undefined
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,7 +21,7 @@ export async function createClient() {
           // directly during the action handler, not via middleware.
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, hardenCookieOptions(options))
+              cookieStore.set(name, value, hardenCookieOptions(options, requestHost))
             })
           } catch {
             // The `setAll` method was called from a Server Component, which

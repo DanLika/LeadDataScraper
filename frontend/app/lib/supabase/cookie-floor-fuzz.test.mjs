@@ -10,11 +10,8 @@
  *   - Cookie with `SameSite=None` → MUST collapse to `Lax`.
  *   - Cookie missing `HttpOnly` → MUST be added.
  *   - Cookie `Domain` set wider than current origin (`.com`, leading
- *     dot, attacker-host) → DOCUMENTED CURRENT BEHAVIOR: floor passes
- *     domain through unchanged. The same-origin defense lives at the
- *     `Set-Cookie` parser layer (browser refuses `Domain=.com`). A
- *     belt-and-braces narrow-domain check would harden further; left
- *     as a TODO with a failing assertion the operator can promote.
+ *     dot, attacker-host) → floor strips domains that are wider than
+ *     or unrelated to the current request host.
  *   - `__Host-` prefix violations — DOCUMENTED: the `__Host-` semantics
  *     are enforced by the BROWSER (no Domain attr, Path=/, Secure).
  *     The floor doesn't know the cookie name; left as a TODO.
@@ -145,18 +142,28 @@ for (const ss of SAMESITE_INPUTS) {
 // could harden against; promote them to live tests when the production
 // code adds these defenses. ──
 
-test.skip('TODO: Domain wider than current origin should be narrowed', () => {
-  // `hardenCookieOptions` currently lets `domain: '.com'` or
-  // `domain: 'evil.com'` pass through. The browser's cookie parser
-  // would reject `.com` (TLD too broad) but a sibling-host cookie like
-  // `.example.com` set from `app.example.com` is accepted. If the floor
-  // ever moves to a context-aware variant (knows current host),
-  // promote this test.
-  const out = hardenCookieOptions(
+test('Domain wider than current origin should be narrowed', () => {
+  // `hardenCookieOptions` blocks `.com` or `evil.com` if they do not
+  // match or suffix the current request host.
+  const requestHost = 'app.example.com'
+
+  const out1 = hardenCookieOptions(
     { sameSite: 'lax', domain: '.com' },
+    requestHost
   )
-  // Expectation: floor strips invalid domain or narrows to host-only.
-  assert.notEqual(out.domain, '.com')
+  assert.notEqual(out1.domain, '.com')
+
+  const out2 = hardenCookieOptions(
+    { sameSite: 'lax', domain: 'evil.com' },
+    requestHost
+  )
+  assert.notEqual(out2.domain, 'evil.com')
+
+  const out3 = hardenCookieOptions(
+    { sameSite: 'lax', domain: '.example.com' },
+    requestHost
+  )
+  assert.equal(out3.domain, '.example.com', 'sibling-host should be preserved')
 })
 
 test.skip("TODO: __Host- prefixed cookies must have Path=/ and no Domain", () => {
