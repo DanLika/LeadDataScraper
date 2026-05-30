@@ -11,13 +11,16 @@
     "saveAndClose": "Save & Close",
     "cancel": "Cancel",
     "close": "Close",
+    "closeEsc": "Close (Esc)",
     "loading": "Loading...",
     "search": "Search",
     "clear": "Clear",
     "delete": "Delete",
     "confirm": "Confirm",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "copy": "Copy",
+    "copied": "Copied"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -38,7 +41,13 @@
     "seoScoreAsc": "SEO score: low → high",
     "outreachScoreDesc": "Outreach score: high → low",
     "nameAZ": "Name A→Z",
-    "nameZA": "Name Z→A"
+    "nameZA": "Name Z→A",
+    "skipLink": "Skip to main content",
+    "openMenu": "Open menu",
+    "openMenuTitle": "Open navigation menu",
+    "stopProcessing": "Stop processing",
+    "kicker": "Operational Overview",
+    "heroTitle": "Pipeline Intelligence"
   },
   "leadTable": {
     "company": "Company",
@@ -55,6 +64,35 @@
     "auditNow": "Audit Now",
     "draftOutreach": "Draft Outreach",
     "viewDetails": "View Details"
+  },
+  "modals": {
+    "outreach": {
+      "close": "Close outreach draft",
+      "subject": "Subject",
+      "suggestedHook": "Suggested Opening Hook",
+      "linkedinTitle": "LinkedIn Connection Request",
+      "connectionHook": "Personalized Connection Hook",
+      "copyHook": "Copy Hook",
+      "copyMessage": "Copy Message",
+      "copyBody": "Copy Body",
+      "copySubject": "Copy Subject"
+    },
+    "discovery": {
+      "close": "Close discovery",
+      "location": "Location",
+      "startSearch": "Start Deep Search"
+    },
+    "settings": {
+      "close": "Close settings",
+      "apiConfig": "API Configuration",
+      "dataExport": "Data Export Management",
+      "myDataGdpr": "My Data (GDPR)"
+    },
+    "campaign": {
+      "title": "Campaign Outreach Strategy",
+      "close": "Close campaign strategy",
+      "closeLibrary": "Close Library"
+    }
   },
   "settings": {
     "title": "Settings",

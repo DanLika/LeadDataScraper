@@ -2,6 +2,7 @@
 
 import { useCallback, useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import dynamic from 'next/dynamic';
 import { useFocusTrap } from '@/app/hooks/useFocusTrap';
 import { restoreFocus, BURGER_SELECTOR } from '@/app/hooks/useEscape';
@@ -114,6 +115,12 @@ export default function Dashboard() {
 function DashboardInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const tDash = useTranslations('dashboard');
+  const tCommon = useTranslations('common');
+  const tOutreach = useTranslations('modals.outreach');
+  const tDiscovery = useTranslations('modals.discovery');
+  const tSettings = useTranslations('modals.settings');
+  const tCampaign = useTranslations('modals.campaign');
   const [leads, setLeads] = useState<Lead[]>([]);
   // DB-wide total from /stats, separate from the paginated `leads` array.
   // Null until the first /stats response lands; StatsCards then displays it
@@ -1186,7 +1193,7 @@ function DashboardInner() {
           ))}
         </div>
       )}
-      <a href="#main-content" className="skip-link">Skip to main content</a>
+      <a href="#main-content" className="skip-link">{tDash('skipLink')}</a>
       {/* Sidebar - Lead Insights */}
       <Sidebar
         view={view}
@@ -1218,8 +1225,8 @@ function DashboardInner() {
           <button
             onClick={() => setIsSidebarOpen(true)}
             style={{ background: 'var(--surface-muted)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '0.5rem', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '44px', minHeight: '44px' }}
-            aria-label="Open menu"
-            title="Open navigation menu"
+            aria-label={tDash('openMenu')}
+            title={tDash('openMenuTitle')}
           >
             <Menu size={22} />
           </button>
@@ -1268,7 +1275,7 @@ function DashboardInner() {
                </span>
                <button 
                  onClick={orchestratorJob ? stopOrchestratorJob : stopAuditProcess}
-                 aria-label="Stop processing"
+                 aria-label={tDash('stopProcessing')}
                  style={{ background: 'var(--error-tint)', border: '1px solid var(--error)', color: 'var(--error)', borderRadius: '4px', padding: '0.35rem 0.75rem', minHeight: '44px', fontSize: '0.7rem', cursor: 'pointer' }}
                >
                  STOP
@@ -1280,8 +1287,8 @@ function DashboardInner() {
         <div style={{ padding: '1rem 2rem 8rem 2rem' }} className="main-content-wrapper">
         <header className="page-header">
           <div style={{ minWidth: '300px' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary-strong)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>Operational Overview</span>
-            <h1 style={{ marginBottom: '0.5rem' }}>Pipeline Intelligence</h1>
+            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary-strong)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>{tDash('kicker')}</span>
+            <h1 style={{ marginBottom: '0.5rem' }}>{tDash('heroTitle')}</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '1rem', fontWeight: 400 }}>Orchestrating AI-driven auditing for high-conversion prospecting.</p>
           </div>
           <div className="header-actions">
@@ -1403,7 +1410,7 @@ function DashboardInner() {
           <div className="card" style={{ width: '100%', maxWidth: 'min(600px, 95vw)', padding: 'clamp(1rem, 5vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setOutreachDraft(null)}
-              aria-label="Close outreach draft"
+              aria-label={tOutreach('close')}
               style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
@@ -1443,7 +1450,7 @@ function DashboardInner() {
 
             {outreachDraft.subject && (
               <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', minWidth: '60px' }}>Subject</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', minWidth: '60px' }}>{tOutreach('subject')}</span>
                 <span style={{ fontSize: '1rem', color: 'var(--text-primary)', fontWeight: 600 }}>{outreachDraft.subject}</span>
               </div>
             )}
@@ -1462,7 +1469,7 @@ function DashboardInner() {
             {activeLead?.email_hook && (
               <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(165, 180, 252, 0.05)', borderRadius: '12px', border: '1px dashed rgba(165, 180, 252, 0.3)', position: 'relative' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--primary-light)', textTransform: 'uppercase', fontWeight: 600 }}>Suggested Opening Hook</div>
+                  <div style={{ fontSize: '0.65rem', color: 'var(--primary-light)', textTransform: 'uppercase', fontWeight: 600 }}>{tOutreach('suggestedHook')}</div>
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(activeLead.email_hook || '');
@@ -1471,7 +1478,7 @@ function DashboardInner() {
                     }}
                     style={{ background: 'none', border: 'none', color: 'var(--primary-light)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem', minHeight: '32px', padding: '0.35rem 0.5rem' }}
                   >
-                    {copiedHookType === 'email' ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Hook</>}
+                    {copiedHookType === 'email' ? <><Check size={12} /> {tCommon('copied')}</> : <><Copy size={12} /> {tOutreach('copyHook')}</>}
                   </button>
                 </div>
                 <p style={{ fontSize: '0.9rem', fontStyle: 'italic', margin: 0, color: 'var(--primary-light)' }}>&quot;{activeLead.email_hook}&quot;</p>
@@ -1482,7 +1489,7 @@ function DashboardInner() {
               <div style={{ marginTop: '0', padding: '1.5rem', background: 'var(--linkedin-tint)', borderRadius: '12px', border: '1px solid rgba(10, 102, 194, 0.2)', marginBottom: '2rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--linkedin)' }}>
                   <Linkedin size={18} aria-hidden="true" />
-                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>LinkedIn Connection Request</h3>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>{tOutreach('linkedinTitle')}</h3>
                 </div>
                 <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0 }}>
                   {linkedinDraft}
@@ -1490,7 +1497,7 @@ function DashboardInner() {
                 {activeLead?.linkedin_hook && (
                   <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--surface-muted)', borderRadius: '8px', borderLeft: '3px solid var(--linkedin)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Personalized Connection Hook</div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{tOutreach('connectionHook')}</div>
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(activeLead.linkedin_hook || '');
@@ -1499,7 +1506,7 @@ function DashboardInner() {
                         }}
                         style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.65rem', minHeight: '32px', padding: '0.35rem 0.5rem' }}
                       >
-                        {copiedHookType === 'linkedin' ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+                        {copiedHookType === 'linkedin' ? <><Check size={10} /> {tCommon('copied')}</> : <><Copy size={10} /> {tCommon('copy')}</>}
                       </button>
                     </div>
                     <p style={{ fontSize: '0.8rem', margin: 0, color: 'var(--text-primary)' }}>{activeLead.linkedin_hook}</p>
@@ -1545,9 +1552,9 @@ function DashboardInner() {
                       title="Copy this message text — LinkedIn has no API for sending invites with prefilled text, so paste manually after clicking Connect on the profile."
                     >
                       {copiedAction === 'invite' ? (
-                        <><Check size={12} style={{ marginRight: '0.3rem', verticalAlign: 'middle' }} /> Copied</>
+                        <><Check size={12} style={{ marginRight: '0.3rem', verticalAlign: 'middle' }} /> {tCommon('copied')}</>
                       ) : (
-                        <><Copy size={12} style={{ marginRight: '0.3rem', verticalAlign: 'middle' }} /> Copy Message</>
+                        <><Copy size={12} style={{ marginRight: '0.3rem', verticalAlign: 'middle' }} /> {tOutreach('copyMessage')}</>
                       )}
                     </button>
                   </div>
@@ -1566,9 +1573,9 @@ function DashboardInner() {
                 }}
               >
                 {copiedAction === 'body' ? (
-                  <><Check size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copied</>
+                  <><Check size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> {tCommon('copied')}</>
                 ) : (
-                  <><Copy size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copy Body</>
+                  <><Copy size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> {tOutreach('copyBody')}</>
                 )}
               </button>
               {outreachDraft.subject && (
@@ -1583,9 +1590,9 @@ function DashboardInner() {
                   }}
                 >
                   {copiedAction === 'subject' ? (
-                    <><Check size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copied</>
+                    <><Check size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> {tCommon('copied')}</>
                   ) : (
-                    <><Copy size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Copy Subject</>
+                    <><Copy size={14} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> {tOutreach('copySubject')}</>
                   )}
                 </button>
               )}
@@ -1612,8 +1619,8 @@ function DashboardInner() {
           <div className="card" style={{ width: '100%', maxWidth: 'min(500px, 95vw)', padding: 'clamp(1.25rem, 4vw, 2rem)', position: 'relative', border: '1px solid var(--primary)', maxHeight: '90vh', overflowY: 'auto' }}>
             <button
               onClick={() => setShowDiscoveryModal(false)}
-              aria-label="Close discovery"
-              title="Close (Esc)"
+              aria-label={tDiscovery('close')}
+              title={tCommon('closeEsc')}
               style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} aria-hidden="true" />
@@ -1636,7 +1643,7 @@ function DashboardInner() {
                 />
               </div>
               <div>
-                <label htmlFor="discovery-location" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Location <span aria-hidden="true" style={{ color: 'var(--error)' }}>*</span></label>
+                <label htmlFor="discovery-location" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>{tDiscovery('location')} <span aria-hidden="true" style={{ color: 'var(--error)' }}>*</span></label>
                 <input
                   type="text"
                   id="discovery-location"
@@ -1665,7 +1672,7 @@ function DashboardInner() {
                 ) : (
                   <>
                     <Play size={18} aria-hidden="true" />
-                    <span>Start Deep Search</span>
+                    <span>{tDiscovery('startSearch')}</span>
                   </>
                 )}
               </button>
@@ -1736,7 +1743,7 @@ function DashboardInner() {
           <div className="card" style={{ width: '100%', maxWidth: '500px', padding: 'clamp(1.25rem, 4vw, 2.5rem)', position: 'relative', border: '1px solid var(--primary)' }}>
             <button
               onClick={() => setShowSettings(false)}
-              aria-label="Close settings"
+              aria-label={tSettings('close')}
               style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <X size={24} />
@@ -1747,13 +1754,13 @@ function DashboardInner() {
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
-                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>API Configuration</h3>
+                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>{tSettings('apiConfig')}</h3>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Backend: <code>{API_BASE_URL}</code></p>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Database: Supabase</p>
               </div>
 
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
-                <h3 style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>Data Export Management</h3>
+                <h3 style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>{tSettings('dataExport')}</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem' }}>
                   <button
                     className="btn-secondary"
@@ -1793,7 +1800,7 @@ function DashboardInner() {
               </div>
 
               <div style={{ padding: '1rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
-                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>My Data (GDPR)</h3>
+                <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>{tSettings('myDataGdpr')}</h3>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
                   Download a ZIP of every row tied to your account — leads, campaigns,
                   messages, and the orchestration audit log. Rate-limited to once per day.
@@ -1920,13 +1927,13 @@ function DashboardInner() {
                     <Zap size={20} color="white" />
                  </div>
                  <div>
-                    <h2 id="campaign-modal-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Campaign Outreach Strategy</h2>
+                    <h2 id="campaign-modal-title" style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>{tCampaign('title')}</h2>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Personalized drafts for {campaign.length} high-priority leads.</p>
                  </div>
                </div>
                <button
                  onClick={() => setCampaign(null)}
-                 aria-label="Close campaign strategy"
+                 aria-label={tCampaign('close')}
                  style={{ background: 'var(--surface-muted)', border: 'none', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', cursor: 'pointer' }}
                >
                  <X size={20} />
@@ -1963,7 +1970,7 @@ function DashboardInner() {
              </div>
 
              <div style={{ padding: '1.5rem 2rem', background: 'var(--surface-subtle)', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
-                <button className="btn-secondary" onClick={() => setCampaign(null)}>Close Library</button>
+                <button className="btn-secondary" onClick={() => setCampaign(null)}>{tCampaign('closeLibrary')}</button>
                 <button className="btn-primary" onClick={() => {
                    const allDrafts = campaign.map(c => `PROSPECT: ${c.company}\nDRAFT:\n${c.draft}\n\n`).join('-------------------\n');
                    navigator.clipboard.writeText(allDrafts);
