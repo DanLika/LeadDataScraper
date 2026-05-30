@@ -15,6 +15,7 @@ import unittest
 from dataclasses import dataclass
 from typing import Optional
 
+from src.services.template_renderer import TemplateError
 from src.services.thread_builder import (
     DispatchPayload,
     PriorMessageNotReadyError,
@@ -182,21 +183,18 @@ class TestRenderErrors(unittest.TestCase):
     def test_missing_var_raises_through(self) -> None:
         step = _Step()
         variant = _Variant(
-            subject_template="{{ city }}",  # not in context
+            subject_template="{{ not_allowed_var }}",  # not in ALLOWED_VARS
             body_template="x {{ unsubscribe_url }}",
         )
         lead = {"unique_key": "uk", "email": "a@b.com"}
-        # city missing → renders empty since we default it in context build
-        # Actually template_renderer's context build defaults city='' so
-        # render won't raise; verify that.
-        payload = build_send_payload(
-            lds_message_id="msg-1",
-            lead=lead,
-            step=step,
-            variant=variant,
-            unsubscribe_url="https://lds/u/track-1",
-        )
-        self.assertEqual(payload.subject, "")  # empty city renders blank
+        with self.assertRaises(TemplateError):
+            build_send_payload(
+                lds_message_id="msg-1",
+                lead=lead,
+                step=step,
+                variant=variant,
+                unsubscribe_url="https://lds/u/track-1",
+            )
 
 
 class TestMissingIdentifiers(unittest.TestCase):
