@@ -15,7 +15,7 @@ import os
 import unittest
 from collections import Counter
 from dataclasses import dataclass
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from src.services.variant_selector import select_variant
 
@@ -64,7 +64,8 @@ class TestWeightedDistribution(unittest.TestCase):
 
 
 class TestDeterministicSeed(unittest.TestCase):
-    def test_seed_without_env_gate_logs_warning_and_uses_random(self) -> None:
+    @patch("src.services.variant_selector.logger")
+    def test_seed_without_env_gate_logs_warning_and_uses_random(self, mock_logger: MagicMock) -> None:
         """Seed passed but ALLOW_SEED not set → seed is IGNORED. Critical
         production safety: a config bug that smuggles a seed value into
         the worker shouldn't disable A/B testing silently."""
@@ -72,15 +73,35 @@ class TestDeterministicSeed(unittest.TestCase):
             # With unique system-random rolls each call, the probability
             # of getting an identical sequence is vanishingly small;
             # easier to assert that the seed didn't pin the result.
-            picks = {
-                select_variant(VARIANTS, deterministic_seed="frozen-seed").id
-                for _ in range(20)
-            }
+            picks = set()
+            for _ in range(20):
+                picked = select_variant(VARIANTS, deterministic_seed="frozen-seed")
+                picks.add(picked.id)
+
+            mock_logger.warning.assert_called()
+            # Test that we redacted the seed:
+            # hashlib.sha256(b"frozen-seed").hexdigest()[:12] == "fe764a9db8bd"
+            self.assertEqual(mock_logger.warning.call_args[0][1], "fe764a9db8bd")
+
         # 20 SystemRandom picks of 3 weighted variants → almost
         # certainly covers ≥2 distinct results.
         self.assertGreater(
             len(picks), 1, "seed was honored without env gate — A/B testing broken"
         )
+
+    @patch("src.services.variant_selector.logger")
+    def test_empty_seed_uses_system_random_without_warning(self, mock_logger: MagicMock) -> None:
+        """Passing an empty string for deterministic_seed should just use
+        SystemRandom without logging a warning about ALLOW_SEED."""
+        with patch.dict(os.environ, {}, clear=True):
+            picks = {
+                select_variant(VARIANTS, deterministic_seed="").id
+                for _ in range(20)
+            }
+        self.assertGreater(
+            len(picks), 1, "empty seed was pinned — A/B testing broken"
+        )
+        mock_logger.warning.assert_not_called()
 
     def test_seed_with_env_gate_pins_pick(self) -> None:
         with patch.dict(os.environ, {"VARIANT_SELECTOR_ALLOW_SEED": "1"}):
@@ -128,6 +149,25 @@ class TestZeroWeightDefence(unittest.TestCase):
         for _ in range(20):
             picked = select_variant(bad)
             self.assertIn(picked.id, ("v-zero", "v-neg"))
+
+    def test_missing_or_none_weights_default_to_one(self) -> None:
+        """Missing or None weights should gracefully default to 1."""
+        from typing import Optional
+
+        @dataclass(frozen=True)
+        class VariantMissingWeight:
+            id: str
+            variant_label: str
+            weight: Optional[int] = None
+
+        bad = [
+            VariantMissingWeight("v-missing-1", "A"),
+            VariantMissingWeight("v-missing-2", "B"),
+        ]
+        # Should not raise; missing weights should default to 1
+        for _ in range(20):
+            picked = select_variant(bad)
+            self.assertIn(picked.id, ("v-missing-1", "v-missing-2"))
 
 
 if __name__ == "__main__":
