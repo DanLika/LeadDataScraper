@@ -64,7 +64,7 @@ class _Aggregate:
     tables: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
 
-class QueryProfiler(AbstractContextManager):
+class QueryProfiler(AbstractContextManager["QueryProfiler"]):
     """Context-manager monkey-patch around supabase_helper.SupabaseHelper.
 
     On enter, replaces the bound `client.table` attribute on every cached
@@ -109,7 +109,7 @@ class QueryProfiler(AbstractContextManager):
 
         for client in targets:
             original = client.table
-            client.table = self._make_wrapped_table(original)  # type: ignore[attr-defined]
+            client.table = self._make_wrapped_table(original)
             self._patched_clients.append((client, original))
 
         self._active = True
@@ -119,7 +119,7 @@ class QueryProfiler(AbstractContextManager):
             return
         for client, original in self._patched_clients:
             try:
-                client.table = original  # type: ignore[attr-defined]
+                client.table = original
             except Exception:
                 pass
         self._patched_clients.clear()
@@ -129,13 +129,13 @@ class QueryProfiler(AbstractContextManager):
         self.enable()
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self.disable()
 
     # ------------------------------------------------------------------
     # discovery + patching
     # ------------------------------------------------------------------
-    def _discover_clients(self):
+    def _discover_clients(self) -> Any:
         import sys
 
         # SupabaseHelper class — used as the identity check.
@@ -162,7 +162,7 @@ class QueryProfiler(AbstractContextManager):
     ) -> Callable[..., Any]:
         prof = self
 
-        def wrapped(table_name: str, *args: Any, **kwargs: Any):
+        def wrapped(table_name: str, *args: Any, **kwargs: Any) -> Any:
             qb = original_table(table_name, *args, **kwargs)
             return _ProfiledQueryBuilder(qb, table_name, prof)
 

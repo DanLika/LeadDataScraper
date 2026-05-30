@@ -52,7 +52,7 @@ def _mk_msg(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def _mk_step_repo(by_id: dict[str, _Step], by_index: dict[tuple, _Step]) -> MagicMock:
+def _mk_step_repo(by_id: dict[str, _Step], by_index: dict[tuple[str, int], _Step]) -> MagicMock:
     repo = MagicMock()
     repo.get_by_id = AsyncMock(side_effect=lambda sid: by_id.get(sid))
     repo.fetch_many = AsyncMock(
@@ -64,7 +64,7 @@ def _mk_step_repo(by_id: dict[str, _Step], by_index: dict[tuple, _Step]) -> Magi
     return repo
 
 
-def _mk_msg_repo(insert_returns: Optional[dict] = None) -> MagicMock:
+def _mk_msg_repo(insert_returns: Optional[dict[str, Any]] = None) -> MagicMock:
     repo = MagicMock()
     repo.insert_next_step_row = AsyncMock(return_value=insert_returns)
     return repo
@@ -203,6 +203,51 @@ class TestMissingContext(unittest.TestCase):
         )
         self.assertFalse(result.advanced)
         self.assertEqual(result.reason, "missing_sequence_context")
+
+    def test_current_step_not_found_short_circuits(self) -> None:
+        step_repo = _mk_step_repo({}, {})
+        msg_repo = _mk_msg_repo()
+
+        result = asyncio.run(
+            advance_to_next_step(
+                current_message=_mk_msg(step_id="missing-step"),
+                step_repo=step_repo,
+                message_repo=msg_repo,
+                event_type="sent",
+            )
+        )
+        self.assertFalse(result.advanced)
+        self.assertEqual(result.reason, "current_step_not_found")
+        msg_repo.insert_next_step_row.assert_not_called()
+
+    def test_fallback_to_fetch_many_when_get_by_id_missing_or_none(self) -> None:
+        cur = _Step(id="step-0", sequence_id="seq-1", step_index=0)
+        nxt = _Step(
+            id="step-1",
+            sequence_id="seq-1",
+            step_index=1,
+            delay_days=3,
+            branch_condition="always",
+        )
+
+        step_repo = _mk_step_repo({"step-0": cur}, {("seq-1", 1): nxt})
+        # Force get_by_id to fail/return None so it falls back to fetch_many
+        step_repo.get_by_id = AsyncMock(return_value=None)
+
+        msg_repo = _mk_msg_repo({"id": "msg-new"})
+
+        result = asyncio.run(
+            advance_to_next_step(
+                current_message=_mk_msg(),
+                step_repo=step_repo,
+                message_repo=msg_repo,
+                event_type="sent",
+            )
+        )
+        self.assertTrue(result.advanced)
+        self.assertEqual(result.next_step_id, "step-1")
+        step_repo.fetch_many.assert_called_once_with(["step-0"])
+        msg_repo.insert_next_step_row.assert_called_once()
 
 
 class TestIdempotentInsert(unittest.TestCase):
