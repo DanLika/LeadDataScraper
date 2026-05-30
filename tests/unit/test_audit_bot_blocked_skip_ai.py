@@ -83,8 +83,13 @@ class TestBotBlockedStatuses:
         assert result["page_text"] == ""  # Gemini guard fires on falsy page_text
         # The red flag is operator-visible in the audit_results JSONB.
         assert any("Bot-blocked" in flag for flag in result["red_flags"])
-        # is_up still True — the site responded, just with a refusal.
-        assert result["is_up"] is True
+        # is_up semantic shift (2026-05-30): now 2xx/3xx only. 401/403/429
+        # are HTTP-error states — site reachable but refused — so is_up=False
+        # AND is_bot_blocked=True. The two flags are complementary, not
+        # mutually exclusive.
+        assert result["is_up"] is False
+        # An HTTP-status red_flag joins the bot-blocked one.
+        assert any(f"HTTP {status} response" in flag for flag in result["red_flags"])
 
 
 class TestShortContentTrips:
@@ -154,6 +159,9 @@ class TestStatusValuesAreSensible:
         ):
             result = asyncio.run(perform_seo_audit_async("https://example.com"))
         assert result.get("is_bot_blocked") is not True
+        # is_up=False because 405 is a 4xx (post 2026-05-30 semantic).
+        assert result["is_up"] is False
+        assert result["last_error"] == "HTTP 405"
 
     def test_403_in_set(self):
         assert 403 in _BOT_BLOCKED_STATUSES
@@ -162,3 +170,68 @@ class TestStatusValuesAreSensible:
         # 500 (server error) is a different failure mode — not "you're a
         # bot" — and should fall through to existing error handling.
         assert 500 not in _BOT_BLOCKED_STATUSES
+
+
+class TestIsUpHttpStatusGate:
+    """2026-05-30 fix: is_up = (200 <= status < 400). 4xx/5xx pages
+    no longer flow their error-template HTML through the line-402
+    analysis block in ``perform_seo_audit_async`` — keeps bogus
+    tech_flags + seo_score + segment_lead inputs out of the pipeline.
+
+    Pre-fix: is_up=True for every status. Operator decision: do not
+    backfill historical leads with corrupted ``audit_results`` — the
+    next re-audit overwrites them, and outreach_score is independent
+    of seo_score (CLAUDE.md pinned finding #1).
+    """
+
+    @pytest.mark.parametrize("status", [404, 410, 500, 502, 503, 504])
+    def test_4xx_5xx_marks_is_up_false_and_skips_analysis(self, status: int):
+        # Body must be >= _MIN_AUDITABLE_CONTENT_BYTES so the bot-blocked
+        # thin-body branch does NOT fire — we want to test the pure
+        # HTTP-status gate, not the (still-correct) thin-body overlap.
+        body = (
+            f"<html><body><h1>HTTP {status} error</h1>"
+            + ("<p>verbose error template padding</p>" * 50)
+            + "</body></html>"
+        )
+        assert len(body) >= _MIN_AUDITABLE_CONTENT_BYTES
+        response = _mock_aiohttp_response(status, body)
+        session = _mock_aiohttp_session(response)
+        with patch(
+            "src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session
+        ):
+            result = asyncio.run(perform_seo_audit_async("https://example.com"))
+
+        assert result["is_up"] is False
+        assert result["http_status"] == status
+        assert result["last_error"] == f"HTTP {status}"
+        assert any(f"HTTP {status} response" in f for f in result["red_flags"])
+        # Analysis block must have been skipped — default zero score,
+        # default tech_flags, no title parsed from the error template.
+        assert result["score"] == 0
+        assert result["title"] is None
+        assert result["meta_description"] is None
+        # tech_flags untouched from the all-False initial dict.
+        assert all(v is False for v in result["tech_flags"].values())
+        # bot-blocked stays False — 404/500/etc are HTTP errors, not
+        # anti-bot soft-blocks.
+        assert result.get("is_bot_blocked") is not True
+
+    @pytest.mark.parametrize("status", [200, 201, 204, 301, 302, 304])
+    def test_2xx_3xx_keeps_is_up_true(self, status: int):
+        body = (
+            "<html><head><title>Normal Page</title></head><body><h1>OK</h1>"
+            + ("<p>normal homepage content padding</p>" * 50)
+            + "</body></html>"
+        )
+        response = _mock_aiohttp_response(status, body)
+        session = _mock_aiohttp_session(response)
+        with patch(
+            "src.scrapers.seo_audit.aiohttp.ClientSession", return_value=session
+        ):
+            result = asyncio.run(perform_seo_audit_async("https://example.com"))
+
+        assert result["is_up"] is True
+        assert result["http_status"] == status
+        # No HTTP-error last_error on success statuses.
+        assert "HTTP " not in (result.get("last_error") or "")

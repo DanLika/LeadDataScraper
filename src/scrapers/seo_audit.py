@@ -318,6 +318,10 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
         "red_flags": [],
         "tech_stack": [],
         "emails": [],
+        # Initialized empty so 4xx/5xx responses (which now skip the
+        # is_up analysis block — 2026-05-30 fix) still expose the key
+        # downstream callers grep on (`if not page_text: return`).
+        "page_text": "",
     }
 
     if url.startswith("https://"):
@@ -358,9 +362,24 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
                         # errors="replace" so malformed bytes don't raise
                         # UnicodeDecodeError up through the auditor.
                         html = raw.decode(response.charset or "utf-8", errors="replace")
-                        results["is_up"] = True
                         results["response_time"] = round(time.time() - start_time, 2)
                         results["http_status"] = response.status
+                        # is_up now reflects HTTP success (2xx/3xx) only.
+                        # Pre-fix (≤2026-05-29): is_up=True for every
+                        # status. A 404/500/503 page's error-template HTML
+                        # then flowed into the line-402 analysis block,
+                        # contributing bogus tech_flags + seo_score +
+                        # segment_lead inputs. The downstream impact on
+                        # outreach_score is indirect — calculate_outreach_score
+                        # does NOT read is_up or seo_score (CLAUDE.md pinned
+                        # finding #1) — but high_risk_flag and segment_lead
+                        # do pivot on these signals.
+                        results["is_up"] = 200 <= response.status < 400
+                        if not results["is_up"]:
+                            results["last_error"] = f"HTTP {response.status}"
+                            results["red_flags"].append(
+                                f"HTTP {response.status} response"
+                            )
                         # Bot-blocked detection — without this, a 403 page
                         # passes its small "403 Forbidden" body downstream
                         # and Gemini hallucinates pain_points that look
