@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Optional
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -219,6 +220,35 @@ class TestDispatcherConstruction:
     def test_default_batch_size(self):
         d = InstantlyDispatcher(api_key="k", default_campaign_id="c")
         assert d.batch_size == DEFAULT_BATCH_SIZE
+
+
+class TestAClose:
+    @pytest.mark.asyncio
+    async def test_no_session_injected(self):
+        d = InstantlyDispatcher(api_key="k", default_campaign_id="c")
+        await d.aclose()  # Should not raise any error
+
+    @pytest.mark.asyncio
+    async def test_open_session_injected(self):
+        mock_session = MagicMock()
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
+
+        d = InstantlyDispatcher(api_key="k", default_campaign_id="c", session=mock_session)
+        await d.aclose()
+
+        mock_session.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_closed_session_injected(self):
+        mock_session = MagicMock()
+        mock_session.closed = True
+        mock_session.close = AsyncMock()
+
+        d = InstantlyDispatcher(api_key="k", default_campaign_id="c", session=mock_session)
+        await d.aclose()
+
+        mock_session.close.assert_not_called()
 
 
 class TestPushLeadsErrorPaths:
