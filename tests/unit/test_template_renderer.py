@@ -52,6 +52,10 @@ class TestValidateTemplateVars(unittest.TestCase):
         self.assertEqual(validate_template_vars(""), [])
         self.assertEqual(validate_template_vars(None), [])  # type: ignore[arg-type]
 
+    def test_mixed_allowed_and_disallowed_vars(self) -> None:
+        body = "Hi {{ first_name }}, your {{ custom_var }} is ready."
+        self.assertEqual(validate_template_vars(body), ["custom_var"])
+
 
 class TestAssertColdEmailUnsubscribe(unittest.TestCase):
     def test_body_with_unsubscribe_url_passes(self) -> None:
@@ -78,6 +82,10 @@ class TestAssertColdEmailUnsubscribe(unittest.TestCase):
     def test_empty_body_raises(self) -> None:
         with self.assertRaises(MissingUnsubscribeUrlError):
             assert_cold_email_unsubscribe("")
+
+    def test_syntax_error_raises_template_error(self) -> None:
+        with self.assertRaises(TemplateError):
+            assert_cold_email_unsubscribe("Hi {{ unclosed")
 
 
 class TestRender(unittest.TestCase):
@@ -126,6 +134,13 @@ class TestRender(unittest.TestCase):
         # text mode does NOT autoescape; the literal flows through.
         # This is OK for cold email bodies (mail clients render plain text).
         self.assertIn("<script>", out)
+
+    def test_none_template_returns_empty_string(self) -> None:
+        self.assertEqual(render(None, {}), "")  # type: ignore[arg-type]
+
+    def test_syntax_error_raises_template_error(self) -> None:
+        with self.assertRaises(TemplateError):
+            render("Hi {{ unclosed", {})
 
 
 class TestSandboxEscape(unittest.TestCase):
