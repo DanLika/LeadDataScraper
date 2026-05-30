@@ -14,13 +14,16 @@
     "saveAndClose": "Spremi i zatvori",
     "cancel": "Odustani",
     "close": "Zatvori",
+    "closeEsc": "Zatvori (Esc)",
     "loading": "Učitavanje...",
     "search": "Pretraži",
     "clear": "Očisti",
     "delete": "Obriši",
     "confirm": "Potvrdi",
     "yes": "Da",
-    "no": "Ne"
+    "no": "Ne",
+    "copy": "Kopiraj",
+    "copied": "Kopirano"
   },
   "dashboard": {
     "title": "Nadzorna ploča",
@@ -41,7 +44,13 @@
     "seoScoreAsc": "SEO ocjena: niska → visoka",
     "outreachScoreDesc": "Ocjena pristupa: visoka → niska",
     "nameAZ": "Naziv A→Ž",
-    "nameZA": "Naziv Ž→A"
+    "nameZA": "Naziv Ž→A",
+    "skipLink": "Preskoči na glavni sadržaj",
+    "openMenu": "Otvori izbornik",
+    "openMenuTitle": "Otvori navigacijski izbornik",
+    "stopProcessing": "Zaustavi obradu",
+    "kicker": "Operativni pregled",
+    "heroTitle": "Inteligencija pipelinea"
   },
   "leadTable": {
     "company": "Tvrtka",
@@ -58,6 +67,35 @@
     "auditNow": "Revidiraj odmah",
     "draftOutreach": "Nacrtaj pristup",
     "viewDetails": "Pogledaj detalje"
+  },
+  "modals": {
+    "outreach": {
+      "close": "Zatvori nacrt pristupa",
+      "subject": "Predmet",
+      "suggestedHook": "Predloženi početni hook",
+      "linkedinTitle": "LinkedIn zahtjev za povezivanje",
+      "connectionHook": "Personalizirani hook povezivanja",
+      "copyHook": "Kopiraj hook",
+      "copyMessage": "Kopiraj poruku",
+      "copyBody": "Kopiraj tijelo",
+      "copySubject": "Kopiraj predmet"
+    },
+    "discovery": {
+      "close": "Zatvori otkrivanje",
+      "location": "Lokacija",
+      "startSearch": "Pokreni duboku pretragu"
+    },
+    "settings": {
+      "close": "Zatvori postavke",
+      "apiConfig": "API konfiguracija",
+      "dataExport": "Upravljanje izvozom podataka",
+      "myDataGdpr": "Moji podaci (GDPR)"
+    },
+    "campaign": {
+      "title": "Strategija pristupa kampanje",
+      "close": "Zatvori strategiju kampanje",
+      "closeLibrary": "Zatvori biblioteku"
+    }
   },
   "settings": {
     "title": "Postavke",
