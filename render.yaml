@@ -45,6 +45,56 @@ services:
       - key: PYTHON_ENV
         value: production
 
+  # Dispatch tick (Cron) — Phase 15.2 sequence-step dispatcher. Reads
+  # campaign_messages where status='pending' AND scheduled_at <= NOW(),
+  # claims a batch, dispatches via Instantly, advances state. Idempotent
+  # under concurrent invocation (status-transition CAS); crash-safe via
+  # the stale-claim sweep (DISPATCH_CLAIM_TIMEOUT_MIN=15 default). Cron
+  # cadence */5 per docs/runbooks/dispatch-cron.md §canonical (Phase
+  # 15.2/13 dogfood low-volume; promote to */1 only once avg claimed
+  # per tick crosses ~50 over a rolling 24h). Reuses backend Docker
+  # image so dependency drift between web and cron is impossible.
+  - type: cron
+    name: lead-scraper-dispatch-tick
+    env: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile
+    schedule: "*/5 * * * *"
+    dockerCommand: python scripts/dispatch_tick.py
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Upstream Instantly REST. Without this the worker raises
+      # `dispatcher_unavailable` and the cron exits 1 (operator misconfig).
+      - key: INSTANTLY_API_KEY
+        sync: false
+      - key: INSTANTLY_DEFAULT_CAMPAIGN_ID
+        sync: false
+      # RFC 8058 List-Unsubscribe link generation. Without UNSUBSCRIBE_*,
+      # sent emails carry no one-click unsub — AUP risk + DMARC ramp blocker.
+      - key: UNSUBSCRIBE_BASE_URL
+        sync: false
+      - key: UNSUBSCRIBE_TOKEN_SECRET
+        sync: false
+      # Outreach signature. OPERATOR_NAME unset → "Your Name" placeholder
+      # in body; OPERATOR_SIGNATURE unset → only first/last name shown.
+      - key: OPERATOR_NAME
+        sync: false
+      - key: OPERATOR_SIGNATURE
+        sync: false
+      # send_windows timezone bind. Default UTC; LDS dogfood uses
+      # `Europe/Sarajevo` so 09:00–18:00 windows track operator local time.
+      - key: SEND_WINDOW_DEFAULT_TZ
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
+      - key: PYTHON_ENV
+        value: production
+
   # Webhook Sweeper (Cron) — Path A recovery for stranded webhook_events
   # rows where supabase-py raised an httpx/httpcore transport exception
   # AFTER PostgREST committed the INSERT (see PR #357 for Path B + C at
