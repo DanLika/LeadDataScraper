@@ -35,6 +35,48 @@ class TestRobustness(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.get("retry_count"), 1)
         self.assertEqual(result.get("audit_status"), "Pending")
 
+    async def test_no_website_logs_warning_not_error(self):
+        """`audit_single_lead` returning ``{"status":"Failed","error":"No website"}``
+        is a graceful skip — must route to WARNING, not ERROR.
+
+        Phase 13 dogfood smoke surfaced ~54/day ERROR-level
+        ``Error processing lead ...: Audit failed: No website`` entries
+        that polluted the operator dashboard. The orchestrator now raises
+        a typed ``NoWebsiteError`` for this sentinel and the per-lead
+        catch logs at WARNING (no ``exc_info``). retry_count + last_error
+        mutations stay identical so the 3-strike behaviour is preserved.
+        """
+        lead = {"unique_key": "ghost_lead", "retry_count": 0, "audit_status": "Pending"}
+        auditor = MagicMock()
+        auditor.audit_single_lead = AsyncMock(
+            return_value={
+                "unique_key": "ghost_lead",
+                "status": "Failed",
+                "error": "No website",
+            }
+        )
+        enricher = MagicMock()
+
+        with self.assertLogs("src.core.task_orchestrator", level="WARNING") as cm:
+            result = await self.orchestrator._process_single_lead(
+                lead, auditor, enricher
+            )
+
+        # At least one WARNING; NO ERROR records on this path.
+        levels = [r.levelname for r in cm.records]
+        self.assertIn("WARNING", levels)
+        self.assertNotIn("ERROR", levels)
+        warn_record = next(r for r in cm.records if r.levelname == "WARNING")
+        self.assertIn("ghost_lead", warn_record.getMessage())
+        # exc_info must NOT be attached on the graceful path.
+        self.assertIsNone(warn_record.exc_info)
+
+        # 3-strike state machine still mutates identically.
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("retry_count"), 1)
+        self.assertEqual(result.get("audit_status"), "Pending")
+        self.assertEqual(result.get("last_error"), "no website to audit")
+
     async def test_fail_fast(self):
         """Verify that orchestrator fails fast after consecutive batch failures."""
         job_id = "test_job"
