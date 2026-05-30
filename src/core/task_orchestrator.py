@@ -201,11 +201,19 @@ class TaskOrchestrator:
                     )
                     return job_id
 
-            # 2. Create new job record
+            # 2. Create new job record.
+            # status='running' on INSERT (not 'starting' transitioned later).
+            # find_running_job filters status=eq.running; if we wrote
+            # 'starting' and flipped to 'running' only inside the detached
+            # _process_in_chunks task, a concurrent caller could win the
+            # lock between INSERT-commit and the deferred flip, miss the
+            # row, and spawn a duplicate job. race_conditions_2026-05-30
+            # T4 observed 2 distinct job_ids from concurrent
+            # /process-all + /hunt-all; this closes that window.
             job_id = str(uuid.uuid4())
             job_data = {
                 "id": job_id,
-                "status": "starting",
+                "status": "running",
                 "total_count": len(lead_ids) if lead_ids else 0,
                 "processed_count": 0,
                 "current_phase": "initialization",
