@@ -1,0 +1,12 @@
+--- tests/unit/test_seo_audit_async.py
++++ tests/unit/test_seo_audit_async.py
+@@ -12,12 +12,12 @@
+ import aiohttp
+
++from src.errors import AuditFetchError
+ from src.scrapers.seo_audit import (
+-    AuditFetchError,
+     MAX_HTML_BYTES,
+     perform_seo_audit_async,
+ )
+ from src.utils.ssrf_guard import SSRFError
