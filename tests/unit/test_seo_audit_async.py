@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import aiohttp
 
+from src.errors import AuditFetchError
 from src.scrapers.seo_audit import (
-    AuditFetchError,
     MAX_HTML_BYTES,
     perform_seo_audit_async,
 )
@@ -41,9 +41,9 @@ def _mock_aiohttp_session(response: MagicMock) -> MagicMock:
 
 class TestPerformSeoAuditAsync:
     @pytest.mark.asyncio
-    async def test_invalid_url_types(self):
+    async def test_invalid_url_types(self) -> None:
         """Test that invalid URLs return the expected red flag."""
-        res_none = await perform_seo_audit_async(None)
+        res_none = await perform_seo_audit_async(None)  # type: ignore[arg-type]
         assert res_none["red_flags"] == ["Invalid URL"]
         assert res_none["is_up"] is False
 
@@ -51,13 +51,13 @@ class TestPerformSeoAuditAsync:
         assert res_empty["red_flags"] == ["Invalid URL"]
         assert res_empty["is_up"] is False
 
-        res_not_str = await perform_seo_audit_async(123)
+        res_not_str = await perform_seo_audit_async(123)  # type: ignore[arg-type]
         assert res_not_str["red_flags"] == ["Invalid URL"]
         assert res_not_str["is_up"] is False
 
     @pytest.mark.asyncio
     @patch("src.scrapers.seo_audit.assert_safe_scheme")
-    async def test_ssrf_error_handling(self, mock_assert_safe_scheme):
+    async def test_ssrf_error_handling(self, mock_assert_safe_scheme: MagicMock) -> None:
         """Test that SSRF errors are caught and returned as red flags."""
         mock_assert_safe_scheme.side_effect = SSRFError("disallowed scheme")
         res = await perform_seo_audit_async("file:///etc/passwd")
@@ -65,7 +65,7 @@ class TestPerformSeoAuditAsync:
         assert "Blocked URL: disallowed scheme" in res["red_flags"]
 
     @pytest.mark.asyncio
-    async def test_html_provided_directly(self):
+    async def test_html_provided_directly(self) -> None:
         """Test providing HTML directly bypasses the network fetch and runs parsing."""
         html_content = "<html><head><title>Direct HTML</title></head><body><h1>Hello</h1><p>contact@example.com</p></body></html>"
         res = await perform_seo_audit_async("https://example.com", html=html_content)
@@ -78,7 +78,7 @@ class TestPerformSeoAuditAsync:
 
     @pytest.mark.asyncio
     @patch("src.scrapers.seo_audit.aiohttp.ClientSession")
-    async def test_aiohttp_fetch_success(self, mock_session_class):
+    async def test_aiohttp_fetch_success(self, mock_session_class: MagicMock) -> None:
         """Test a successful network fetch and parsing."""
         html_content = "<html><head><title>Network HTML</title></head><body><h1>Hi</h1></body></html>"
         response_mock = _mock_aiohttp_response(200, html_content.encode("utf-8"))
@@ -94,7 +94,7 @@ class TestPerformSeoAuditAsync:
 
     @pytest.mark.asyncio
     @patch("src.scrapers.seo_audit.aiohttp.ClientSession")
-    async def test_aiohttp_audit_fetch_error_size_cap(self, mock_session_class):
+    async def test_aiohttp_audit_fetch_error_size_cap(self, mock_session_class: MagicMock) -> None:
         """Test that a body exceeding MAX_HTML_BYTES raises AuditFetchError."""
         # Create a body that is MAX_HTML_BYTES + 2 bytes
         body_bytes = b"x" * (MAX_HTML_BYTES + 2)
@@ -110,7 +110,7 @@ class TestPerformSeoAuditAsync:
 
     @pytest.mark.asyncio
     @patch("src.scrapers.seo_audit.aiohttp.ClientSession")
-    async def test_aiohttp_ssl_error(self, mock_session_class):
+    async def test_aiohttp_ssl_error(self, mock_session_class: MagicMock) -> None:
         """Test that an SSLError sets has_ssl to False and adds a red flag."""
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=ssl.SSLError("cert verify failed"))
@@ -126,7 +126,7 @@ class TestPerformSeoAuditAsync:
 
     @pytest.mark.asyncio
     @patch("src.scrapers.seo_audit.aiohttp.ClientSession")
-    async def test_generic_exception_connection_failed(self, mock_session_class):
+    async def test_generic_exception_connection_failed(self, mock_session_class: MagicMock) -> None:
         """Test that a generic Exception is caught and returns Connection Failed."""
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=Exception("Timeout or something"))
