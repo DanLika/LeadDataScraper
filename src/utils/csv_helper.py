@@ -76,7 +76,13 @@ def merge_and_deduplicate(dataframes):
         return pd.DataFrame()
 
 
-def _read_or_initialize_csv(filepath, df_name, essential_cols):
+def load_csv_with_unique_key(filepath, df_name="CSV"):
+    """
+    Loads a CSV file, initializes if not found/empty, and ensures a 'unique_key' column exists.
+    Also ensures default essential columns are present if initializing.
+    """
+    essential_cols = ["Name", "Website", "email", "unique_key"]
+
     try:
         df = pd.read_csv(filepath, dtype=str)
         logger.info(
@@ -122,10 +128,8 @@ def _read_or_initialize_csv(filepath, df_name, essential_cols):
                 e2,
             )
             df = pd.DataFrame(columns=essential_cols, dtype=str)
-    return df
 
-
-def _normalize_dataframe_columns(df):
+    # Case-insensitive column merging logic
     canonical_map = {
         "name": "Name",
         "website": "Website",
@@ -163,10 +167,12 @@ def _normalize_dataframe_columns(df):
                     # Both exist; fill nulls from source then drop it.
                     df[canonical] = df[canonical].fillna(df[actual_col])
                     df.drop(columns=[actual_col], inplace=True, errors="ignore")
-    return df
 
+    # Ensure all essential columns exist
+    for col in essential_cols:
+        if col not in df.columns:
+            df[col] = np.nan
 
-def _ensure_unique_key(df, df_name):
     # Sync unique_key and UNIQUE_KEY
     if "UNIQUE_KEY" in df.columns and (
         "unique_key" not in df.columns or df["unique_key"].isnull().all()
@@ -200,25 +206,6 @@ def _ensure_unique_key(df, df_name):
 
         df["unique_key"] = df.apply(generate_row_key, axis=1)
         logger.info("Finished generating 'unique_key' for %s.", df_name)
-    return df
-
-
-def load_csv_with_unique_key(filepath, df_name="CSV"):
-    """
-    Loads a CSV file, initializes if not found/empty, and ensures a 'unique_key' column exists.
-    Also ensures default essential columns are present if initializing.
-    """
-    essential_cols = ["Name", "Website", "email", "unique_key"]
-
-    df = _read_or_initialize_csv(filepath, df_name, essential_cols)
-    df = _normalize_dataframe_columns(df)
-
-    # Ensure all essential columns exist
-    for col in essential_cols:
-        if col not in df.columns:
-            df[col] = np.nan
-
-    df = _ensure_unique_key(df, df_name)
 
     return df
 
