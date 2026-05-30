@@ -145,18 +145,26 @@ for (const ss of SAMESITE_INPUTS) {
 // could harden against; promote them to live tests when the production
 // code adds these defenses. ──
 
-test.skip('TODO: Domain wider than current origin should be narrowed', () => {
-  // `hardenCookieOptions` currently lets `domain: '.com'` or
-  // `domain: 'evil.com'` pass through. The browser's cookie parser
-  // would reject `.com` (TLD too broad) but a sibling-host cookie like
-  // `.example.com` set from `app.example.com` is accepted. If the floor
-  // ever moves to a context-aware variant (knows current host),
-  // promote this test.
-  const out = hardenCookieOptions(
+test('Domain wider than current origin should be narrowed', () => {
+  // `hardenCookieOptions` natively narrows domain if it's wider than the current
+  // host.
+  const outCom = hardenCookieOptions(
     { sameSite: 'lax', domain: '.com' },
+    'app.example.com'
   )
-  // Expectation: floor strips invalid domain or narrows to host-only.
-  assert.notEqual(out.domain, '.com')
+  assert.equal(outCom.domain, undefined)
+
+  const outEvil = hardenCookieOptions(
+    { sameSite: 'lax', domain: 'evil.com' },
+    'app.example.com'
+  )
+  assert.equal(outEvil.domain, undefined)
+
+  const outValid = hardenCookieOptions(
+    { sameSite: 'lax', domain: '.example.com' },
+    'app.example.com'
+  )
+  assert.equal(outValid.domain, '.example.com')
 })
 
 test.skip("TODO: __Host- prefixed cookies must have Path=/ and no Domain", () => {

@@ -11,14 +11,34 @@
  * Used by frontend/app/lib/supabase/middleware.ts and server.ts — both cookie
  * write paths share the same contract, pinned by cookie-floor.test.mjs.
  */
-export function hardenCookieOptions(options) {
+export function hardenCookieOptions(options, requestHost) {
   const requestedStrict =
     typeof options?.sameSite === 'string' &&
     options.sameSite.toLowerCase() === 'strict'
-  return {
+  const hardened = {
     ...options,
     sameSite: requestedStrict ? 'strict' : 'lax',
     httpOnly: true,
     secure: true,
   }
+
+  if (hardened.domain && requestHost) {
+    const d = hardened.domain.startsWith('.') ? hardened.domain.slice(1) : hardened.domain
+    const h = requestHost.split(':')[0]
+
+    let valid = false
+    if (d === h) {
+      valid = true
+    } else if (h.endsWith('.' + d) && d.includes('.')) {
+      valid = true
+    } else if (d === 'localhost' && h === 'localhost') {
+      valid = true
+    }
+
+    if (!valid) {
+      delete hardened.domain
+    }
+  }
+
+  return hardened
 }
