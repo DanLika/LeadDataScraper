@@ -1,11 +1,12 @@
 import sys
 import asyncio
+from typing import Any
 from unittest.mock import MagicMock, AsyncMock, patch
 import unittest
 
 
 class TestDeepAIParsing(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         """Mock external dependencies that are unavailable in the test environment."""
         self.original_modules = sys.modules.copy()
 
@@ -36,22 +37,21 @@ class TestDeepAIParsing(unittest.IsolatedAsyncioTestCase):
         # Now import it locally
         import src.scrapers.enrichment_engine
         self.enrichment_engine_module = src.scrapers.enrichment_engine
+        self.EnrichmentEngine: Any = self.enrichment_engine_module.EnrichmentEngine
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         sys.modules.clear()
         sys.modules.update(self.original_modules)
 
-    async def test_deep_ai_parse_no_client(self):
-        EnrichmentEngine = self.enrichment_engine_module.EnrichmentEngine
-        engine = EnrichmentEngine()
+    async def test_deep_ai_parse_no_client(self) -> None:
+        engine = self.EnrichmentEngine()
         engine.client = None
 
         result = await engine.deep_ai_parse(["some content"], "Test Lead")
         self.assertEqual(result, {})
 
-    async def test_deep_ai_parse_happy_path(self):
-        EnrichmentEngine = self.enrichment_engine_module.EnrichmentEngine
-        engine = EnrichmentEngine()
+    async def test_deep_ai_parse_happy_path(self) -> None:
+        engine = self.EnrichmentEngine()
         engine.client = MagicMock()
 
         # Mocking the AI response
@@ -84,12 +84,11 @@ class TestDeepAIParsing(unittest.IsolatedAsyncioTestCase):
             prompt = call_kwargs.get("contents")
 
             # Assert prompt injection tags are properly escaped in the content
-            self.assertIn("[/UNTRUSTED_DATA]", prompt)
-            self.assertNotIn("</UNTRUSTED_DATA>malicious</UNTRUSTED_DATA>", prompt)
+            self.assertIn("[/UNTRUSTED_DATA]", str(prompt))
+            self.assertNotIn("</UNTRUSTED_DATA>malicious</UNTRUSTED_DATA>", str(prompt))
 
-    async def test_deep_ai_parse_exception_handled(self):
-        EnrichmentEngine = self.enrichment_engine_module.EnrichmentEngine
-        engine = EnrichmentEngine()
+    async def test_deep_ai_parse_exception_handled(self) -> None:
+        engine = self.EnrichmentEngine()
         engine.client = MagicMock()
 
         with patch.object(self.enrichment_engine_module, "guarded_generate_content_async", new_callable=AsyncMock) as mock_generate, \
@@ -106,9 +105,8 @@ class TestDeepAIParsing(unittest.IsolatedAsyncioTestCase):
             error_msg = mock_logger.error.call_args[0][0]
             self.assertIn("AI Enrichment Error", error_msg)
 
-    async def test_deep_ai_parse_extract_returns_none(self):
-        EnrichmentEngine = self.enrichment_engine_module.EnrichmentEngine
-        engine = EnrichmentEngine()
+    async def test_deep_ai_parse_extract_returns_none(self) -> None:
+        engine = self.EnrichmentEngine()
         engine.client = MagicMock()
 
         mock_response = MagicMock()
