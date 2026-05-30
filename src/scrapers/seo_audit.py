@@ -427,16 +427,3 @@ async def perform_seo_audit_async(url: str, html: Optional[str] = None):
             results["page_text"] = ""
 
     return results
-
-
-if __name__ == "__main__":
-    # Test
-    async def test():
-        test_url = "https://google.com"
-        print(f"Auditing {test_url}...")
-        res = await perform_seo_audit_async(test_url)
-        import json
-
-        print(json.dumps(res, indent=2))
-
-    asyncio.run(test())
