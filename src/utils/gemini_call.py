@@ -39,9 +39,28 @@ still catch and translate domain errors (e.g. ``"AI query failed"``).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from src.errors import AIQuotaExceededError
 from src.utils.gemini_budget import check_budget, record_usage
+
+logger = logging.getLogger(__name__)
+
+
+def _is_quota_error(exc: BaseException) -> bool:
+    """Return True iff `exc` is a Gemini SDK 429.
+
+    The new `google-genai` SDK raises `google.genai.errors.ClientError`
+    (subclass of `APIError`) carrying `.code = 429` for upstream quota.
+    Match by both module path and `.code` so a future SDK refactor that
+    swaps the class hierarchy still fires this branch instead of leaking
+    the raw envelope to the client.
+    """
+    if getattr(exc, "code", None) != 429:
+        return False
+    mod = type(exc).__module__ or ""
+    return mod.startswith("google.genai") or mod.startswith("google.api_core")
 
 
 def _extract_usage(
@@ -87,11 +106,17 @@ def guarded_generate_content(
     # BudgetExceededError propagates here — caller MUST NOT have
     # already issued the Gemini call.
     check_budget(est_in, est_out)
-    response = client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=config,
-    )
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+    except Exception as exc:
+        if _is_quota_error(exc):
+            logger.warning("Gemini upstream 429 — raising AIQuotaExceededError")
+            raise AIQuotaExceededError("upstream Gemini quota exhausted") from exc
+        raise
     actual_in, actual_out = _extract_usage(response, est_in, est_out)
     record_usage(actual_in, actual_out, est_in, est_out)
     return response
@@ -119,11 +144,17 @@ async def guarded_generate_content_async(
     est_in = max(0, int(estimate_input))
     est_out = max(0, int(estimate_output))
     check_budget(est_in, est_out)
-    response = await client.aio.models.generate_content(
-        model=model,
-        contents=contents,
-        config=config,
-    )
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+    except Exception as exc:
+        if _is_quota_error(exc):
+            logger.warning("Gemini upstream 429 (async) — raising AIQuotaExceededError")
+            raise AIQuotaExceededError("upstream Gemini quota exhausted") from exc
+        raise
     actual_in, actual_out = _extract_usage(response, est_in, est_out)
     record_usage(actual_in, actual_out, est_in, est_out)
     return response

@@ -99,6 +99,12 @@ queued on branch `chore/page-tsx-split`; deferred while `pgrep claude ≥ 2`
 See `tests/quality/` + memory `quality_baseline_drift_exception_template.md`
 for the documented escape hatch when admin-merge has bypassed the ratchet.
 
+### AI / Gemini
+
+| Runbook | Status | Symptom |
+|---|---|---|
+| [`gemini-quota-exhausted.md`](gemini-quota-exhausted.md) | RESOLVED (graceful surfacing) | All AI endpoints return 503 `{"error":"ai_quota_exceeded","retry_after":"tomorrow"}`. Upstream Gemini 429. Distinguish from local-cap 503 by body. PR #420. |
+
 ### Secrets / env
 
 | Runbook | Status | Symptom |
