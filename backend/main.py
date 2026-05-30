@@ -797,7 +797,14 @@ async def _request_context_middleware(request: Request, call_next):
 # single handler holds the loop for > SLOW_HANDLER_THRESHOLD_MS. Catches
 # sync calls sneaking into async paths — same class of bug Locust 4.1
 # surfaced (sync supabase-py underneath an async def stalls the loop).
-# Threshold defaults to 100 ms; override per-deployment via env var.
+# Threshold defaults to 250 ms; override per-deployment via env var.
+# Floor chosen above the cross-region p95 baseline (Render Oregon ↔
+# Supabase EU adds ~150–200 ms of pure network tax to PostgREST round
+# trips) so the WARN line stays a signal of real loop-blocking rather
+# than a tally of expected geography. Was 100 ms; emitted 654 false
+# positives/day dominated by /leads (257), /orchestrator/active (110),
+# and /stats (82) — all healthy async paths whose latency was network,
+# not blocked-loop.
 #
 # `time.perf_counter()` is monotonic and not subject to NTP correction;
 # safe for short-interval wall-clock measurement. The middleware runs
@@ -813,7 +820,7 @@ async def _request_context_middleware(request: Request, call_next):
 # rolling summary; out of scope here.
 import time as _time
 
-SLOW_HANDLER_THRESHOLD_MS = float(os.getenv("SLOW_HANDLER_THRESHOLD_MS", "100"))
+SLOW_HANDLER_THRESHOLD_MS = float(os.getenv("SLOW_HANDLER_THRESHOLD_MS", "250"))
 
 
 @app.middleware("http")

@@ -106,7 +106,7 @@ Full: [`docs/architecture/performance.md`](docs/architecture/performance.md). Lo
 - **Structured JSON logging** envelope `{timestamp, level, logger, message, request_id, user_id, route, duration_ms?, exception?, <domain>...}`. `extra={…}` merges at top level (NOT nested under `"context"`). 11-test pin.
 - **Request-context middleware** declared BEFORE `_block_logger` (Starlette LAST decorator = OUTERMOST wrapper). Honours valid `X-Request-ID` (`[A-Za-z0-9_-]{1,64}`); mints else. Binds ContextVars + Sentry per-request scope. Also stashes on `request.state` (survives BaseHTTPMiddleware task-hop — PR #246). **Does NOT clear in `finally`** — `StreamingResponse` body iterators run AFTER `call_next` returns; clearing would lose request_id.
 - **Web-vitals RUM** `/metrics`: `WebVitalsMetric` Pydantic; `sendBeacon` with JSON `Blob` (bare beacon defaults `text/plain` → 422). Rate-limit 60/min. PR #242: `{reportAllChanges:true}` on `onCLS+onLCP`.
-- **Block-logger middleware**: `WARN slow handler` when elapsed ≥ `SLOW_HANDLER_THRESHOLD_MS` (100 default). `extra={method, path, duration_ms, threshold_ms}`.
+- **Block-logger middleware**: `WARN slow handler` when elapsed ≥ `SLOW_HANDLER_THRESHOLD_MS` (250 default — above the Oregon↔EU cross-region p95). `extra={method, path, duration_ms, threshold_ms}`.
 - **Load-test scaffolding** `tests/loadtest/`: `locustfile.py`, `bench_enrich.py`, `spike.sh`, `soak.sh` (24h + 8-signal `SOAK_PLAYBOOK.md`), `chaos.md` + `drop_supabase_pool.py` (local-only `CHAOS_LOCAL_ONLY=1`). VUs inject synthetic RFC1918 XFF.
 
 ## Sentry + Discord
