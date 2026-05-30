@@ -43,6 +43,13 @@ class TestEdgeCases(unittest.TestCase):
         only = [_FakeVariant("v-X", "X", weight=1)]
         self.assertEqual(select_variant(only).id, "v-X")
 
+    def test_variant_label_accessibility(self) -> None:
+        """Ensure the variant_label attribute from the _Weighted protocol is preserved."""
+        only = [_FakeVariant("v-Y", "label-Y", weight=1)]
+        picked = select_variant(only)
+        self.assertIsNotNone(picked)
+        self.assertEqual(picked.variant_label, "label-Y")
+
 
 class TestWeightedDistribution(unittest.TestCase):
     def test_weighted_distribution_converges(self) -> None:
