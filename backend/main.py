@@ -2413,15 +2413,41 @@ def _filter_valid_columns(df: "pd.DataFrame") -> "pd.DataFrame":
     return df[[col for col in df.columns if col in valid_cols]]
 
 
-def _upsert_leads_to_db(df: "pd.DataFrame") -> int:
-    """Upsert the dataframe; returns the actual row count Postgres acknowledged.
+def _upsert_leads_to_db(df: "pd.DataFrame") -> tuple[int, int, int]:
+    """Upsert the dataframe; returns `(submitted, deduped, inserted)`.
 
     The previous implementation returned `len(leads_dict)` regardless of
     whether `db.upsert_leads` succeeded — so a schema-mismatch APIError
     swallowed inside `upsert_leads` looked identical to a successful insert
     in the upload-handler log. Inspect the return value here instead.
+
+    Same-`unique_key`-in-batch dedupe: PostgREST upsert into a column with
+    a unique constraint fails the WHOLE batch with Postgres error 21000
+    (`ON CONFLICT DO UPDATE command cannot affect row a second time`) if
+    the same `unique_key` appears more than once in the payload. A CSV
+    with three rows sharing the same Name + Website + email derives the
+    same `unique_key` three times via `load_csv_with_unique_key` →
+    without this dedupe the upload silently inserts 0 rows. Verified
+    prod repro 2026-05-30 against `kbtkxpvchmunwjykbeht`; recipe pinned
+    by `tests/unit/test_upload_dedupe.py`. `keep='last'` matches the
+    "operator is reuploading newer data" intent.
     """
     import pandas as pd
+
+    submitted = len(df)
+    deduped = 0
+    if submitted and "unique_key" in df.columns:
+        df = df.drop_duplicates(subset=["unique_key"], keep="last")
+        deduped = submitted - len(df)
+        if deduped:
+            logger.warning(
+                "csv_upload_dedup_collapse",
+                extra={
+                    "rows_submitted": submitted,
+                    "rows_deduped": deduped,
+                    "rows_remaining": len(df),
+                },
+            )
 
     leads_dict = df.to_dict("records")
     # Clean up NaN for JSON serialization
@@ -2436,39 +2462,52 @@ def _upsert_leads_to_db(df: "pd.DataFrame") -> int:
         logger.error(
             "Upsert called with 0 leads — upstream parse likely failed; see prior csv_helper / mapping logs."
         )
-        return 0
+        return submitted, deduped, 0
     logger.info(
         "Upserting %d leads with columns: %s", len(leads_dict), df.columns.tolist()
     )
     result = db.upsert_leads(leads_dict)
     if result is None:
-        return 0
-    return len(getattr(result, "data", None) or [])
+        return submitted, deduped, 0
+    inserted = len(getattr(result, "data", None) or [])
+    return submitted, deduped, inserted
 
 
 def process_csv_background(temp_path: str):
     """Background task to process the uploaded CSV."""
     from pathlib import Path
 
+    submitted = deduped = inserted = 0
     try:
         df = _load_and_standardize_csv(temp_path)
         df = _apply_ai_mapping(df)
         final_df = _filter_valid_columns(df)
-        upserted_count = _upsert_leads_to_db(final_df)
-        if upserted_count == 0:
+        submitted, deduped, inserted = _upsert_leads_to_db(final_df)
+        if inserted == 0:
             logger.error(
                 "Upload completed but 0 rows landed in Supabase. "
                 "Check the supabase_helper upsert error above for the cause "
                 "(typical: schema mismatch / missing column)."
             )
         else:
-            logger.info("Successfully processed and upserted %d leads.", upserted_count)
+            logger.info("Successfully processed and upserted %d leads.", inserted)
             # Lead counts and source mix just changed — drop the cached
             # /stats payload so the next request sees the new totals.
             stats_cache.invalidate()
     except Exception as e:
         logger.error("Error processing upload: %s", e, exc_info=True)
     finally:
+        # Single structured summary line — operator greps Render logs for
+        # `csv_upload_complete` and spots silent zero-insert when
+        # rows_submitted > 0 but rows_inserted == 0.
+        logger.info(
+            "csv_upload_complete",
+            extra={
+                "rows_submitted": submitted,
+                "rows_deduped": deduped,
+                "rows_inserted": inserted,
+            },
+        )
         Path(temp_path).unlink(missing_ok=True)
 
 
