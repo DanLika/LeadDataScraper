@@ -132,11 +132,31 @@ services:
     plan: starter
     envVars:
       # Server-side only: Next.js proxy forwards browser calls here.
+      # Operator-managed (sync: false). Was `fromService: ... property: host`
+      # — but Render's `host` returns the bare service-name+suffix
+      # (`lead-scraper-backend-x51l`) WITHOUT the `.onrender.com` TLD AND
+      # without a scheme. The proxy code falls back to `https://${raw}`,
+      # which yields `https://lead-scraper-backend-x51l/` — an unresolvable
+      # public hostname. Every blueprint reconcile rewrites this slot to
+      # the truncated value, silently breaking all `/api/proxy/*` traffic
+      # until the operator re-paints (`502 Upstream backend unreachable`).
+      # Recurrence inventory:
+      #   * 2026-05-28 — original incident, operator manually painted to
+      #     full URL post-migration (see `session_2026-05-28_final_arc`).
+      #   * 2026-05-30 13:47Z — PR #473 added an unrelated env-var to this
+      #     same envVars block; Render reconciled the whole block and
+      #     overwrote the manual paint, taking the proxy down again
+      #     (see `single_tenant_per_request_2026-05-30`).
+      # Operator paints the full URL ONCE per service-name:
+      #   https://lead-scraper-backend-x51l.onrender.com
+      # If the backend service ever gets a new name (rare — Render
+      # generates the random suffix at service creation), re-paint to
+      # match. Fallback default in `frontend/app/api/proxy/[...path]`
+      # is `http://127.0.0.1:8000` — production scheme guard rejects it
+      # so unset env fails closed at request time with 500 instead of
+      # silently hitting localhost.
       - key: BACKEND_URL
-        fromService:
-          type: web
-          name: lead-scraper-backend
-          property: host
+        sync: false
       # Server-side only — NOT NEXT_PUBLIC_. Used by the /api/proxy route.
       - key: API_SECRET_KEY
         sync: false
