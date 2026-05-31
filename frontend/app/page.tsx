@@ -155,25 +155,44 @@ function DashboardInner() {
     else window.localStorage.removeItem('lds-include-demo');
   }, [showDemo]);
 
-  // Auto-open Settings / Discovery / set view when arriving from /insights or
-  // /campaigns via ?openSettings=1 / ?openDiscovery=1 / ?view=audited|high-risk.
-  // After consuming, strip the query so refresh doesn't re-trigger. Sidebar
-  // lives on every page but its state only exists on Dashboard — this bridges.
+  // Auto-open Settings / Discovery when arriving from /insights or /campaigns
+  // via ?openSettings=1 / ?openDiscovery=1 — modal triggers are one-shot, so
+  // strip them after consumption (refresh shouldn't re-pop the modal).
+  //
+  // ?view=audited|high-risk and ?search=… are NOT one-shot — they describe
+  // persistent table state and belong in the URL. The bidirectional
+  // URL ↔ filter state sync below (lines below) reads `view` + `q` from the
+  // URL and writes them back when state changes, so deep-linking, back/
+  // forward, bookmark and share all stay coherent. Earlier behavior here
+  // was to setView()/setSearchTerm() then router.replace('/') which left
+  // the URL bar at `/` even though the table was filtered (E2E sweep
+  // B-04 "audited-stat-card nav race": URL not committed after Link
+  // navigation from /insights). Letting the sync block own these two is
+  // the structurally simpler fix.
+  //
+  // For backward compat with any existing inbound link using ?search=
+  // (the bridge from non-dashboard pages), translate it to ?q= once on
+  // mount so the sync block sees the canonical key.
   useEffect(() => {
     const openSettings = searchParams?.get('openSettings') === '1';
     const openDiscovery = searchParams?.get('openDiscovery') === '1';
-    const viewParam = searchParams?.get('view');
     const searchParam = searchParams?.get('search');
-    if (openSettings || openDiscovery || viewParam || searchParam) {
+    if (openSettings || openDiscovery || searchParam) {
       if (openSettings) setShowSettings(true);
       if (openDiscovery) setShowDiscoveryModal(true);
-      if (viewParam === 'audited' || viewParam === 'high-risk') setView(viewParam);
       if (searchParam) setSearchTerm(searchParam);
-      // Preserve the search as ?q= so the URL-state sync below sees a
-      // consistent vocabulary. Otherwise replace('/') strips searchTerm
-      // on the very next read tick.
-      const dest = searchParam ? `/?q=${encodeURIComponent(searchParam)}` : '/';
-      router.replace(dest, { scroll: false });
+      // Rebuild the URL preserving ?view= + ?q= (translating ?search= →
+      // ?q=) while dropping the one-shot modal flags. Without this, a
+      // bare router.replace('/') strips view + search even when those
+      // were valid persistent params.
+      const next = new URLSearchParams();
+      const viewParam = searchParams?.get('view');
+      if (viewParam) next.set('view', viewParam);
+      const qParam = searchParams?.get('q');
+      if (qParam) next.set('q', qParam);
+      else if (searchParam) next.set('q', searchParam);
+      const qs = next.toString();
+      router.replace(qs ? `/?${qs}` : '/', { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1122,6 +1141,9 @@ function DashboardInner() {
     const minRaw = searchParams?.get('min');
     const q = searchParams?.get('q') || '';
     const sort = (searchParams?.get('sort') as SortKey | null) || DEFAULT_SORT;
+    const viewRaw = searchParams?.get('view');
+    const nextView: 'all' | 'audited' | 'high-risk' =
+      viewRaw === 'audited' || viewRaw === 'high-risk' ? viewRaw : 'all';
     const minN = minRaw ? parseInt(minRaw, 10) : 0;
     const safeMin = Number.isFinite(minN) && minN >= 0 && minN <= 100 ? minN : 0;
     // Suppress the immediate write-back during read-driven state updates.
@@ -1131,6 +1153,7 @@ function DashboardInner() {
     if (safeMin !== filterMinScore) setFilterMinScore(safeMin);
     if (q !== searchTerm) setSearchTerm(q);
     if (sort !== sortKey) setSortKey(sort);
+    if (nextView !== view) setView(nextView);
     // Release the suppression in the next tick — by then the state-driven
     // re-render has already happened and the write effect's diff check
     // will short-circuit because URL == canonical state.
@@ -1146,12 +1169,13 @@ function DashboardInner() {
     if (filterMinScore > 0) params.set('min', String(filterMinScore));
     if (searchTerm) params.set('q', searchTerm);
     if (sortKey !== DEFAULT_SORT) params.set('sort', sortKey);
+    if (view !== 'all') params.set('view', view);
     const qs = params.toString();
     const target = qs ? `/?${qs}` : '/';
     if (typeof window !== 'undefined' && window.location.pathname + window.location.search !== target) {
       router.push(target, { scroll: false });
     }
-  }, [filterSegment, filterAuditStatus, filterMinScore, searchTerm, sortKey, router]);
+  }, [filterSegment, filterAuditStatus, filterMinScore, searchTerm, sortKey, view, router]);
 
   return (
     <div

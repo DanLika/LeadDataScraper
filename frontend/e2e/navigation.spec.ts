@@ -132,6 +132,38 @@ test.describe('SPA navigation', () => {
     await expect(page.locator('#sort-leads')).toHaveValue('seo_score_desc')
   })
 
+  test('insights audited-stat-card commits ?view=audited to URL (B-04 regression)', async ({ page }) => {
+    // Regression for E2E sweep finding B-04 "audited-stat-card nav race":
+    // clicking the audited stat card on /insights filtered the dashboard
+    // table but the URL bar showed `/`, not `/?view=audited`. Root cause:
+    // the one-shot consume-and-strip effect on the dashboard handled
+    // `?view=` then did `router.replace('/')`, dropping the URL state
+    // that the bidirectional URL ↔ filter sync block never re-emitted
+    // (view was state-only, not URL-backed). Fix: drop view from the
+    // consume effect, add it to the bidirectional sync (page.tsx).
+    await mockData(page)
+    await login(page)
+    await page.goto('/insights')
+    await page.waitForLoadState('networkidle')
+
+    // Click the Audited Leads stat card.
+    await page.locator('a.stat-card').filter({ hasText: /Audited Leads/i }).click()
+
+    // URL must commit to /?view=audited within the navigation tick.
+    await page.waitForURL(/\?view=audited$/, { timeout: 5_000 })
+
+    // Reload — the URL drives state, so view should survive.
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+    expect(page.url()).toMatch(/\?view=audited$/)
+
+    // High Risk card from /insights → same contract.
+    await page.goto('/insights')
+    await page.waitForLoadState('networkidle')
+    await page.locator('a.stat-card').filter({ hasText: /High Risk/i }).click()
+    await page.waitForURL(/\?view=high-risk$/, { timeout: 5_000 })
+  })
+
   test('modal state on refresh: closed (documents current behavior)', async ({ page }) => {
     // Modals are React state only, not URL-backed today. Refreshing the
     // page closes them. This test documents that contract — if modal
