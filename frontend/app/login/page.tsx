@@ -141,7 +141,7 @@ function LoginForm() {
         )}
         <SubmitButton />
         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted, #888896)' }}>
-          Accounts are provisioned in Supabase. Ask the operator if you need access.
+          {t('footer')}
         </p>
       </form>
     </main>
