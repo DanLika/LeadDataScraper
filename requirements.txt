@@ -630,9 +630,9 @@ google-auth==2.53.0 \
     --hash=sha256:6e7449917c599b35126a99ec268ec6880301f2fea41dce198fe8fd83ff642b68 \
     --hash=sha256:e7e6aa16f6bee7b2b264830fd04f08087a1d5a836df516251a5d15327b246c9c
     # via google-genai
-google-genai==2.6.0 \
-    --hash=sha256:272b6f6320f5d355735241ad441f972af095ec80dc10cb075cb430d96721648a \
-    --hash=sha256:7d4f777234002f2e94be499dbdfb43b506a6aca9dbbec13e61d3dc6ce640ffa7
+google-genai==2.7.0 \
+    --hash=sha256:21cac381e09a869151706aba797b6a4f96cfe92c484e13204d092caee7ff11cb \
+    --hash=sha256:3c6f32f5ced9877ededd1b384b5e5b7f09c20046ec3390b662b16d8cd1882ac5
     # via -r requirements.in
 greenlet==3.5.1 \
     --hash=sha256:001775efe7b8e758861294c7a27c28af87f3f3f1c20468a2bc618c45b346c061 \
