@@ -171,6 +171,73 @@ test.describe('modal behaviour', () => {
     expect(activeAfter, 'focus must return to the trigger after the modal closes').toBe(triggerHtmlBefore)
   })
 
+  test('browser back closes Settings opened in-page + leaves URL clean', async ({ page }) => {
+    // In-page open path (Sidebar button → setShowSettings(true)) is the case
+    // useModalHistory pushes a sentinel entry for. Cross-page arrival via
+    // ?openSettings=1 skips the push so back returns to the originating page.
+    await login(page)
+    await page.goto('/')
+    await page.waitForLoadState('networkidle')
+    const urlBefore = page.url()
+
+    await page.getByRole('button', { name: /settings/i }).first().click()
+    const dialog = page.getByRole('dialog', { name: /settings/i })
+    await expect(dialog).toBeVisible()
+
+    await page.goBack({ waitUntil: 'load' })
+    await expect(dialog).toBeHidden({ timeout: 3_000 })
+    // URL must be the same as before the open — no leftover query / hash.
+    expect(page.url()).toBe(urlBefore)
+  })
+
+  test('browser back closes Discovery opened in-page + leaves URL clean', async ({ page }) => {
+    await login(page)
+    await page.goto('/')
+    await page.waitForLoadState('networkidle')
+    const urlBefore = page.url()
+
+    // Discovery's only in-page trigger is the FAB-style button on the empty
+    // state or sidebar. Use the sidebar Discovery item.
+    await page.getByRole('button', { name: /discover/i }).first().click()
+    const dialog = page.getByRole('dialog', { name: /Lead Discovery/i })
+    await expect(dialog).toBeVisible()
+
+    await page.goBack({ waitUntil: 'load' })
+    await expect(dialog).toBeHidden({ timeout: 3_000 })
+    expect(page.url()).toBe(urlBefore)
+  })
+
+  test('browser back during in-flight discovery is swallowed', async ({ page }) => {
+    // ESC is blocked while isDiscovering — back must match the same gate.
+    // Hook re-pushes the sentinel on popstate to keep the modal anchored.
+    await page.route('**/api/proxy/discovery/start', async (route) => {
+      await new Promise((r) => setTimeout(r, 3_000))
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ job_id: 'modal-back-stub', status: 'starting' }),
+      })
+    })
+    await login(page)
+    await page.goto('/')
+    await page.waitForLoadState('networkidle')
+
+    await page.getByRole('button', { name: /discover/i }).first().click()
+    const dialog = page.getByRole('dialog', { name: /Lead Discovery/i })
+    await expect(dialog).toBeVisible()
+    await page.fill('#discovery-query', 'cafes')
+    await page.fill('#discovery-location', 'Zagreb')
+    await page.getByRole('button', { name: /Start Deep Search/i }).click()
+
+    // Mid-flight: press back. Hook should re-push and keep the modal open.
+    await page.waitForTimeout(400)
+    await page.goBack({ waitUntil: 'load' }).catch(() => undefined)
+    await page.waitForTimeout(200)
+    await expect(dialog, 'modal must stay open during in-flight discovery').toBeVisible()
+
+    await page.unroute('**/api/proxy/discovery/start')
+  })
+
   test.skip('open modal A, click "open modal B" inside it → A closes cleanly', () => {
     // No in-modal cross-modal trigger exists in the current dashboard.
     // The only modal openers are in the Sidebar (z-index 100), which is

@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import dynamic from 'next/dynamic';
 import { useFocusTrap } from '@/app/hooks/useFocusTrap';
 import { restoreFocus, BURGER_SELECTOR } from '@/app/hooks/useEscape';
+import { useModalHistory } from '@/app/hooks/useModalHistory';
 // Row-level icons (Globe, Phone, Crosshair, Music, Pin, Facebook, Instagram,
 // AlertCircle, etc.) all moved into LeadTable.tsx with the JSX they belong
 // to. Page-level chrome still uses Upload/Mail/Shield/Settings/etc.
@@ -220,6 +221,27 @@ function DashboardInner() {
   useFocusTrap(discoveryModalRef, showDiscoveryModal);
   useFocusTrap(outreachModalRef, !!outreachDraft);
   useFocusTrap(campaignModalRef, !!campaign);
+
+  // Browser back-button closes Settings + Discovery. Hook pushes a sentinel
+  // history entry when the modal opens in-page; popstate then closes the
+  // modal instead of leaving the dashboard. Cross-page arrivals (`?openSettings=1`
+  // from sidebar) skip the push so back returns to the originating page.
+  const closeSettings = useCallback(() => setShowSettings(false), []);
+  const closeDiscovery = useCallback(() => setShowDiscoveryModal(false), []);
+  const blockDiscoveryClose = useCallback(() => isDiscovering, [isDiscovering]);
+  useModalHistory({
+    open: showSettings,
+    onClose: closeSettings,
+    marker: 'settings',
+    urlParam: 'openSettings',
+  });
+  useModalHistory({
+    open: showDiscoveryModal,
+    onClose: closeDiscovery,
+    marker: 'discovery',
+    urlParam: 'openDiscovery',
+    preventClose: blockDiscoveryClose,
+  });
   const [filterSegment, setFilterSegment] = useState<string>('all');
   const [filterMinScore, setFilterMinScore] = useState<number>(0);
   const [filterAuditStatus, setFilterAuditStatus] = useState<string>('all');
