@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
+import { getTranslations } from 'next-intl/server'
 import { createClient } from '@/app/lib/supabase/server'
 import { checkLoginRate, clearLoginRate } from '@/app/lib/loginThrottle'
 import { sanitizeNext } from '@/app/lib/url.mjs'
@@ -24,9 +25,10 @@ export async function signInAction(
   const email = String(formData.get('email') ?? '').trim()
   const password = String(formData.get('password') ?? '')
   const next = sanitizeNext(formData.get('next') as string | null)
+  const t = await getTranslations('login.errors')
 
   if (!email || !password) {
-    return { error: 'Email and password are required.' }
+    return { error: t('missingCredentials') }
   }
 
   // App-layer brute-force gate. Bounded at 5 attempts per 60s per trusted
@@ -39,7 +41,7 @@ export async function signInAction(
   const trustedIp = (hdrs.get(TRUSTED_CLIENT_IP_HEADER) || '').split(',')[0]?.trim() || null
   const rate = checkLoginRate(trustedIp)
   if (!rate.allowed) {
-    return { error: `Too many sign-in attempts. Try again in ${rate.retryAfterSeconds}s.` }
+    return { error: t('rateLimited', { seconds: rate.retryAfterSeconds }) }
   }
 
   const supabase = await createClient()

@@ -109,7 +109,12 @@
     "email": "E-pošta",
     "password": "Lozinka",
     "submit": "Prijavi se",
-    "submitting": "Prijavljivanje..."
+    "submitting": "Prijavljivanje...",
+    "footer": "Računi se dodjeljuju u Supabaseu. Pitajte operatera ako trebate pristup.",
+    "errors": {
+      "missingCredentials": "E-pošta i lozinka su obavezne.",
+      "rateLimited": "Previše pokušaja prijave. Pokušajte ponovno za {seconds}s."
+    }
   },
   "localeSwitcher": {
     "label": "Jezik",

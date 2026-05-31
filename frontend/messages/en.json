@@ -106,7 +106,12 @@
     "email": "Email",
     "password": "Password",
     "submit": "Sign in",
-    "submitting": "Signing in..."
+    "submitting": "Signing in...",
+    "footer": "Accounts are provisioned in Supabase. Ask the operator if you need access.",
+    "errors": {
+      "missingCredentials": "Email and password are required.",
+      "rateLimited": "Too many sign-in attempts. Try again in {seconds}s."
+    }
   },
   "localeSwitcher": {
     "label": "Language",
