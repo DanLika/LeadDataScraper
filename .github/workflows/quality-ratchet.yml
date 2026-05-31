@@ -47,6 +47,8 @@ jobs:
       - name: Install Python tools
         run: |
           python -m pip install --upgrade pip
+          # Install project dependencies first so mypy can resolve project imports
+          pip install --prefer-binary -r requirements.txt
           # Tool versions intentionally NOT pinned in requirements.txt
           # because they're CI-only — but pinning here keeps the
           # baseline-vs-current comparison apples-to-apples across runs.
