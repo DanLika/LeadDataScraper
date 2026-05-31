@@ -30,7 +30,7 @@ fastapi==0.136.3
 # requires starlette>=0.46.0, so without this floor pip-compile keeps
 # the existing 0.49.3 to minimise diff — and the CVE stays in the lock.
 starlette>=1.0.1
-uvicorn==0.34.0
+uvicorn==0.48.0
 python-multipart==0.0.29
 supabase==2.30.0
 # Phase 15.3 — Jinja2 sandbox + autoescape for the sequence_variants
