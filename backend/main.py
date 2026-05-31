@@ -295,11 +295,17 @@ class LeadProcessRequest(BaseModel):
 class LeadBatchRequest(BaseModel):
     """Body for `/audit-batch` — re-audit a caller-supplied subset of
     leads in one orchestrator job. Hard-cap 200 to mirror the `/leads`
-    page-size; each ID fans out to a Playwright + Gemini call, so a
-    larger list trivially exhausts the per-minute Gemini budget."""
+    page-size; each ID fans out to a Playwright crawl, so a larger
+    list trivially exhausts the per-minute orchestrator budget."""
 
     model_config = ConfigDict(extra="forbid")
-    lead_ids: conlist(
+    # `# type: ignore[valid-type]` matches the established pattern for
+    # Pydantic's runtime-derived constraint types — mypy can't see the
+    # dynamic class `conlist` synthesises. The same pattern is used by
+    # the existing `PipelineRequest.lead_ids` field (without the
+    # suppression, those 20 sites contribute to the baseline). Adding
+    # the marker here keeps the quality ratchet at zero net regression.
+    lead_ids: conlist(  # type: ignore[valid-type]
         safe_constr(min_length=1, max_length=128),
         min_length=1,
         max_length=200,
@@ -2572,7 +2578,7 @@ async def process_all_pending(request: Request):
 
 @app.post("/audit-batch", dependencies=[Depends(verify_api_key)])
 @limiter.limit("6/minute")
-async def audit_batch(request: Request, payload: LeadBatchRequest):
+async def audit_batch(request: Request, payload: LeadBatchRequest) -> dict[str, str | int]:
     """Re-audit a caller-supplied subset of leads (UI bulk-select).
     `/process-lead` handles size 1; `/process-all` handles "everything
     pending". This fills the explicit-list gap without forcing the
@@ -2580,8 +2586,17 @@ async def audit_batch(request: Request, payload: LeadBatchRequest):
 
     Rate-limit 6/min is higher than `/process-all` (3/min) because the
     orchestrator's `_job_lock` serialises jobs anyway — practical
-    throughput is gated by per-job duration, not per-minute requests."""
-    job_id = await orchestrator.run_massive_pipeline(
+    throughput is gated by per-job duration, not per-minute requests.
+
+    `_sys.modules[__name__].orchestrator` resolves the lazy PEP 562
+    singleton; bare `orchestrator` works at runtime but trips the
+    `name-defined` mypy check (the module __getattr__ fallback is
+    invisible to static analysis). Same pattern as
+    `_process_instantly_event` shipped in PR #415."""
+    import sys as _sys
+
+    orch = _sys.modules[__name__].orchestrator
+    job_id = await orch.run_massive_pipeline(
         lead_ids=list(payload.lead_ids),
         tasks=["audit"],
     )
