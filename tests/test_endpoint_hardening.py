@@ -129,6 +129,7 @@ AUTHED_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", "/upload"),  # multipart, special handling
     ("POST", "/process-lead"),
     ("POST", "/process-all"),
+    ("POST", "/audit-batch"),
     ("GET", "/audit-status"),
     ("POST", "/audit/stop"),
     ("GET", "/health/schema"),
@@ -159,7 +160,7 @@ AUTHED_ENDPOINTS: list[tuple[str, str]] = [
     ("POST", f"/campaigns/{TEST_CAMPAIGN_ID}/pause"),
     ("GET", f"/campaigns/{TEST_CAMPAIGN_ID}/export"),
 ]
-assert len(AUTHED_ENDPOINTS) == 33, len(AUTHED_ENDPOINTS)
+assert len(AUTHED_ENDPOINTS) == 34, len(AUTHED_ENDPOINTS)
 
 
 # POST endpoints with a Pydantic JSON body. (Excludes /upload which is
@@ -172,6 +173,12 @@ POST_WITH_BODY: dict[str, dict[str, Any]] = {
         "extra": {"unique_key": "valid-key", "extra_field": "x"},
         "over": {"unique_key": "x" * 129},  # constr max_length=128
         "string_fields": ["unique_key"],
+    },
+    "/audit-batch": {
+        "valid": {"lead_ids": ["k1", "k2"]},
+        "extra": {"lead_ids": ["k1"], "tasks": ["audit"]},
+        "over": {"lead_ids": ["x" * 129]},  # per-id constr max_length=128
+        "string_fields": ["lead_ids[0]"],
     },
     "/ask": {
         "valid": {"instruction": {"text": "hello"}},
