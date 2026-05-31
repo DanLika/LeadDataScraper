@@ -14,9 +14,9 @@ Assertions:
 - Every column in DB is declared in ``supabase_schema.sql`` (no silent drift).
 - RLS enabled on leads, campaigns, campaign_messages, orchestration_jobs,
   account_deletions, email_send_ledger, suppressions, webhook_events,
-  sequences, sequence_steps, sequence_variants.
+  sequences, sequence_steps, sequence_variants, reply_classifications.
 - A deny-all policy (AS RESTRICTIVE, qual=false, with_check=false,
-  anon+authenticated, FOR ALL) exists on each of those 11 tables. RESTRICTIVE
+  anon+authenticated, FOR ALL) exists on each of those 12 tables. RESTRICTIVE
   is enforced so a future ad-hoc PERMISSIVE qual=true policy added in Studio
   cannot OR over the deny.
 - No GRANT to anon / authenticated / PUBLIC on those 11 tables.
@@ -35,8 +35,10 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import psycopg
+if TYPE_CHECKING:
+    import psycopg
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_FILE = REPO_ROOT / "supabase_schema.sql"
@@ -52,6 +54,9 @@ TABLES: tuple[str, ...] = (
     "sequences",
     "sequence_steps",
     "sequence_variants",
+    # Phase 16 (PR α) — reply_classifications: one row per classified
+    # inbound reply. Drives auto-pause via sequences.paused_on_reply.
+    "reply_classifications",
 )
 TABLE_CONSTRAINT_KEYWORDS = {
     "CONSTRAINT",
@@ -104,6 +109,8 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
     },
     "sequences": {
         "sequences_status_allowed",
+        # Phase 16 (PR α) — pause_reason ≤ 200 chars audit cap.
+        "sequences_pause_reason_size",
     },
     "sequence_steps": {
         "sequence_steps_channel_allowed",
@@ -123,6 +130,15 @@ EXPECTED_CHECK_CONSTRAINTS: dict[str, set[str]] = {
         # as a clean IN-list in PR #366).
         "sequence_variants_body_size",
         "sequence_variants_content_type_allowed",
+    },
+    # Phase 16 (PR α) — reply_classifications table.
+    # Note: the UNIQUE constraint reply_classifications_unique_classification
+    # is contype='u' in pg_constraint, NOT 'c' (CHECK), so it does NOT belong
+    # in this dict — check_check_constraints only queries CHECK contype.
+    "reply_classifications": {
+        "reply_classifications_classification_allowed",
+        "reply_classifications_confidence_range",
+        "reply_classifications_body_hash_format",
     },
 }
 
@@ -212,7 +228,7 @@ def parse_expected_columns(path: Path) -> dict[str, set[str]]:
     return expected
 
 
-def fetch_db_columns(conn: psycopg.Connection) -> dict[str, set[str]]:
+def fetch_db_columns(conn: "psycopg.Connection") -> dict[str, set[str]]:
     actual: dict[str, set[str]] = {t: set() for t in TABLES}
     cur = conn.execute(
         "SELECT table_name, column_name FROM information_schema.columns "
@@ -224,7 +240,7 @@ def fetch_db_columns(conn: psycopg.Connection) -> dict[str, set[str]]:
     return actual
 
 
-def check_rls(conn: psycopg.Connection) -> list[str]:
+def check_rls(conn: "psycopg.Connection") -> list[str]:
     cur = conn.execute(
         "SELECT c.relname, c.relrowsecurity "
         "FROM pg_class c JOIN pg_namespace n ON c.relnamespace = n.oid "
@@ -241,7 +257,7 @@ def check_rls(conn: psycopg.Connection) -> list[str]:
     return errs
 
 
-def check_deny_policies(conn: psycopg.Connection) -> list[str]:
+def check_deny_policies(conn: "psycopg.Connection") -> list[str]:
     cur = conn.execute(
         "SELECT tablename, policyname, permissive, roles, cmd, qual, with_check "
         "FROM pg_policies "
@@ -278,7 +294,7 @@ def check_deny_policies(conn: psycopg.Connection) -> list[str]:
     return errs
 
 
-def check_table_grants(conn: psycopg.Connection) -> list[str]:
+def check_table_grants(conn: "psycopg.Connection") -> list[str]:
     cur = conn.execute(
         "SELECT table_name, grantee, privilege_type "
         "FROM information_schema.role_table_grants "
@@ -293,7 +309,7 @@ def check_table_grants(conn: psycopg.Connection) -> list[str]:
     ]
 
 
-def check_check_constraints(conn: psycopg.Connection) -> list[str]:
+def check_check_constraints(conn: "psycopg.Connection") -> list[str]:
     """Assert every named CHECK constraint declared in supabase_schema.sql
     is present in the live DB, and that no extra ones have crept in.
 
@@ -337,7 +353,7 @@ def check_check_constraints(conn: psycopg.Connection) -> list[str]:
     return errs
 
 
-def check_add_lead_column(conn: psycopg.Connection) -> list[str]:
+def check_add_lead_column(conn: "psycopg.Connection") -> list[str]:
     cur = conn.execute(
         "SELECT p.prosecdef, pg_get_userbyid(p.proowner), p.proconfig "
         "FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid "
@@ -379,6 +395,11 @@ def main() -> int:
         return 2
 
     expected = parse_expected_columns(SCHEMA_FILE)
+
+    # Lazy import so offline tests can read parse_expected_columns + the
+    # EXPECTED_CHECK_CONSTRAINTS / TABLES constants without requiring
+    # psycopg in the host env (system Python on dev macOS).
+    import psycopg
 
     try:
         conn = psycopg.connect(url, autocommit=True)
