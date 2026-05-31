@@ -127,6 +127,9 @@ function DashboardInner() {
   // on the TOTAL LEADS card instead of the loaded-slice count.
   const [totalLeads, setTotalLeads] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exportingKind, setExportingKind] = useState<null | 'full' | 'outreach'>(null);
+  const [exportStage, setExportStage] = useState<'connecting' | 'fetching' | null>(null);
+  const [exportBytes, setExportBytes] = useState(0);
   const [outreachDraft, setOutreachDraft] = useState<{ text: string, leadName: string, subject?: string, leadEmail?: string } | null>(null);
   const [linkedinDraft, setLinkedinDraft] = useState<string>('');
   const [isDrafting, setIsDrafting] = useState(false);
@@ -990,7 +993,16 @@ function DashboardInner() {
       console.error('Stop audit failed:', err);
     }
   };
-  const triggerCsvDownload = async (path: string, filename: string, emptyMessage: string) => {
+  const triggerCsvDownload = async (
+    kind: 'full' | 'outreach',
+    path: string,
+    filename: string,
+    emptyMessage: string,
+  ) => {
+    if (exportingKind !== null) return;
+    setExportingKind(kind);
+    setExportStage('connecting');
+    setExportBytes(0);
     try {
       const res = await apiFetch(`${API_BASE_URL}${path}`, { cache: 'no-store' });
       const ctype = res.headers.get('content-type') || '';
@@ -1003,7 +1015,36 @@ function DashboardInner() {
         showToast(detail, 'error');
         return;
       }
-      const blob = await res.blob();
+      // Read the stream chunk-by-chunk so the button label can reflect live
+      // bytes-received instead of freezing on "Preparing…" for the full
+      // server-side keyset walk. `await res.blob()` would not resolve until
+      // the entire CSV streamed; the user reads that as "broken".
+      const reader = res.body?.getReader();
+      let blob: Blob;
+      if (reader) {
+        setExportStage('fetching');
+        const chunks: BlobPart[] = [];
+        let bytes = 0;
+        let lastTick = 0;
+        // setState throttled to ~10Hz so paint keeps up on long streams.
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            bytes += value.length;
+            const now = performance.now();
+            if (now - lastTick > 100) {
+              lastTick = now;
+              setExportBytes(bytes);
+            }
+          }
+        }
+        setExportBytes(bytes);
+        blob = new Blob(chunks, { type: 'text/csv' });
+      } else {
+        blob = await res.blob();
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1016,19 +1057,37 @@ function DashboardInner() {
     } catch (err) {
       console.error('Download failed:', err);
       showToast('Download failed — try again.', 'error');
+    } finally {
+      setExportingKind(null);
+      setExportStage(null);
+      setExportBytes(0);
     }
   };
 
   const handleDownloadCsv = () => triggerCsvDownload(
+    'full',
     '/export/download',
     `leads-export-${new Date().toISOString().slice(0,10)}.csv`,
     'No leads to export yet.'
   );
   const handleDownloadOutreachCsv = () => triggerCsvDownload(
+    'outreach',
     '/export/outreach',
     `outreach-export-${new Date().toISOString().slice(0,10)}.csv`,
     'No outreach files generated yet — draft outreach for leads first.'
   );
+
+  const exportLabel = (idle: string): string => {
+    if (exportStage === 'connecting') return 'Connecting…';
+    if (exportStage === 'fetching') {
+      if (exportBytes === 0) return 'Fetching…';
+      const kb = exportBytes / 1024;
+      return kb >= 1024
+        ? `Fetching ${(kb / 1024).toFixed(1)} MB`
+        : `Fetching ${Math.round(kb)} KB`;
+    }
+    return idle;
+  };
 
   const filteredLeads = useMemo(() => {
     const matched = leads.filter((lead: Lead) => {
@@ -1332,18 +1391,26 @@ function DashboardInner() {
             <button
               className="btn-secondary"
               onClick={handleDownloadCsv}
-              disabled={loading || leads.length === 0}
-              aria-busy={loading}
+              disabled={loading || leads.length === 0 || exportingKind !== null}
+              aria-busy={exportingKind === 'full'}
             >
-              <Download size={18} /> Export Full
+              {exportingKind === 'full' ? (
+                <><Loader2 size={18} className="animate-spin" aria-hidden="true" /> {exportLabel('Export Full')}</>
+              ) : (
+                <><Download size={18} /> Export Full</>
+              )}
             </button>
             <button
               className="btn-secondary"
               onClick={handleDownloadOutreachCsv}
-              disabled={loading || leads.length === 0}
-              aria-busy={loading}
+              disabled={loading || leads.length === 0 || exportingKind !== null}
+              aria-busy={exportingKind === 'outreach'}
             >
-              <FileDown size={18} /> CRM Export
+              {exportingKind === 'outreach' ? (
+                <><Loader2 size={18} className="animate-spin" aria-hidden="true" /> {exportLabel('CRM Export')}</>
+              ) : (
+                <><FileDown size={18} /> CRM Export</>
+              )}
             </button>
             <button
               className="btn-primary"
