@@ -23,6 +23,7 @@ budget. The standard library primitive is safe by construction.
 
 from __future__ import annotations
 
+import base64
 import hmac
 import logging
 import time
@@ -162,6 +163,148 @@ def verify_timestamp_window(
     return ts
 
 
+# ----- Svix scheme (Resend, ngrok, OpenAI Realtime, etc.) -------------------
+#
+# Svix is the webhook-delivery service Resend uses. Its signature scheme is
+# distinct enough from the plain "sha256=<hex>" convention that the existing
+# verify_hmac_sha256 cannot serve it:
+#
+#   * Headers: svix-id, svix-timestamp, svix-signature (3 separate headers
+#     instead of 1 + 1).
+#   * Payload-to-sign: "{svix_id}.{svix_timestamp}.{body}" (NOT the body
+#     alone — the id + ts bind the signature to one specific delivery).
+#   * Digest encoding: base64 (NOT hex).
+#   * Header format: a SPACE-separated list of "v1,<base64-digest>" entries.
+#     A single header may carry several versions in parallel — Svix uses
+#     this to roll signing-key updates without breaking clients.
+#   * Secret format: "whsec_<base64-secret-bytes>". The whsec_ prefix is
+#     part of the textual representation; the HMAC key is the base64-
+#     decoded suffix.
+#
+# Phase 16 TODO(resend-go-live): when Resend ingest is wired and
+# Py3.10-built requirements.txt can be regenerated, replace this hand-roll
+# with `from svix.webhooks import Webhook; wh.verify(payload, headers)`.
+# The package handles future "v2,..." rotation we'd otherwise miss. Until
+# then, this single-version verifier covers v1 (the only version Svix has
+# emitted since 2020) and the test corpus exercises the rotation surface.
+# ----------------------------------------------------------------------------
+
+
+_SVIX_SUPPORTED_VERSIONS = frozenset({"v1"})
+
+
+def verify_svix_signature(
+    payload: bytes,
+    svix_id: str,
+    svix_timestamp: str,
+    svix_signature_header: str,
+    secret: str,
+    *,
+    tolerance_seconds: int = DEFAULT_TIMESTAMP_TOLERANCE_SECONDS,
+    now: Optional[int] = None,
+) -> None:
+    """Verify a Svix-signed webhook (Resend, ngrok, etc.).
+
+    Raises :class:`WebhookVerificationError` on any failure — the
+    caller collapses every reject into one opaque 401 response so the
+    attacker can't probe which check broke first.
+
+    Args:
+        payload: Raw body bytes — exactly as received. Re-serialising
+            through json.loads + json.dumps changes byte-for-byte
+            equality and breaks the HMAC.
+        svix_id: Value of the ``svix-id`` request header.
+        svix_timestamp: Value of the ``svix-timestamp`` request header
+            (unix epoch seconds, as a string).
+        svix_signature_header: Value of the ``svix-signature`` request
+            header. May carry multiple space-separated versions
+            (e.g. ``v1,abc... v1,def...``); ANY matching version
+            passes.
+        secret: HMAC key in the canonical ``whsec_<base64>`` form
+            Resend / Svix issue. The ``whsec_`` prefix is part of the
+            display format; the actual key is the base64-decoded
+            suffix. Empty raises ``RuntimeError`` — operator misconfig
+            must fail loud.
+        tolerance_seconds: Replay window. Defaults to 300s (matches
+            ``DEFAULT_TIMESTAMP_TOLERANCE_SECONDS`` for the Instantly
+            handler — uniform behaviour across providers).
+        now: Override for unit tests; production passes None.
+
+    Notes:
+        * No silent ``True`` return on a malformed header — we surface
+          MissingSignature so the caller's structured log can pinpoint
+          ingress drift to either "header missing" vs "HMAC mismatch".
+        * ``hmac.compare_digest`` enforces constant-time compare per
+          version — no early-exit on the first byte mismatch leaks
+          which version was tried last.
+    """
+    if not secret:
+        raise RuntimeError(
+            "Svix signing secret is empty — operator misconfigured the "
+            "RESEND_WEBHOOK_SIGNING_SECRET env var"
+        )
+    if not svix_id:
+        raise MissingSignature("svix-id header missing or empty")
+    if not svix_signature_header:
+        raise MissingSignature("svix-signature header missing or empty")
+
+    # Timestamp window first — a fresh signature on a stale timestamp
+    # is still replay. Reusing the existing verify_timestamp_window
+    # so the 300s tolerance + numeric-parse error semantics stay
+    # uniform across providers.
+    verify_timestamp_window(
+        svix_timestamp,
+        tolerance_seconds=tolerance_seconds,
+        now=now,
+    )
+
+    # Decode the secret. The whsec_ prefix is textual decoration; the
+    # actual key is whatever base64-decodes from the rest.
+    if secret.startswith("whsec_"):
+        secret_b64 = secret[len("whsec_") :]
+    else:
+        # Forward-compat: accept raw base64 without the prefix so
+        # operators who set the env var without the human-readable
+        # prefix don't get a silent reject.
+        secret_b64 = secret
+    try:
+        secret_bytes = base64.b64decode(secret_b64, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise RuntimeError(
+            f"Svix signing secret is not valid base64: {exc!s}"
+        ) from exc
+
+    # Payload to sign: id.timestamp.body (three parts joined by '.').
+    signed_payload = f"{svix_id}.{svix_timestamp}.".encode("utf-8") + payload
+    expected_digest = base64.b64encode(
+        hmac.new(secret_bytes, signed_payload, sha256).digest()
+    ).decode("ascii")
+
+    # Header is a space-separated list of "<version>,<base64-digest>".
+    # ANY matching version passes — Svix uses this to ship a v1 + a
+    # rotated-key v1 in parallel during a secret rotation.
+    matched = False
+    for entry in svix_signature_header.split(" "):
+        entry = entry.strip()
+        if not entry or "," not in entry:
+            continue
+        version, _, candidate = entry.partition(",")
+        if version not in _SVIX_SUPPORTED_VERSIONS:
+            # Forward-compat: ignore unknown versions rather than
+            # failing the whole request. When Svix introduces v2, the
+            # operator will still see v1 in the same header until they
+            # roll; rejecting on v2-only would break that grace period.
+            continue
+        if hmac.compare_digest(candidate.strip(), expected_digest):
+            matched = True
+            break
+
+    if not matched:
+        raise BadSignature(
+            "no matching v1 signature in svix-signature header"
+        )
+
+
 __all__ = [
     "DEFAULT_TIMESTAMP_TOLERANCE_SECONDS",
     "WebhookVerificationError",
@@ -170,5 +313,6 @@ __all__ = [
     "MissingTimestamp",
     "StaleTimestamp",
     "verify_hmac_sha256",
+    "verify_svix_signature",
     "verify_timestamp_window",
 ]

@@ -73,6 +73,7 @@ from src.repositories.webhook_event_repo import WebhookEventRepository
 # Annotated WebhookProvider so a future widening of webhook_events_provider_allowed
 # CHECK that drops 'instantly' (or a typo) trips mypy at the repo boundary.
 _INSTANTLY_WEBHOOK_PROVIDER: WebhookProvider = "instantly"
+_RESEND_WEBHOOK_PROVIDER: WebhookProvider = "resend"
 from fastapi.responses import FileResponse
 
 
@@ -1287,6 +1288,27 @@ _INSTANTLY_HANDLED_EVENTS: frozenset[str] = frozenset(
     }
 )
 
+# Phase 16 (T2) — Resend webhook event types we ack + dispatch on.
+# Inserts into webhook_events for every event Resend sends; only the
+# types in this set get a background dispatcher call. New types extend
+# the set + the _process_resend_event handler.
+#
+# Resend uses dotted names (email.delivered, email.bounced) — distinct
+# from Instantly's underscore form. Spec target Phase 16: email.replied
+# drives classification; the rest log + ack for completeness audit.
+_RESEND_HANDLED_EVENTS: frozenset[str] = frozenset(
+    {
+        "email.sent",
+        "email.delivered",
+        "email.delivery_delayed",
+        "email.bounced",
+        "email.complained",
+        "email.opened",
+        "email.clicked",
+        "email.replied",
+    }
+)
+
 
 def _generic_webhook_error(detail: str, status_code: int = 401):
     """Webhook failure response — body is intentionally terse so a
@@ -2055,6 +2077,286 @@ async def _instantly_handle_replied(provider_msg_id: str) -> None:
                 "reason": advance_result.reason,
             },
         )
+
+
+# ===========================================================================
+# Phase 16 (T2) — Resend webhook handler + dispatcher
+# ---------------------------------------------------------------------------
+# Mirrors the Instantly handler shape (HMAC-verify → idempotent INSERT into
+# webhook_events → ack 200 → background dispatch). Differences:
+#
+#   * Svix signature scheme (svix-id + svix-timestamp + svix-signature
+#     headers; base64 digest of "id.ts.body"; verified via
+#     src.utils.webhook_security.verify_svix_signature). TODO(resend-go-live):
+#     swap hand-rolled verifier for the svix package once requirements.txt
+#     can be regenerated on Py3.10 — see verify_svix_signature docstring.
+#
+#   * Phase 16 reply classification is gated behind PHASE16_REPLY_CLASSIFIER=1
+#     in src.services.reply_classifier_service. The endpoint exists +
+#     HMAC-verifies + acks 200 even when the flag is 0; the *classification*
+#     side-effects (Anthropic call, reply_classifications INSERT,
+#     campaign_messages.status='paused_by_reply' UPDATE, suppression INSERT)
+#     stay dark. This lets the defense surface land + verify against the
+#     prod-traffic shape without requiring T1's schema PR #476 to be
+#     applied to the live DB.
+#
+#   * Resend uses dotted event names ('email.delivered'); the Instantly
+#     analog uses underscore ('email_sent'). _RESEND_HANDLED_EVENTS at
+#     module-top is the source of truth.
+# ===========================================================================
+
+
+@app.post("/webhooks/resend", response_class=JSONResponse)
+@limiter.limit("120/minute")
+async def webhook_resend(request: Request, background_tasks: BackgroundTasks):
+    """Inbound webhook from Resend (Svix-signed).
+
+    Public endpoint (no X-API-Key — Resend doesn't carry one). HMAC
+    on the raw body + svix-id + svix-timestamp triple is the entire
+    auth surface; the 5-minute window in
+    ``verify_timestamp_window`` bounds replay.
+
+    Returns:
+        * 200 + ``{ok: true}`` on a fresh accepted event
+        * 200 + ``{ok: true, duplicate: true}`` on a duplicate event_id
+        * 401 + generic body on any verification failure
+        * 503 if the DB is unreachable
+
+    Phase 16 stub: ``email.replied`` triggers classification ONLY when
+    ``PHASE16_REPLY_CLASSIFIER=1`` (see
+    ``src/services/reply_classifier_service.py``). Without the flag,
+    the event is recorded in ``webhook_events`` and logged with a
+    "classifier disabled" line — operator review queue catches missed
+    auto-pauses during the stub window.
+    """
+    from src.utils.webhook_security import (
+        BadSignature,
+        MissingSignature,
+        MissingTimestamp,
+        StaleTimestamp,
+        verify_svix_signature,
+    )
+
+    secret = os.environ.get("RESEND_WEBHOOK_SIGNING_SECRET", "")
+    if not secret:
+        logger.error("RESEND_WEBHOOK_SIGNING_SECRET not set; rejecting")
+        return _generic_webhook_error("misconfigured")
+
+    raw_body = await request.body()
+    if len(raw_body) > 256 * 1024:
+        # Resend events are small (~5 KB typically); 256 KB matches the
+        # cap used by the Instantly handler so a single attacker payload
+        # ceiling covers both providers.
+        return _generic_webhook_error("payload too large", status_code=413)
+
+    svix_id = request.headers.get("svix-id", "")
+    svix_timestamp = request.headers.get("svix-timestamp", "")
+    svix_signature = request.headers.get("svix-signature", "")
+
+    try:
+        verify_svix_signature(
+            raw_body,
+            svix_id,
+            svix_timestamp,
+            svix_signature,
+            secret,
+        )
+    except (MissingSignature, BadSignature, MissingTimestamp, StaleTimestamp) as exc:
+        logger.info(
+            "resend webhook rejected: %s",
+            type(exc).__name__,
+            extra={"reason": type(exc).__name__},
+        )
+        return _generic_webhook_error("rejected")
+    except RuntimeError as exc:
+        # Misconfigured signing secret (empty / not base64). Same
+        # opaque-401 response as a bad sig so an attacker can't tell
+        # the difference, but log at error level for operator alert.
+        logger.error("resend webhook misconfig: %s", exc)
+        return _generic_webhook_error("misconfigured")
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.info("resend webhook bad JSON: %s", exc)
+        return _generic_webhook_error("bad JSON")
+
+    if not isinstance(payload, dict):
+        return _generic_webhook_error("bad JSON shape")
+
+    # Resend uses ``type`` (not ``event_type``) for the event name.
+    # Idempotency key is svix-id — the HMAC just signed that we
+    # received this exact (id, ts, body) triple, so trusting svix-id
+    # as the event_id is cryptographically equivalent to trusting
+    # the body's claim.
+    event_type = _STRIP_CTRL_PATTERN.sub("", str(payload.get("type") or ""))[:64]
+    event_id = _STRIP_CTRL_PATTERN.sub("", svix_id)[:128]
+    if not event_id or not event_type:
+        return _generic_webhook_error("missing event_id/event_type")
+
+    if not db.client:
+        return JSONResponse({"detail": "database unavailable"}, status_code=503)
+
+    try:
+        result = await WebhookEventRepository(db.client).insert_event(
+            provider=_RESEND_WEBHOOK_PROVIDER,
+            event_id=event_id,
+            event_type=event_type,
+            payload=payload,
+        )
+    except Exception as exc:
+        if _is_transport_error(exc) and await _webhook_event_exists(
+            _RESEND_WEBHOOK_PROVIDER,
+            event_id,
+        ):
+            logger.warning(
+                "resend webhook transport error post-commit; row exists, scheduling bg task",
+                extra={
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+            if event_type in _RESEND_HANDLED_EVENTS:
+                background_tasks.add_task(
+                    _process_resend_event,
+                    event_id=event_id,
+                    payload=payload,
+                )
+            return JSONResponse({"ok": True, "recovered": True}, status_code=200)
+        logger.exception("resend webhook INSERT failed")
+        return JSONResponse({"detail": "internal error"}, status_code=500)
+
+    if result.duplicate:
+        logger.info(
+            "resend webhook duplicate event_id=%s",
+            event_id,
+            extra={"event_id": event_id, "event_type": event_type},
+        )
+        if event_type in _RESEND_HANDLED_EVENTS:
+            background_tasks.add_task(
+                _process_resend_event,
+                event_id=event_id,
+                payload=payload,
+            )
+        return JSONResponse({"ok": True, "duplicate": True}, status_code=200)
+
+    if event_type in _RESEND_HANDLED_EVENTS:
+        background_tasks.add_task(
+            _process_resend_event,
+            event_id=event_id,
+            payload=payload,
+        )
+    else:
+        logger.info(
+            "resend webhook unhandled event_type=%s",
+            event_type,
+            extra={"event_type": event_type},
+        )
+
+    return JSONResponse({"ok": True}, status_code=200)
+
+
+async def _process_resend_event(event_id: str, payload: dict) -> None:
+    """Translate a Resend event into LDS state transitions.
+
+    Runs in a FastAPI BackgroundTask after the request returns. Same
+    PEP-562 cron-path guard as ``_process_instantly_event`` — primes
+    the lazy ``db`` global via ``sys.modules[__name__]`` so any
+    bare-name reference inside nested calls resolves cleanly when
+    invoked from a context without the FastAPI lifespan
+    (webhook_sweeper, future Resend retry-sweeper, tests).
+    """
+    import sys as _sys
+
+    _self_mod = _sys.modules[__name__]
+    _self_mod.db  # noqa — primes globals()["db"] via PEP-562 __getattr__
+
+    from src.services.reply_classifier_service import ReplyClassifierService
+
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    event_type = str(payload.get("type") or "")
+
+    # email.replied is the only event T2 routes into the classifier.
+    # Other events (delivered / bounced / complained / opened / clicked)
+    # land in webhook_events for analytics + future expansion but get
+    # no state mutation in T2 — analytics is operator-facing and
+    # doesn't require runtime side-effects.
+    if event_type != "email.replied":
+        logger.info(
+            "resend event ack-only — no T2 side-effect for %s",
+            event_type,
+            extra={"event_id": event_id, "event_type": event_type},
+        )
+        return
+
+    # Reply-event field shape per Resend docs (subject + body + to + from
+    # + message_id + reply_in_html). Reply body lives in `data.text`
+    # (preferred — already stripped of HTML) or `data.html`. Lead key
+    # comes from the outbound message's custom_args, propagated through
+    # Resend's reply-to thread.
+    reply_body = (
+        data.get("text")
+        or data.get("body_plain")
+        or _strip_html_lite(data.get("html", ""))
+        or ""
+    )
+    custom_args = data.get("custom_args") if isinstance(data.get("custom_args"), dict) else {}
+    lead_unique_key = (
+        custom_args.get("lds_lead_unique_key")
+        or data.get("lds_lead_unique_key")
+        or ""
+    )
+    campaign_message_id = (
+        custom_args.get("lds_message_id")
+        or data.get("lds_message_id")
+    )
+
+    if not lead_unique_key:
+        logger.warning(
+            "resend email.replied missing lds_lead_unique_key custom_arg; "
+            "cannot classify",
+            extra={
+                "event_id": event_id,
+                "data_keys": sorted(data.keys()),
+                "custom_args_keys": sorted(custom_args.keys()),
+            },
+        )
+        return
+
+    service = ReplyClassifierService(db)
+    await service.handle_replied_event(
+        reply_body=str(reply_body)[:32 * 1024],
+        lead_unique_key=str(lead_unique_key)[:256],
+        campaign_message_id=str(campaign_message_id) if campaign_message_id else None,
+        provider_event_id=event_id,
+    )
+
+
+def _strip_html_lite(html: str) -> str:
+    """Last-resort HTML stripper for Resend reply payloads.
+
+    The classifier wants plain text. Resend includes `data.text` for
+    most replies, but rare mail clients (older Outlook) ship HTML-
+    only. This is intentionally minimal — drop tags, collapse
+    whitespace, no entity decoding (the classifier handles entity-y
+    text fine; over-decoding risks XSS-style payload smuggling into
+    the prompt).
+    """
+    if not html:
+        return ""
+    # Tag strip — naive but adequate for the few % of HTML-only replies
+    # in the wild. The result feeds into the
+    # reply_classifier_service.preprocess_reply_body quote-stripper, so
+    # exact whitespace is not load-bearing.
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+# ===========================================================================
+# End Phase 16 T2 block
+# ===========================================================================
 
 
 async def _lookup_message_by_id(message_id: str) -> Optional[dict]:
