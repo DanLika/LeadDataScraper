@@ -21,6 +21,8 @@ import { Linkedin } from './components/BrandIcons';
 import Sidebar from './components/Sidebar';
 import StatsCards from './components/StatsCards';
 import FilterBar, { DEFAULT_SORT, type SortKey } from './components/FilterBar';
+import BulkActionToolbar from './components/BulkActionToolbar';
+import { useLeadSelection } from '@/app/hooks/useLeadSelection';
 import { API_BASE_URL, apiFetch } from '@/app/lib/apiConfig';
 import { ensureProtocol } from '@/app/lib/url.mjs';
 
@@ -1186,6 +1188,114 @@ function DashboardInner() {
     Array.from(new Set(leads.map((l: Lead) => l.segment).filter(Boolean))),
   [leads]);
 
+  // Bulk-select state for the LeadTable. Lives at page-level so the
+  // toolbar (sibling of LeadTable) can read the count and trigger the
+  // batch handlers without prop-drilling.
+  const selection = useLeadSelection(filteredLeads);
+  const [isBulkAuditing, setIsBulkAuditing] = useState(false);
+
+  // CSV-injection guard mirrors `sanitize_dataframe_for_csv` in
+  // `src/utils/csv_helper.py` — leading =/@/+/-/tab/CR are formula
+  // triggers in Excel + Sheets, neutralised by a single-quote prefix.
+  const sanitizeCsvCell = useCallback((value: unknown): string => {
+    const s = value == null ? '' : String(value);
+    if (s.length === 0) return '';
+    const first = s.charAt(0);
+    const dangerous = first === '=' || first === '@' || first === '+' || first === '-' || first === '\t' || first === '\r';
+    const needsQuote = s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r');
+    const escaped = (dangerous ? "'" + s : s).replace(/"/g, '""');
+    return needsQuote || dangerous ? `"${escaped}"` : escaped;
+  }, []);
+
+  const handleBulkAudit = useCallback(async () => {
+    const ids = Array.from(selection.selectedIds);
+    if (ids.length === 0) return;
+    // Hard cap mirrors the backend `conlist(max_length=200)` on
+    // /audit-batch; if the user somehow accumulated more than 200
+    // selections (e.g. cross-filter), bail with a clear message
+    // rather than firing a request the server will 422.
+    if (ids.length > 200) {
+      showToast('Bulk audit supports up to 200 leads at once. Narrow the selection.', 'error');
+      return;
+    }
+    // SEO audit is Playwright-only — it doesn't hit Gemini, so the
+    // cost story is wall-clock runtime + Google rate-limit pressure,
+    // not API spend. Mirrors the `processAll` confirm wording.
+    const ok = confirm(
+      `Run SEO audit on ${ids.length} selected lead${ids.length === 1 ? '' : 's'}? ` +
+      `Each lead triggers a Playwright crawl; may take several minutes and hit Google rate limits.`,
+    );
+    if (!ok) return;
+    setIsBulkAuditing(true);
+    try {
+      const resp = await apiFetch(`${API_BASE_URL}/audit-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_ids: ids }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const detail = Array.isArray(data?.detail)
+          ? data.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ')
+          : (data?.detail || data?.error);
+        showToast(detail || `Bulk audit failed (HTTP ${resp.status})`, 'error');
+        return;
+      }
+      if (data.job_id) {
+        setOrchestratorJob({ id: data.job_id, status: 'starting', processed_count: 0, total_count: data.count ?? ids.length, type: 'audit' });
+        showToast(`Bulk audit started for ${data.count ?? ids.length} lead${(data.count ?? ids.length) === 1 ? '' : 's'} — job ${String(data.job_id).slice(0, 8)}…`, 'success');
+        selection.clear();
+      } else {
+        showToast('Audit accepted but no job ID returned.', 'info');
+      }
+    } catch (err) {
+      console.error('Bulk audit failed:', err);
+      showToast('Bulk audit failed — backend unreachable.', 'error');
+    } finally {
+      setIsBulkAuditing(false);
+    }
+  }, [selection, showToast]);
+
+  const handleExportSelected = useCallback(() => {
+    const ids = selection.selectedIds;
+    if (ids.size === 0) return;
+    const rows = filteredLeads.filter(l => ids.has(l.unique_key));
+    if (rows.length === 0) {
+      showToast('Selected leads not in current view — nothing to export.', 'info');
+      return;
+    }
+    // Columns are a UI-snapshot subset of what the table renders —
+    // diverging from the backend `_EXPORT_LEADS_COLUMNS` tuple is the
+    // explicit trade-off for client-side export. Operators who need
+    // the full canonical export hit the global "Download CSV" button.
+    const header = ['unique_key', 'company_name', 'name', 'website', 'phone', 'email', 'segment', 'audit_status', 'seo_score', 'outreach_score'];
+    const lines = [header.map(sanitizeCsvCell).join(',')];
+    for (const l of rows) {
+      lines.push([
+        l.unique_key,
+        l.company_name ?? '',
+        l.name ?? '',
+        l.website ?? '',
+        l.phone ?? '',
+        l.email ?? '',
+        l.segment ?? '',
+        l.audit_status ?? '',
+        l.seo_score ?? l.audit_results?.score ?? '',
+        l.outreach_score ?? '',
+      ].map(sanitizeCsvCell).join(','));
+    }
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `selected-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${rows.length} lead${rows.length === 1 ? '' : 's'} to CSV.`, 'success');
+  }, [filteredLeads, selection.selectedIds, sanitizeCsvCell, showToast]);
+
   const hasActiveFilters = useMemo(
     () => filterSegment !== 'all' || filterAuditStatus !== 'all' || filterMinScore > 0 || searchTerm.length > 0 || sortKey !== DEFAULT_SORT,
     [filterSegment, filterAuditStatus, filterMinScore, searchTerm, sortKey],
@@ -1493,6 +1603,14 @@ function DashboardInner() {
               setShowDemo={setShowDemo}
             />
 
+            <BulkActionToolbar
+              count={selection.count}
+              isAuditing={isBulkAuditing}
+              onRunAudit={handleBulkAudit}
+              onExportSelected={handleExportSelected}
+              onClear={selection.clear}
+            />
+
             <LeadTable
               leads={filteredLeads}
               loading={loading}
@@ -1509,6 +1627,13 @@ function DashboardInner() {
               onDeepHunt={handleDeepHunt}
               onDraftOutreach={handleDraftOutreach}
               onProcessLead={processLead}
+              selection={{
+                isSelected: selection.isSelected,
+                toggleOne: selection.toggleOne,
+                toggleAllVisible: selection.toggleAllVisible,
+                allVisibleSelected: selection.allVisibleSelected,
+                someVisibleSelected: selection.someVisibleSelected,
+              }}
             />
           </div>
         </div>

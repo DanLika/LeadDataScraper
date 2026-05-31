@@ -23,7 +23,9 @@
  * `scrollToIndex` — same behaviour as DOM-default tab traversal.
  *
  * NOT included here: search/segment/status filtering. The parent owns
- * that state and passes already-filtered `leads`.
+ * that state and passes already-filtered `leads`. The bulk-select
+ * `selection` prop is optional — when omitted, the checkbox column
+ * is skipped and the table renders exactly as it did pre-selection.
  */
 
 import { Fragment, useEffect, useRef, useState } from 'react';
@@ -52,12 +54,26 @@ interface LeadTableProps {
   onDeepHunt: (uniqueKey: string) => void;
   onDraftOutreach: (lead: Lead) => void;
   onProcessLead: (uniqueKey: string) => void;
+  // Bulk-selection — parent owns the Set<unique_key>. When the
+  // selection bag is omitted (e.g. future read-only embedded use)
+  // the checkbox column is skipped entirely so behaviour matches the
+  // pre-selection LeadTable.
+  selection?: {
+    isSelected: (uniqueKey: string) => boolean;
+    toggleOne: (uniqueKey: string) => void;
+    toggleAllVisible: () => void;
+    allVisibleSelected: boolean;
+    someVisibleSelected: boolean;
+  };
 }
 
 // Mirror the previous <colgroup> widths. fr units used as the rest of
-// the cards stretch to container width — percentages would produce the
-// same effect but `fr` is cleaner.
+// the cards stretch to container width — percentages would produce
+// the same effect but `fr` is cleaner. When `selection` is wired in,
+// a fixed 44 px checkbox column is prepended; 44 px matches the WCAG
+// hit-target minimum and the row-action buttons already use 44 px.
 const COL_TEMPLATE = '25fr 14fr 14fr 20fr 27fr';
+const COL_TEMPLATE_WITH_SELECT = '44px 25fr 14fr 14fr 20fr 27fr';
 
 // Estimated default row height. The virtualizer treats this as a hint;
 // measureElement records the real height per row so subsequent scrolls
@@ -123,7 +139,9 @@ export default function LeadTable(props: LeadTableProps) {
     processingLeads, isDrafting, activeLeadKey,
     hasMore, nextCursor, isLoadingMore, onLoadMore,
     onEnrichLead, onDeepHunt, onDraftOutreach, onProcessLead,
+    selection,
   } = props;
+  const colTemplate = selection ? COL_TEMPLATE_WITH_SELECT : COL_TEMPLATE;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -184,7 +202,7 @@ export default function LeadTable(props: LeadTableProps) {
   // ---- Header ----------------------------------------------------------
   const headerStyle: React.CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: COL_TEMPLATE,
+    gridTemplateColumns: colTemplate,
     background: 'var(--surface-subtle)',
     position: 'sticky',
     top: 0,
@@ -204,6 +222,24 @@ export default function LeadTable(props: LeadTableProps) {
   return (
     <div>
       <div role="rowgroup" style={headerStyle}>
+        {selection && (
+          <div role="columnheader" style={{ padding: '1rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <input
+              type="checkbox"
+              aria-label={`Select all ${leads.length} visible lead${leads.length === 1 ? '' : 's'}`}
+              checked={selection.allVisibleSelected}
+              ref={(el) => {
+                // Indeterminate is property-only (not an HTML attr), so
+                // set it imperatively. Mixed-state header signals "some
+                // but not all visible rows selected" — clicking still
+                // resolves to all-on (mirrors GitHub/Gmail behaviour).
+                if (el) el.indeterminate = selection.someVisibleSelected && !selection.allVisibleSelected;
+              }}
+              onChange={selection.toggleAllVisible}
+              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+            />
+          </div>
+        )}
         <div role="columnheader" style={headerCellStyle('left')}>PROSPECT</div>
         <div role="columnheader" style={headerCellStyle('center')}>AUDIT STATUS</div>
         <div role="columnheader" style={headerCellStyle('center')}>INTELLIGENCE</div>
@@ -261,7 +297,23 @@ export default function LeadTable(props: LeadTableProps) {
                   borderBottom: '1px solid var(--border)',
                 }}
               >
-                <div style={{ display: 'grid', gridTemplateColumns: COL_TEMPLATE, alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: colTemplate, alignItems: 'center' }}>
+                  {selection && (
+                    <div role="cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem 0' }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${lead.company_name || lead.name || 'lead'}`}
+                        checked={selection.isSelected(lead.unique_key)}
+                        onChange={() => selection.toggleOne(lead.unique_key)}
+                        // Stop bubble so clicking the checkbox doesn't
+                        // also trigger the row's tab-focus / hover side
+                        // effects (e.g. virtualizer scrollToIndex on
+                        // last-row Tab).
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                      />
+                    </div>
+                  )}
                   {/* PROSPECT */}
                   <div role="cell" style={{ padding: '1rem 1.5rem' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>

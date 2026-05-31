@@ -292,6 +292,20 @@ class LeadProcessRequest(BaseModel):
     unique_key: safe_constr(min_length=1, max_length=128)
 
 
+class LeadBatchRequest(BaseModel):
+    """Body for `/audit-batch` — re-audit a caller-supplied subset of
+    leads in one orchestrator job. Hard-cap 200 to mirror the `/leads`
+    page-size; each ID fans out to a Playwright + Gemini call, so a
+    larger list trivially exhausts the per-minute Gemini budget."""
+
+    model_config = ConfigDict(extra="forbid")
+    lead_ids: conlist(
+        safe_constr(min_length=1, max_length=128),
+        min_length=1,
+        max_length=200,
+    )
+
+
 class AskInstruction(BaseModel):
     """Inner payload for `/ask`. The 4000-char cap on `text` bounds
     per-request Gemini billing AND prevents raw prompt-injection blobs
@@ -2554,6 +2568,24 @@ async def process_all_pending(request: Request):
     """Trigger the audit orchestrator to process all pending leads."""
     job_id = await orchestrator.run_massive_pipeline(tasks=["audit"])
     return {"status": "job_started", "job_id": job_id}
+
+
+@app.post("/audit-batch", dependencies=[Depends(verify_api_key)])
+@limiter.limit("6/minute")
+async def audit_batch(request: Request, payload: LeadBatchRequest):
+    """Re-audit a caller-supplied subset of leads (UI bulk-select).
+    `/process-lead` handles size 1; `/process-all` handles "everything
+    pending". This fills the explicit-list gap without forcing the
+    client to loop N times against the 20/min /process-lead cap.
+
+    Rate-limit 6/min is higher than `/process-all` (3/min) because the
+    orchestrator's `_job_lock` serialises jobs anyway — practical
+    throughput is gated by per-job duration, not per-minute requests."""
+    job_id = await orchestrator.run_massive_pipeline(
+        lead_ids=list(payload.lead_ids),
+        tasks=["audit"],
+    )
+    return {"status": "job_started", "job_id": job_id, "count": len(payload.lead_ids)}
 
 
 @app.get("/audit-status", dependencies=[Depends(verify_api_key)])

@@ -228,6 +228,7 @@ ENDPOINTS_TO_FUZZ = [
     ("/orchestrator/start", lambda v: {"filters": {"type": v}},                "filters.type"),
     ("/orchestrator/start", lambda v: {"lead_ids": [v]},                       "lead_ids[0]"),
     ("/orchestrator/start", lambda v: {"tasks": [v]},                          "tasks[0]"),
+    ("/audit-batch",        lambda v: {"lead_ids": [v]},                       "lead_ids[0]"),
     ("/metrics",            lambda v: {"name": "LCP", "value": 1.0,
                                        "rating": "good", "path": v,
                                        "id": "qatest"},                        "path"),
