@@ -1,6 +1,6 @@
 # Tier 1 operator credential rotations
 
-Four high-leverage rotations that unblock multiple downstream systems. Each
+Six high-leverage rotations that unblock multiple downstream systems. Each
 section is copy-paste ready — dashboard URL, exact shell commands,
 verification probe, rollback. Run from `~/git/LeadDataScraper` unless
 noted.
@@ -9,12 +9,14 @@ After completing any rotation, message the orchestrator with the literal
 string `<rotation-name> rotated` (e.g. `api-secret-key rotated`) so
 dependent autonomous tasks unblock.
 
-| § | Rotation | Time | Unblocks |
-|---|----------|------|----------|
-| 1 | `API_SECRET_KEY` (compromised — see audit below) | ~10 min | Backend auth |
-| 2 | Supabase DB password | ~5 min | EXPLAIN harness + 17 security.yml gates |
-| 3 | Supabase PAT | ~3 min | Mgmt API (#476 schema apply, future audits) |
-| 4 | `ANTHROPIC_API_KEY` mint + wire | ~5 min | #477 live bench + Phase 16 classifier in prod |
+| § | Rotation | Time | Last applied | Unblocks |
+|---|----------|------|--------------|----------|
+| 1 | `API_SECRET_KEY` | ~10 min | **2026-05-31T07:15Z (live)** | Backend auth |
+| 2 | Supabase DB password | ~5 min | — | EXPLAIN harness + 17 security.yml gates |
+| 3 | Supabase PAT | ~3 min | — | Mgmt API (#476 schema apply, future audits) |
+| 4 | `ANTHROPIC_API_KEY` mint + wire | ~5 min | — | #477 live bench + Phase 16 classifier in prod |
+| 5 | Sentry auth token | ~5 min | — | Backend Sentry-API issue query + source-map upload |
+| 6 | `RENDER_API_KEY` (dashboard-only — no self-mint API) | ~5 min | — | Render Mgmt-API ops + every other rotation in this doc |
 
 ---
 
@@ -416,6 +418,200 @@ Revoke the key in the Anthropic console (same URL as Mint). Render env
 removal: PUT the env-vars list without the `ANTHROPIC_API_KEY` entry.
 Classifier service degrades to `None` returns + logs "stub" lines per
 the T2 design — no exception path.
+
+---
+
+## §5 — Sentry auth token (project-scoped)
+
+### Why
+
+Backend can't query the Sentry API to surface issues / drive SLOs /
+self-monitor without a `SENTRY_AUTH_TOKEN`. DSNs are already wired per
+[[sentry-enabled-2026-05-29]] so capture works — this rotation enables
+the *query* path + source-map upload for the frontend release pipeline.
+
+### Prerequisites
+
+- Operator has admin on Sentry org `leaddatascraper`
+- `$RENDER_API_KEY` in shell (for the Render env-PUT below)
+
+### Steps
+
+```sh
+# 1. Mint at https://sentry.io/settings/account/api/auth-tokens/
+#    - Name: lds-mgmt-$(date +%Y-%m-%d)
+#    - Scopes (minimum for issue query): project:read, event:read, org:read
+#    - Add release:admin ONLY if you also use this token for frontend
+#      source-map upload (Sentry CLI `releases files upload-sourcemaps`).
+#    - Click Create.
+#    - Copy the token (starts with sntrys_) — Sentry shows once.
+#    - Save to 1Password as "LDS Sentry auth token $(date +%Y-%m-%d)".
+
+# 2. Three update locations (one local file + two Render env-vars):
+NEW_SENTRY_TOKEN='<paste-sentry-token-here>'
+
+# 2a. Local secrets file:
+sed -i.bak.$(date +%Y%m%d) "s|^SENTRY_AUTH_TOKEN=.*|SENTRY_AUTH_TOKEN=$NEW_SENTRY_TOKEN|" ~/.bookbed-secrets 2>/dev/null \
+  || echo "SENTRY_AUTH_TOKEN=$NEW_SENTRY_TOKEN" >> ~/.bookbed-secrets
+grep -c '^SENTRY_AUTH_TOKEN=' ~/.bookbed-secrets   # → 1
+# Also add the org + project slugs (only needed once; safe to re-set):
+grep -q '^SENTRY_ORG='     ~/.bookbed-secrets || echo 'SENTRY_ORG=leaddatascraper' >> ~/.bookbed-secrets
+grep -q '^SENTRY_PROJECT=' ~/.bookbed-secrets || echo 'SENTRY_PROJECT=lds-backend' >> ~/.bookbed-secrets
+
+# 2b. Render backend env — SINGLE-KEY endpoint per §1's two-endpoint
+#     lesson (bulk PUT replaces the entire env-var list):
+for KV in \
+  "SENTRY_AUTH_TOKEN:$NEW_SENTRY_TOKEN" \
+  "SENTRY_ORG:leaddatascraper" \
+  "SENTRY_PROJECT:lds-backend" ; do
+  K="${KV%%:*}" ; V="${KV#*:}"
+  curl -fsS -X PUT \
+    -H "Authorization: Bearer $RENDER_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d "{\"value\":\"$V\"}" \
+    "https://api.render.com/v1/services/srv-d89bisbbc2fs73f1pjpg/env-vars/$K" \
+    && echo "$K set"
+done
+
+# 3. Single-key env-var PUT does NOT auto-redeploy. Trigger:
+curl -fsS -X POST \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"clearCache":"do_not_clear"}' \
+  'https://api.render.com/v1/services/srv-d89bisbbc2fs73f1pjpg/deploys'
+
+# 4. Wait deploy live (~3 min). Poll:
+curl -fsS -H "Authorization: Bearer $RENDER_API_KEY" \
+  'https://api.render.com/v1/services/srv-d89bisbbc2fs73f1pjpg/deploys?limit=1' \
+  | jq -r '.[].deploy | "\(.id) \(.status)"'
+```
+
+### Verification probe
+
+```sh
+# Direct Sentry API smoke (sidesteps backend wiring uncertainty —
+# proves the token + scopes + slugs are all correct):
+source ~/.bookbed-secrets
+curl -fsS \
+  -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+  "https://sentry.io/api/0/projects/leaddatascraper/lds-backend/issues/?limit=5&statsPeriod=24h" \
+  | jq 'length'
+# Expected: integer ≥ 0 (empty array is fine on a quiet prod).
+# 401 → scopes wrong (re-mint with the 3 listed scopes).
+# 404 → org/project slug mismatch (verify against the URL after dashboard login).
+```
+
+### Rollback
+
+```sh
+# Sentry-side: dashboard → Auth Tokens → Revoke on the NEW token.
+# Render-side: re-PUT the OLD value (kept in 1Password):
+curl -fsS -X PUT \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"value\":\"$OLD_SENTRY_TOKEN\"}" \
+  'https://api.render.com/v1/services/srv-d89bisbbc2fs73f1pjpg/env-vars/SENTRY_AUTH_TOKEN'
+# Re-deploy (see step 3).
+```
+
+### Memory link
+
+- [[sentry-token-awaiting-operator-2026-05-30]] — the gate this
+  rotation lifts (and the partial recipe that fed this section).
+- [[sentry-enabled-2026-05-29]] — DSN side already wired; this is the
+  complementary token side.
+
+---
+
+## §6 — `RENDER_API_KEY` rotation (dashboard-only)
+
+### Why
+
+`RENDER_API_KEY` is the master key for every other rotation in this
+runbook + every Render Mgmt-API operation. Render has **no API
+endpoint to mint its own PATs** — rotation is dashboard-only.
+
+This section also catches the case where the value has leaked to a
+transcript (the autonomous-rotation flow on 2026-05-31 echoed the
+value through a `${VAR:+PRESENT}${VAR:-MISSING}` shell expansion;
+see [[api-secret-key-rotation-2026-05-30]] cross-ref) — treat as
+compromised and rotate.
+
+### Prerequisites
+
+- Render dashboard access (PAT lives at the *account* level, not per-
+  workspace).
+- 1Password open before clicking Create — the token is shown once.
+
+### Steps
+
+```sh
+# 1. Open the PAT manager:
+open 'https://dashboard.render.com/u/settings#api-keys'
+
+# 2. Click "Create API Key":
+#    - Name: lds-prod-$(date +%Y-%m-%d)
+#    - Click Create — copy the value (starts with rnd_). Render shows it once.
+#    - Save to 1Password as "LDS Render PAT $(date +%Y-%m-%d)" BEFORE
+#      closing the dialog.
+
+# 3. Two local update locations:
+NEW_RENDER_PAT='<paste-render-pat-here>'
+
+# 3a. Persistent secret file:
+sed -i.bak.$(date +%Y%m%d) "s|^RENDER_API_KEY=.*|RENDER_API_KEY=$NEW_RENDER_PAT|" ~/.bookbed-secrets 2>/dev/null \
+  || echo "RENDER_API_KEY=$NEW_RENDER_PAT" >> ~/.bookbed-secrets
+grep -c '^RENDER_API_KEY=' ~/.bookbed-secrets   # → 1
+
+# 3b. Shell-rc (so future shells pick it up without sourcing):
+if grep -q '^export RENDER_API_KEY=' ~/.zshenv 2>/dev/null; then
+  sed -i.bak.$(date +%Y%m%d) "s|^export RENDER_API_KEY=.*|export RENDER_API_KEY=$NEW_RENDER_PAT|" ~/.zshenv
+else
+  echo "export RENDER_API_KEY=$NEW_RENDER_PAT" >> ~/.zshenv
+fi
+
+# 4. Reload current shell so the new value is live now:
+export RENDER_API_KEY="$NEW_RENDER_PAT"
+# (or: source ~/.zshenv — but only if ~/.zshenv is idempotent.)
+
+# 5. Smoke the new key:
+curl -fsS -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  'https://api.render.com/v1/services?limit=1'
+# Expected: 200. 401 → typo in token (re-paste). 403 → workspace/role mismatch.
+
+# 6. Revoke the OLD key in the dashboard:
+open 'https://dashboard.render.com/u/settings#api-keys'
+# Click "Revoke" on the old-named row (the one NOT named lds-prod-<today>).
+
+# 7. Verify revocation — re-fire step 5 using the OLD key value
+#    (paste manually one last time):
+OLD_RENDER_PAT='<paste-old-rnd-value-here>'
+curl -fsS -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $OLD_RENDER_PAT" \
+  'https://api.render.com/v1/services?limit=1'
+# Expected: 401. Any other code (200, 403, 5xx) → revocation didn't
+# stick; retry step 6.
+```
+
+### Verification probe
+
+Covered by steps 5 + 7 above (smoke new key returns 200; verify old
+key returns 401). No further probe needed — every other Mgmt-API
+endpoint flows through the same auth gate.
+
+### Rollback
+
+Not applicable — once an old key is revoked it is dead. If you lose
+the new key between mint and step 4, generate again (step 1-2) and
+repeat. If you accidentally revoke the only working key (no other
+PAT minted), you must log in to the dashboard fresh and mint a new
+one; there is no API path back in.
+
+### Memory link
+
+- [[api-secret-key-rotation-2026-05-30]] — the autonomous flow that
+  echoed the previous PAT to transcript via shell expansion.
 
 ---
 
