@@ -1,0 +1,50 @@
+{"id": "int-en-01", "language": "en", "ambiguity": "clear", "expected": "interested", "reply": "Hi, this sounds great. Could we get on a 30-min call next Tuesday or Wednesday? I'd love to see a demo of the dashboard."}
+{"id": "int-en-02", "language": "en", "ambiguity": "clear", "expected": "interested", "reply": "Interested. Let's book something for next week — I'll send a Calendly link in a separate email."}
+{"id": "int-en-03", "language": "en", "ambiguity": "edge", "expected": "interested", "reply": "Not sure if we need this yet but I'd like to learn more about how it would fit our stack. Free to chat Friday afternoon?"}
+{"id": "int-hr-04", "language": "hr", "ambiguity": "clear", "expected": "interested", "reply": "Hvala na poruci, ovo nas zanima. Možemo li dogovoriti kratak razgovor sljedeći tjedan? Najbolje srijedu ili četvrtak ujutro."}
+{"id": "int-hr-05", "language": "hr", "ambiguity": "edge", "expected": "interested", "reply": "U principu da, ali prvo bih vidio kako izgleda u praksi. Ima li snimka demoa koju mogu pogledati prije sastanka?"}
+{"id": "ni-en-01", "language": "en", "ambiguity": "clear", "expected": "not_interested", "reply": "Thanks but we're not looking for this right now."}
+{"id": "ni-en-02", "language": "en", "ambiguity": "clear", "expected": "not_interested", "reply": "No thanks — we already have a vendor in this space and we're happy with them."}
+{"id": "ni-en-03", "language": "en", "ambiguity": "edge", "expected": "not_interested", "reply": "Appreciate the outreach. Not a fit for us right now, but I'll keep your details on file in case anything changes."}
+{"id": "ni-hr-04", "language": "hr", "ambiguity": "clear", "expected": "not_interested", "reply": "Hvala, ali trenutno nam ovo ne treba."}
+{"id": "ni-hr-05", "language": "hr", "ambiguity": "edge", "expected": "not_interested", "reply": "Nije nam zanimljivo u ovom trenutku — možda za godinu dana kad budemo skalirali."}
+{"id": "ooo-en-01", "language": "en", "ambiguity": "clear", "expected": "ooo", "reply": "I'm currently out of the office on vacation and will return on Monday, June 9th. For urgent matters please contact ops@acme.com."}
+{"id": "ooo-en-02", "language": "en", "ambiguity": "clear", "expected": "ooo", "reply": "Thanks for your email — I am on parental leave until September 2026. Your message has not been forwarded."}
+{"id": "ooo-en-03", "language": "en", "ambiguity": "edge", "expected": "ooo", "reply": "Out today, back tomorrow. Will respond then."}
+{"id": "ooo-hr-04", "language": "hr", "ambiguity": "clear", "expected": "ooo", "reply": "Trenutno sam na godišnjem odmoru i vraćam se 15. lipnja. Za hitne stvari kontaktirajte kolegicu na info@firma.hr."}
+{"id": "ooo-hr-05", "language": "hr", "ambiguity": "edge", "expected": "ooo", "reply": "Nisam u uredu ovog tjedna. Javiti ću se kad se vratim."}
+{"id": "wp-en-01", "language": "en", "ambiguity": "clear", "expected": "wrong_person", "reply": "I'm not the right person for this — please contact Sarah Chen, our VP of Marketing, at sarah.chen@acme.com."}
+{"id": "wp-en-02", "language": "en", "ambiguity": "clear", "expected": "wrong_person", "reply": "I left Acme Corp last year. I'm now at a different company and don't make purchasing decisions here either."}
+{"id": "wp-en-03", "language": "en", "ambiguity": "edge", "expected": "wrong_person", "reply": "Wrong contact — try our procurement team. I just handle accounts payable."}
+{"id": "wp-hr-04", "language": "hr", "ambiguity": "clear", "expected": "wrong_person", "reply": "Niste pisali pravoj osobi. Za ovakve upite obratite se direktoru marketinga, gospodinu Mariću (m.maric@tvrtka.hr)."}
+{"id": "wp-hr-05", "language": "hr", "ambiguity": "edge", "expected": "wrong_person", "reply": "Više ne radim u firmi od prosinca. Nemam pojma tko je sada nadležan za to."}
+{"id": "afi-en-01", "language": "en", "ambiguity": "clear", "expected": "asking_for_info", "reply": "What's your pricing for a team of 25? Also, do you have a case study from a fintech client?"}
+{"id": "afi-en-02", "language": "en", "ambiguity": "clear", "expected": "asking_for_info", "reply": "Can you send me a one-pager and your SOC 2 report? I'd like to review before scheduling anything."}
+{"id": "afi-en-03", "language": "en", "ambiguity": "edge", "expected": "asking_for_info", "reply": "Curious how this compares to Outreach.io — do you have a feature matrix?"}
+{"id": "afi-hr-04", "language": "hr", "ambiguity": "clear", "expected": "asking_for_info", "reply": "Možete li mi poslati cjenik i listu referentnih klijenata u industriji bankarstva?"}
+{"id": "afi-hr-05", "language": "hr", "ambiguity": "edge", "expected": "asking_for_info", "reply": "Kako se to razlikuje od konkurencije? Trebam više informacija prije nego razmotrim sastanak."}
+{"id": "unsub-en-01", "language": "en", "ambiguity": "clear", "expected": "unsubscribe_request", "reply": "Please remove me from your list and do not contact me again."}
+{"id": "unsub-en-02", "language": "en", "ambiguity": "clear", "expected": "unsubscribe_request", "reply": "Unsubscribe me. Stop emailing this address."}
+{"id": "unsub-en-03", "language": "en", "ambiguity": "edge", "expected": "unsubscribe_request", "reply": "I never opted in to your mailing list. Take me off it under GDPR Article 21."}
+{"id": "unsub-hr-04", "language": "hr", "ambiguity": "clear", "expected": "unsubscribe_request", "reply": "Molim vas, uklonite me s vaše mailing liste."}
+{"id": "unsub-hr-05", "language": "hr", "ambiguity": "edge", "expected": "unsubscribe_request", "reply": "Nisam dao suglasnost za primanje ovih poruka. Brišite moje podatke u skladu s GDPR-om."}
+{"id": "comp-en-01", "language": "en", "ambiguity": "clear", "expected": "complaint", "reply": "This is unsolicited spam. If I receive one more email from your company I will file a CAN-SPAM complaint and contact my attorney."}
+{"id": "comp-en-02", "language": "en", "ambiguity": "clear", "expected": "complaint", "reply": "How dare you cold-email me on my personal address. Disgusting practice. I will be reporting your domain to every blocklist I can find."}
+{"id": "comp-en-03", "language": "en", "ambiguity": "edge", "expected": "complaint", "reply": "Stop wasting my time with this garbage. Your sales tactics are predatory and I'm escalating to your CEO."}
+{"id": "comp-hr-04", "language": "hr", "ambiguity": "clear", "expected": "complaint", "reply": "Ovo je gnusno. Ne mogu vjerovati da spamate ljude na ovaj način. Prijavit ću vas AZOP-u."}
+{"id": "bs-en-01", "language": "en", "ambiguity": "clear", "expected": "bounce_soft", "reply": "Delivery Status Notification (Delay): Your message to recipient@acme.com is delayed. The server will retry for 24 hours. Reason: Mailbox temporarily full."}
+{"id": "bs-en-02", "language": "en", "ambiguity": "clear", "expected": "bounce_soft", "reply": "Mail server at acme.com unreachable: connection timed out after 30 seconds. The mail system will retry your message automatically. No action required from you at this time."}
+{"id": "bs-en-03", "language": "en", "ambiguity": "edge", "expected": "bounce_soft", "reply": "452 4.2.2 The email account that you tried to reach is over quota. The message was retained and we'll try delivery again later."}
+{"id": "bs-hr-04", "language": "hr", "ambiguity": "clear", "expected": "bounce_soft", "reply": "Privremena pogreška u dostavi: poslužitelj primatelja trenutno nije dostupan. Sustav će automatski pokušati ponovo u sljedećih 24h."}
+{"id": "bh-en-01", "language": "en", "ambiguity": "clear", "expected": "bounce_hard", "reply": "Delivery Status Notification (Failure): 550 5.1.1 The email account that you tried to reach does not exist. Please double-check the recipient's email address."}
+{"id": "bh-en-02", "language": "en", "ambiguity": "clear", "expected": "bounce_hard", "reply": "Your message could not be delivered to recipient@example.com because the domain does not accept mail (no MX records configured). This is a permanent error; the system gave up."}
+{"id": "bh-en-03", "language": "en", "ambiguity": "edge", "expected": "bounce_hard", "reply": "550-Permanent failure for one or more recipients. 550 5.7.1 Recipient address rejected: User unknown in virtual mailbox table."}
+{"id": "bh-hr-04", "language": "hr", "ambiguity": "clear", "expected": "bounce_hard", "reply": "Trajna pogreška u dostavi: primatelj ne postoji na poslužitelju. Provjerite e-mail adresu."}
+{"id": "auto-en-01", "language": "en", "ambiguity": "clear", "expected": "auto_reply", "reply": "Thank you for contacting Acme Support. Your ticket #74829 has been created and a representative will respond within 24 business hours."}
+{"id": "auto-en-02", "language": "en", "ambiguity": "clear", "expected": "auto_reply", "reply": "We have received your message and will get back to you as soon as possible. Typical response time is 1-2 business days. This is an automated confirmation; please do not reply."}
+{"id": "auto-en-03", "language": "en", "ambiguity": "edge", "expected": "auto_reply", "reply": "Your calendar booking with John Doe has been confirmed for Tuesday, June 4 at 14:00 PDT. Add to your calendar with the attached .ics file."}
+{"id": "auto-hr-04", "language": "hr", "ambiguity": "clear", "expected": "auto_reply", "reply": "Hvala što ste nam se obratili. Vaš upit je zaprimljen pod brojem 12345. Odgovorit ćemo Vam u najkraćem mogućem roku."}
+{"id": "oth-en-01", "language": "en", "ambiguity": "edge", "expected": "other", "reply": "?"}
+{"id": "oth-en-02", "language": "en", "ambiguity": "edge", "expected": "other", "reply": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."}
+{"id": "oth-en-03", "language": "en", "ambiguity": "edge", "expected": "other", "reply": "Hahaha that's hilarious, did Brian put you up to this?"}
+{"id": "oth-hr-04", "language": "hr", "ambiguity": "edge", "expected": "other", "reply": "????"}
